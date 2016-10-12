@@ -1,5 +1,5 @@
 # Amlogic S905 Configurations
 
-require conf/machine/amlogic-meson64.inc
+require conf/machine/include/amlogic-meson64.inc
 
 MACHINE_FEATURES = "serial usbhost sdio"

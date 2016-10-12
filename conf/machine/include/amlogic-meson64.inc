@@ -1,6 +1,6 @@
 # Amlogic Meson64 Configurations
 
-require conf/machine/amlogic-meson.inc
+require conf/machine/include/amlogic-meson.inc
 
 KERNEL_IMAGETYPE ?= "Image"
 

@@ -1,6 +1,6 @@
 # Amlogic Meson32 Configurations
 
-require conf/machine/amlogic-meson.inc
+require conf/machine/include/amlogic-meson.inc
 
 KERNEL_IMAGETYPE ?= "zImage"
 
