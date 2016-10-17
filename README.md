@@ -1,5 +1,4 @@
-Upstream Linux Amlogic Meson Yocto/Openembedded Layer
-#####################################################
+# Upstream Linux Amlogic Meson Yocto/Openembedded Layer
 
 Now Amlogic SoCs of the Meson family are supported upstream :
  - Meson8b : s805
@@ -7,8 +6,7 @@ Now Amlogic SoCs of the Meson family are supported upstream :
 
 This Yocto/Openembedded will help building images for these SoCs using the lastest uptream linux branch.
 
-Build Setup
-###########
+## Build Setup
 
 Create a home repository for the build :
 ```
@@ -36,8 +34,7 @@ Add meta-meson layer :
 amlogic-bsp/build$ bitbake-layers add-layer $PWD/../meta-meson/
 ```
 
-Selecting Machine to build for
-################################
+## Selecting Machine to build for
 
 Available S805 machines are :
  - hardkernel-odroidc1
@@ -52,15 +49,13 @@ Available S905 machines are :
  - tronsmart-vega-s95-telos
  - amlogic-s905 (all S905 machines)
 
-Selecting Image type
-####################
+## Selecting Image type
 
 Images types available (in addition of standard Poky/OE images) :
  - amlogic-image-sd : to flash on an eMMC or SD-Card
  - amlogic-image-initrd : to load as ramdisk
 
-Building example
-################
+## Building example
 
 Building SD image for all S905 machines :
 ```
