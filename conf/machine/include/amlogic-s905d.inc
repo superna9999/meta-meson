@@ -1,4 +1,4 @@
-# Amlogic S905 Configurations
+# Amlogic S905D Configurations
 
 require conf/machine/include/amlogic-meson64.inc
 
