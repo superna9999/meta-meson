@@ -47,13 +47,31 @@ Available S905 machines are :
  - tronsmart-vega-s95-pro
  - tronsmart-vega-s95-meta
  - tronsmart-vega-s95-telos
+ - Nexbox A95
  - amlogic-s905 (all S905 machines)
+
+Available S905D machines are :
+ - amlogic-p230
+ - amlogic-p231
+ - amlogic-s905d (all S905D machines)
+
+Available S905X machines are :
+ - amlogic-p212
+ - Nexbox A95 (S905X)
+ - amlogic-s905x (all S905X machines)
+
+Available S912 machines are :
+ - amlogic-q200
+ - amlogic-q201
+ - Nexbox A1
+ - amlogic-s912 (all S912 machines)
 
 ## Selecting Image type
 
 Images types available (in addition of standard Poky/OE images) :
- - amlogic-image-sd : to flash on an eMMC or SD-Card
- - amlogic-image-initrd : to load as ramdisk
+ - amlogic-image-headless-sd : to flash on an eMMC or SD-Card
+ - amlogic-image-headless-initrd : to load as ramdisk
+ - amlogic-image-headless-sata : Graphical images with X11 and Sato environment to flash on an eMMC or SD-Card
 
 ## Building example
 
