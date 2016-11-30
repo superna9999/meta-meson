@@ -2,7 +2,7 @@
 
 Now Amlogic SoCs of the Meson family are supported upstream :
  - Meson8b : s805
- - Meson-GX : s905 (GXBB)
+ - Meson-GX : s905 (GXBB) s905x/S905d (GXL) s912 (GXM)
 
 This Yocto/Openembedded will help building images for these SoCs using the lastest uptream linux branch.
 
