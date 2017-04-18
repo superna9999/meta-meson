@@ -75,13 +75,45 @@ Images types available (in addition of standard Poky/OE images) :
 
 ## Building example
 
-Building SD image for all S905 machines :
+Building SD image for Hardkernel Odroid-C2 machine :
 ```
-amlogic-bsp/build$ export MACHINE=amlogic-s905
+amlogic-bsp/build$ export MACHINE=hardkernel-odroidc2
 amlogic-bsp/build$ bitbake amlogic-image-sd
 ```
 
-Flashable image will be in :
+Install native tools :
 ```
-build/tmp/deploy/images/amlogic-s905
+amlogic-bsp/build$ bitbake dosfstools-native mtools-native parted-native
+```
+
+Then generate the SDCard image :
+```
+wic create ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks -e amlogic-image-headless-sd
+```
+
+The wic tool should print :
+```
+Checking basic build environment...
+Done.
+
+Creating image(s)...
+
+Warning: bootloader config not specified, using defaults
+Info: The new image(s) can be found here:
+  /var/tmp/wic/build/sdimage-bootpart-201704180905-mmcblk.direct
+
+The following build artifacts were used to create the image(s):
+  ROOTFS_DIR:                   /path/to/amlogic-bsp/build/tmp/work/hardkernel_odroidc2-poky-linux/amlogic-image-headless-sd/1.0-r0/rootfs
+  BOOTIMG_DIR:                  
+  KERNEL_DIR:                   /path/to/amlogic-bsp/build/tmp/deploy/images/hardkernel-odroidc2
+  NATIVE_SYSROOT:               /path/to/amlogic-bsp/build/tmp/sysroots/x86_64-linux
+
+
+The image(s) were created using OE kickstart file:
+  ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks
+```
+
+So, you can directly copy the content of the sdimage-bootpart-201704180905-mmcblk.direct to the SDCard :
+```
+amlogic-bsp/build$ sudo dd if=/var/tmp/wic/build/sdimage-bootpart-201704180905-mmcblk.direct of=/dev/mmcblk0 bs=1M
 ```
