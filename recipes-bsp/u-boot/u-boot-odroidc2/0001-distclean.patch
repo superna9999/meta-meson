@@ -1,0 +1,30 @@
+diff --git a/Makefile b/Makefile
+index 4cb6cde..dc4aa55 100644
+--- a/Makefile
++++ b/Makefile
+@@ -863,14 +863,6 @@ FIP_ARGS += --bl33 $(FIP_FOLDER_SOC)/bl33.bin
+ 
+ .PHONY: fip_create
+ fip_create:
+-	$(Q)$(FIP_FOLDER)/fip_create > /dev/null 2>&1 && \
+-		echo "Pre-built fip_create is valid" || \
+-		echo "Re-build fip_create"
+-ifneq ($$?, "0")
+-	$(Q)rm -f $(FIP_FOLDER)/fip_create
+-	$(Q)$(MAKE) -C $(srctree)/tools/fip_create/
+-	$(Q)cp $(srctree)/tools/fip_create/fip_create $(FIP_FOLDER)/
+-endif
+ 
+ .PHONY: fip.bin
+ fip.bin: tools prepare u-boot.bin bl301.bin fip_create
+@@ -1416,7 +1408,6 @@ distclean: mrproper
+ 	@rm -f $(FIP_FOLDER_SOC)/u-boot.bin $(srctree)/u-boot.bin
+ 	@rm -f $(FIP_FOLDER_SOC)/u-boot.bin.* $(FIP_FOLDER_SOC)/*.encrypt
+ 	@rm -f $(FIP_FOLDER)/u-boot.bin.* $(FIP_FOLDER)/*.bin $(FIP_FOLDER)/*.encrypt
+-	@rm -f $(FIP_FOLDER)/fip_create
+ 	@rm -f $(srctree)/fip/aml_encrypt_gxb
+ 	@rm -f $(FUSING_FOLDER)/u-boot.bin
+ 	@$(MAKE) -C $(srctree)/tools/fip_create clean
+diff --git a/fip/fip_create b/fip/fip_create
+index e8a71f3..69b7356 100755
+Binary files a/fip/fip_create and b/fip/fip_create differ
