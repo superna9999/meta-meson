@@ -22,6 +22,7 @@ BL1_SYMLINK ?= "bl1-${MACHINE}.${BL1_SUFFIX}"
 
 do_deploy_append () {
     install ${S}/sd_fuse/${BL1_BINARY} ${DEPLOYDIR}/${BL1_IMAGE}
+    install ${S}/sd_fuse/sd_fusing.sh ${DEPLOYDIR}/sd_fusing.sh
     cd ${DEPLOYDIR}
     rm -f ${BL1_BINARY} ${BL1_SYMLINK}
     ln -sf ${BL1_IMAGE} ${BL1_SYMLINK}
