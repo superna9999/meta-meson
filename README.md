@@ -71,7 +71,7 @@ Available S912 machines are :
 Images types available (in addition of standard Poky/OE images) :
  - amlogic-image-headless-sd : to flash on an eMMC or SD-Card
  - amlogic-image-headless-initrd : to load as ramdisk
- - amlogic-image-headless-sata : Graphical images with X11 and Sato environment to flash on an eMMC or SD-Card
+ - amlogic-image-sato : Graphical images with X11 and Sato environment to flash on an eMMC or SD-Card
 
 ## Building example
 
