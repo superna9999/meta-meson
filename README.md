@@ -16,12 +16,12 @@ $ mkdir amlogic-bsp
 Checkout Yocto/Poky :
 ```
 $ cd amlogic-bsp
-amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b jethro poky
+amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b krogoth poky
 ```
 
 Checkout meta-meson :
 ```
-amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson
+amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b krogoth
 ```
 
 Source Poky environment :
@@ -47,7 +47,7 @@ Available S905 machines are :
  - tronsmart-vega-s95-pro
  - tronsmart-vega-s95-meta
  - tronsmart-vega-s95-telos
- - Nexbox A95
+ - nexbox-a95x-s905
  - amlogic-s905 (all S905 machines)
 
 Available S905D machines are :
@@ -57,13 +57,13 @@ Available S905D machines are :
 
 Available S905X machines are :
  - amlogic-p212
- - Nexbox A95 (S905X)
+ - nexbox-a95x-s905x
  - amlogic-s905x (all S905X machines)
 
 Available S912 machines are :
  - amlogic-q200
  - amlogic-q201
- - Nexbox A1
+ - nexbox-a1
  - amlogic-s912 (all S912 machines)
 
 ## Selecting Image type
