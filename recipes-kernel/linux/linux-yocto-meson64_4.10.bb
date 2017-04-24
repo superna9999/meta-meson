@@ -103,9 +103,9 @@ SRC_URI += "file://defconfig \
             file://0093-snd-soc-meson-aiu-i2s-Keep-div_lrclk-to-64-only.patch \
 "
 
-LINUX_VERSION ?= "4.10.10"
+LINUX_VERSION ?= "4.10.12"
 
-# tag: v4.10.10
+# tag: v4.10.12
 SRCREV_meson="e6925852d5b862bac749fab9c8d26491cda99e4e"
 
 KERNEL_CLASSES = "kernel-uimage-meson64"
