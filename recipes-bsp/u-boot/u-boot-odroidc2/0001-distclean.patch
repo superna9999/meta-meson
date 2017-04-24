@@ -1,8 +1,16 @@
 diff --git a/Makefile b/Makefile
-index 4cb6cde..dc4aa55 100644
+index 4cb6cde..565962d 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -863,14 +863,6 @@ FIP_ARGS += --bl33 $(FIP_FOLDER_SOC)/bl33.bin
+@@ -587,7 +587,6 @@ include $(srctree)/scripts/Makefile.extrawarn
+ KBUILD_CPPFLAGS += $(KCPPFLAGS)
+ KBUILD_AFLAGS += $(KAFLAGS)
+ KBUILD_CFLAGS += $(KCFLAGS)
+-KBUILD_CFLAGS += -Werror
+ 
+ # Use UBOOTINCLUDE when you must reference the include/ directory.
+ # Needed to be compatible with the O= option
+@@ -863,14 +862,6 @@ FIP_ARGS += --bl33 $(FIP_FOLDER_SOC)/bl33.bin
  
  .PHONY: fip_create
  fip_create:
@@ -17,7 +25,7 @@ index 4cb6cde..dc4aa55 100644
  
  .PHONY: fip.bin
  fip.bin: tools prepare u-boot.bin bl301.bin fip_create
-@@ -1416,7 +1408,6 @@ distclean: mrproper
+@@ -1416,7 +1407,6 @@ distclean: mrproper
  	@rm -f $(FIP_FOLDER_SOC)/u-boot.bin $(srctree)/u-boot.bin
  	@rm -f $(FIP_FOLDER_SOC)/u-boot.bin.* $(FIP_FOLDER_SOC)/*.encrypt
  	@rm -f $(FIP_FOLDER)/u-boot.bin.* $(FIP_FOLDER)/*.bin $(FIP_FOLDER)/*.encrypt
@@ -25,6 +33,3 @@ index 4cb6cde..dc4aa55 100644
  	@rm -f $(srctree)/fip/aml_encrypt_gxb
  	@rm -f $(FUSING_FOLDER)/u-boot.bin
  	@$(MAKE) -C $(srctree)/tools/fip_create clean
-diff --git a/fip/fip_create b/fip/fip_create
-index e8a71f3..69b7356 100755
-Binary files a/fip/fip_create and b/fip/fip_create differ

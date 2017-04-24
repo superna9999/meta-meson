@@ -13,6 +13,8 @@ PROVIDES =+ "u-boot"
 
 SRC_URI = "git://github.com/hardkernel/u-boot.git;branch=odroidc2-v2015.01 \
 	   file://0001-distclean.patch \
+	   file://0002-fix-build-error-under-gcc6.patch \
+	   file://0003-fix-s3c-udc-otg-build.patch \
 "
 
 BL1_SUFFIX ?= "bin.hardkernel"
