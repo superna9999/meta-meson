@@ -2,9 +2,9 @@ require kernel-module-mali-utgard.inc
 
 LIC_FILES_CHKSUM = "file://driver/src/devicedrv/mali/readme.txt;md5=92d15b487d204ace57072c48697b4a89"
 
-SRC_URI = "git://github.com/superna9999/meson_gx_mali_450.git;protocol=git;branch=DX910-SW-99002-r6p1-01rel0_meson_gx"
+SRC_URI = "git://github.com/jakogut/meson_gx_mali_450.git;protocol=git;branch=DX910-SW-99002-r6p1-01rel0_meson_gx"
 
-SRCREV = "0d146fd1fa6b162ff2a2ed2dd17d291622aeec70"
+SRCREV = "ff8527dab12a4fb4f3199544683e1508ae498073"
 
 S = "${WORKDIR}/git"
 
