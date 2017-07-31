@@ -16,21 +16,24 @@ $ mkdir amlogic-bsp
 Checkout Yocto/Poky :
 ```
 $ cd amlogic-bsp
-amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b morty poky
+amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b pyro poky
 ```
 
 Checkout meta-meson :
 ```
-amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b morty
+amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b pyro
 ```
 
-Source Poky environment :
+Initialize environment :
 ```
+amlogic-bsp$ TEMPLATECONF=../meta-meson/conf
 amlogic-bsp$ source poky/oe-init-build-env
 ```
 
-Add meta-meson layer :
+or :
+
 ```
+amlogic-bsp$ source poky/oe-init-build-env
 amlogic-bsp/build$ bitbake-layers add-layer $PWD/../meta-meson/
 ```
 
