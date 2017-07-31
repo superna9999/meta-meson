@@ -89,7 +89,7 @@ SRC_URI += "file://defconfig \
         file://0079-phy-meson-add-USB2-PHY-support-for-Meson-GXL-and-GXM.patch \
 "
 
-LINUX_VERSION ?= "4.12"
+LINUX_VERSION ?= "4.12.4"
 
 # tag: v4.12
 SRCREV_meson="6f7da290413ba713f0cdd9ff1a2a9bb129ef4f6c"
