@@ -1,7 +1,6 @@
 # Amlogic Meson SoCs configurations
 
-MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS += " kernel-modules"
-MACHINE_EXTRA_RRECOMMENDS += " kernel-devicetree"
+MACHINE_EXTRA_RRECOMMENDS = " kernel-modules kernel-devicetree"
 
 SERIAL_CONSOLE = "115200 ttyAML0"
 
@@ -10,3 +9,7 @@ UBOOT_LOADADDRESS = "0x1080000"
 UBOOT_ENTRYSYMBOL = "0x1080000"
 
 IMAGE_BOOT_FILES ?= "uImage"
+
+IMAGE_FSTYPES += "tar.bz2 wic"
+WKS_FILE = "sdimage-bootpart.wks"
+do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
