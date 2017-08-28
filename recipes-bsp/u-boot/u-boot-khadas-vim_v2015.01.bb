@@ -1,3 +1,11 @@
+HOMEPAGE = "http://www.denx.de/wiki/U-Boot/WebHome"
+SECTION = "bootloaders"
+
+LICENSE = "GPLv2+"
+PE = "1"
+
+S = "${WORKDIR}/git"
+
 require recipes-bsp/u-boot/u-boot.inc
 
 LIC_FILES_CHKSUM = "file://Licenses/README;md5=c7383a594871c03da76b3707929d2919"

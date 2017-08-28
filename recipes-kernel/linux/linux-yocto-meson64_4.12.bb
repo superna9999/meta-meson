@@ -27,8 +27,6 @@ SRC_URI += "file://defconfig \
         file://0017-pinctrl-meson-gxbb-Add-CEC-pins.patch \
         file://0018-pinctrl-meson-gxl-Add-CEC-pins.patch \
         file://0019-pinctrl-meson-gxl-Add-Ethernet-PHY-LEDS-pins.patch \
-        file://0020-pinctrl-meson-gxl-Add-missing-GPIODV_18-pin-entry.patch \
-        file://0021-pinctrl-meson-gxbb-Add-missing-GPIODV_18-pin-entry.patch \
         file://0022-cec-add-cec_s_phys_addr_from_edid-helper-function.patch \
         file://0023-cec-add-cec_phys_addr_invalidate-helper-function.patch \
         file://0024-cec-add-cec_transmit_attempt_done-helper-function.patch \
@@ -89,7 +87,7 @@ SRC_URI += "file://defconfig \
         file://0079-phy-meson-add-USB2-PHY-support-for-Meson-GXL-and-GXM.patch \
 "
 
-LINUX_VERSION ?= "4.12"
+LINUX_VERSION ?= "4.12.9"
 
 # tag: v4.12
 SRCREV_meson="6f7da290413ba713f0cdd9ff1a2a9bb129ef4f6c"

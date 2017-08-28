@@ -1,0 +1,9 @@
+Images types available (in addition of standard Poky/OE images) :
+ - amlogic-image-headless-sd : to flash on an eMMC or SD-Card
+ - amlogic-image-headless-initrd : to load as ramdisk
+ - amlogic-image-sato : Graphical images with X11 and Sato environment to flash on an eMMC or SD-Card
+
+Now type
+    bitbake amlogic-image-sato
+
+To build the final image
