@@ -73,6 +73,9 @@ Available S912 machines are :
  - nexbox-a1
  - amlogic-s912 (all S912 machines)
 
+Available S9xxx machines are :
+ - amlogic-s9xxx (all S905 and S905X and S912 machines)
+
 ## Selecting Image type
 
 Images types available (in addition of standard Poky/OE images) :
@@ -82,20 +85,20 @@ Images types available (in addition of standard Poky/OE images) :
 
 ## Building example
 
-Building SD image for Hardkernel Odroid-C2 machine :
+Building SD image for all S905 and S905X and S912 machines :
 ```
-amlogic-bsp/build$ export MACHINE=hardkernel-odroidc2
-amlogic-bsp/build$ bitbake amlogic-image-sd
+amlogic-bsp/build$ export MACHINE=amlogic-s9xxx
+amlogic-bsp/build$ bitbake amlogic-image-sato
 ```
 
 Install native tools :
 ```
-amlogic-bsp/build$ bitbake dosfstools-native mtools-native parted-native
+amlogic-bsp/build$ bitbake dosfstools-native mtools-native parted-native wic-tools
 ```
 
 Then generate the SDCard image :
 ```
-wic create ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks -e amlogic-image-headless-sd
+wic create ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks -e amlogic-image-sato
 ```
 
 The wic tool should print :
@@ -110,9 +113,9 @@ Info: The new image(s) can be found here:
   /var/tmp/wic/build/sdimage-bootpart-201704180905-mmcblk.direct
 
 The following build artifacts were used to create the image(s):
-  ROOTFS_DIR:                   /path/to/amlogic-bsp/build/tmp/work/hardkernel_odroidc2-poky-linux/amlogic-image-headless-sd/1.0-r0/rootfs
+  ROOTFS_DIR:                   /path/to/amlogic-bsp/build/tmp/work/amlogic-s905x-poky-linux/amlogic-image-sd/1.0-r0/rootfs
   BOOTIMG_DIR:                  
-  KERNEL_DIR:                   /path/to/amlogic-bsp/build/tmp/deploy/images/hardkernel-odroidc2
+  KERNEL_DIR:                   /path/to/amlogic-bsp/build/tmp/deploy/images/amlogic-s9xxx
   NATIVE_SYSROOT:               /path/to/amlogic-bsp/build/tmp/sysroots/x86_64-linux
 
 
