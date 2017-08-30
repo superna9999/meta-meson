@@ -1,4 +1,4 @@
 # Amlogic Q201
 
-KERNEL_DEVICETREE += "amlogic/meson-gxm-s912-q201.dtb"
-IMAGE_BOOT_FILES += "Image-meson-gxm-s912-q201.dtb;meson-gxm-s912-q201.dtb"
+KERNEL_DEVICETREE += "amlogic/meson-gxm-q201.dtb"
+IMAGE_BOOT_FILES += "Image-meson-gxm-q201.dtb;meson-gxm-q201.dtb"
