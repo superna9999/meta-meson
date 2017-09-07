@@ -29,7 +29,7 @@ index fe451cc..4089f04 100644
 +		compatible = "amlogic,meson-gxl-usb2-phy";
 +		#phy-cells = <0>;
 +		reg = <0x0 0x78040 0x0 0x20>;
-+		status = "disabled";
++		status = "okay";
 +	};
 +};
 +

@@ -1,0 +1,6 @@
+# short-description: Create SD card image for Meson
+# long-description: Creates a partitioned SD card image for Meson.
+# Boot files are located in the first vfat partition.
+
+part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label BOOT --active --align 4 --size 96
+part / --source rootfs --ondisk mmcblk --fstype=ext4 --label ROOTFS --align 4

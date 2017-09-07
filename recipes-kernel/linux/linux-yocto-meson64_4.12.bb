@@ -92,7 +92,7 @@ LINUX_VERSION ?= "4.12"
 KERNEL_VERSION_SANITY_SKIP="1"
 
 # tag: v4.12
-SRCREV_meson="6f7da290413ba713f0cdd9ff1a2a9bb129ef4f6c"
+SRCREV_meson="6371f030c4dc8b69140819e92803aae7e6039cd6"
 
 KERNEL_CLASSES = "kernel-uimage-meson64"
 
