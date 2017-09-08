@@ -62,12 +62,15 @@ SRC_URI += "file://defconfig \
 	    file://0052-usb-host-add-a-generic-platform-USB-roothub-driver.patch \
 	    file://0053-usb-host-xhci-plat-integrate-the-platform-roothub.patch \
 	    file://0054-ARM64-dts-meson-gx-Enable-USB-on-GXL-and-GXM-boards.patch \
-	    file://0055-ARM64-dts-meson-gxl-Enable-HDMI-audio-on-p212-based-.patch \
 	    file://0056-ARM64-dts-meson-gx-Add-SoC-info-register.patch \
 	    file://0057-ARM64-dts-meson-gxl-khadas-vim-Add-GPIO-lines-names.patch \
 	    file://0058-ARM64-dts-meson-gxbb-nanopi-k2-Add-GPIO-lines-names.patch \
 	    file://0059-ARM64-dts-meson-gx-use-stable-UART-bindings-with-cor.patch \
 	    file://0060-ARM64-dts-meson-gxl-libretech-cc-Add-GPIO-lines-name.patch \
+	    file://0080-ARM64-dts-add-meson-gxm-vega-s96-dtb.patch \
+	    file://0085-ARM64-dts-meson-gxm-vega-s96-dts.patch \
+	    file://0086-ARM64-dts-meson-gxl-Enable-HDMI-audio-on.patch \
+	    file://0088-ARM64-dts-meson-gxbb-vega-s95-dtsi.patch \
 "
 
 LINUX_VERSION ?= "4.13"

@@ -21,7 +21,7 @@ amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b pyro poky
 
 Checkout meta-meson :
 ```
-amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b pyro
+amlogic-bsp$ git clone https://github.com/150balbes/meta-meson.git
 ```
 
 Initialize environment :
@@ -71,6 +71,7 @@ Available S912 machines are :
  - amlogic-q200
  - amlogic-q201
  - nexbox-a1
+ - vega-S96 (q201 LAN 1Gb)
  - amlogic-s912 (all S912 machines)
 
 Available S9xxx machines are :
@@ -98,7 +99,7 @@ amlogic-bsp/build$ bitbake dosfstools-native mtools-native parted-native wic-too
 
 Then generate the SDCard image :
 ```
-wic create ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks -e amlogic-image-sato
+amlogic-bsp/build$ wic create ../meta-meson/wic/meson.wks -e amlogic-image-sato
 ```
 
 The wic tool should print :
