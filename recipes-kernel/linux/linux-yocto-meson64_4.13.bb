@@ -70,6 +70,7 @@ SRC_URI += "file://defconfig \
 	    file://0080-ARM64-dts-add-meson-gxm-vega-s96-dtb.patch \
 	    file://0085-ARM64-dts-meson-gxm-vega-s96-dts.patch \
 	    file://0086-ARM64-dts-meson-gxl-Enable-HDMI-audio-on.patch \
+	    file://0088-ARM64-dts-meson-gxbb-vega-s95-dtsi.patch \
 "
 
 LINUX_VERSION ?= "4.13"
