@@ -1,7 +1,7 @@
 From 42d72ee7c36ce858763a8cabda2d762cea34d822 Mon Sep 17 00:00:00 2001
 From: Martin Blumenstingl <martin.blumenstingl@googlemail.com>
 Date: Sat, 26 Nov 2016 00:17:22 +0100
-Subject: [PATCH 51/60] ARM64: dts: meson-gxm: add GXM specific USB host
+Subject: [PATCH 51/67] ARM64: dts: meson-gxm: add GXM specific USB host
  configuration
 
 The USB configuration on GXM is slightly different than on GXL. The dwc3

@@ -1,7 +1,7 @@
 From 60b862f7611860a9cc76ec92da53d7cddfce23f7 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Tue, 21 Mar 2017 19:24:35 +0100
-Subject: [PATCH 37/60] clk: cosmetic changes to clk_summary debugfs entry
+Subject: [PATCH 37/67] clk: cosmetic changes to clk_summary debugfs entry
 
 clk_summary debugfs entry was already well over the traditional 80
 characters per line limit but it grew even larger with the addition of

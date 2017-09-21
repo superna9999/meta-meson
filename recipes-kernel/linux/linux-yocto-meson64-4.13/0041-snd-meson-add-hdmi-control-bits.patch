@@ -1,7 +1,7 @@
 From f67048ab256cb25ba1c090e7f89d7ee67de0f484 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 7 Jul 2017 17:38:21 +0200
-Subject: [PATCH 41/60] snd: meson: add hdmi control bits
+Subject: [PATCH 41/67] snd: meson: add hdmi control bits
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---

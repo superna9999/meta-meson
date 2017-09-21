@@ -1,7 +1,7 @@
 From fc0f316448ecbbf94319e8183ee86f642f7febcb Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Mon, 10 Jul 2017 12:24:14 +0200
-Subject: [PATCH 47/60] ARM64: dts: meson-gx: Add CEC support for Wetek Play2
+Subject: [PATCH 47/67] ARM64: dts: meson-gx: Add CEC support for Wetek Play2
  and Khadas Vim
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>

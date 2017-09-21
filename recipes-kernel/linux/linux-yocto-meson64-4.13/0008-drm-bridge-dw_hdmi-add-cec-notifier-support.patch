@@ -1,7 +1,7 @@
 From 8f6179a1266cc9426dfe1b733c1dafa2dc72f06c Mon Sep 17 00:00:00 2001
 From: Russell King <rmk+kernel@armlinux.org.uk>
 Date: Fri, 4 Dec 2015 10:47:35 +0000
-Subject: [PATCH 08/60] drm/bridge: dw_hdmi: add cec notifier support
+Subject: [PATCH 08/67] drm/bridge: dw_hdmi: add cec notifier support
 
 Add CEC notifier support to the HDMI bridge driver, so that the CEC
 part of the IP can receive its physical address.

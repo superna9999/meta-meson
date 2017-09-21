@@ -1,7 +1,7 @@
 From 9adce96e65a9b0853da642667cd1db236e922a32 Mon Sep 17 00:00:00 2001
 From: Martin Blumenstingl <martin.blumenstingl@googlemail.com>
 Date: Tue, 10 Jan 2017 18:59:43 +0100
-Subject: [PATCH 52/60] usb: host: add a generic platform USB roothub driver
+Subject: [PATCH 52/67] usb: host: add a generic platform USB roothub driver
 
 Many SoC platforms have separate devices for the USB PHY which are
 registered through the generic PHY framework. These PHYs have to be

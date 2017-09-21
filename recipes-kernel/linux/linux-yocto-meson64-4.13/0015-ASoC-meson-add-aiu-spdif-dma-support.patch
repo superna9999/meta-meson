@@ -1,7 +1,7 @@
 From ad1cf02c5f5a56695d35a527732efaebb26af632 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 13:43:52 +0200
-Subject: [PATCH 15/60] ASoC: meson: add aiu spdif dma support
+Subject: [PATCH 15/67] ASoC: meson: add aiu spdif dma support
 
 Add support for the spdif output dma which is part of the AIU block
 

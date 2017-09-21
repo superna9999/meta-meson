@@ -1,7 +1,7 @@
 From 98a81e626d9ebe029e6ede4696306f8f4cc63bec Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 4 Aug 2017 15:38:04 +0200
-Subject: [PATCH 60/60] ARM64: dts: meson-gxl-libretech-cc: Add GPIO lines
+Subject: [PATCH 60/67] ARM64: dts: meson-gxl-libretech-cc: Add GPIO lines
  names
 
 This patch describes the GPIO lines usage on the LibreTech CC board.
@@ -11,8 +11,6 @@ This is useful in the debugfs gpio file and using the cdev gpio API.
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 [khilman: minor whiespace fix]
 Signed-off-by: Kevin Hilman <khilman@baylibre.com>
-
-Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---
  .../dts/amlogic/meson-gxl-s905x-libretech-cc.dts   | 57 ++++++++++++++++++++++
  1 file changed, 57 insertions(+)

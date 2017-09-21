@@ -1,7 +1,7 @@
 From 1e7ed14840531e2a681bacd4d18716138eaee52d Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 23 Mar 2017 12:00:17 +0100
-Subject: [PATCH 40/60] ASoC: meson: protect dai output clock rates
+Subject: [PATCH 40/67] ASoC: meson: protect dai output clock rates
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>

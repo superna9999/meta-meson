@@ -1,7 +1,7 @@
 From 780af60a3912d2e8238b33b9bee904c77cf6f044 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 20 Mar 2017 16:48:17 +0100
-Subject: [PATCH 34/60] clk: add support for clock protection
+Subject: [PATCH 34/67] clk: add support for clock protection
 
 The patch adds clk_protect and clk_unprotect to the CCF API. These
 functions allow a consumer to inform the system that the rate of clock is

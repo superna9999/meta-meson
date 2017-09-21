@@ -1,7 +1,7 @@
 From a7fb2e59cdb3c76abd1eb92479267ca5c865a7b4 Mon Sep 17 00:00:00 2001
 From: Helmut Klein <hgkr.klein@gmail.com>
 Date: Wed, 21 Jun 2017 16:42:11 +0200
-Subject: [PATCH 59/60] ARM64: dts: meson-gx: use stable UART bindings with
+Subject: [PATCH 59/67] ARM64: dts: meson-gx: use stable UART bindings with
  correct gate clock
 
 This patch switches to the stable UART bindings but also add the correct

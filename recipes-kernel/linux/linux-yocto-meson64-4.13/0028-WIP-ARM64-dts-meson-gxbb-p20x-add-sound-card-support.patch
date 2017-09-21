@@ -1,7 +1,7 @@
 From 15abb6b351066f5e646e0a6498bbebaaa65b1691 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 15:53:47 +0200
-Subject: [PATCH 28/60] WIP: ARM64: dts: meson-gxbb-p20x: add sound card
+Subject: [PATCH 28/67] WIP: ARM64: dts: meson-gxbb-p20x: add sound card
  support
 
 This commit add sound card support to the meson-gxbb-p20x

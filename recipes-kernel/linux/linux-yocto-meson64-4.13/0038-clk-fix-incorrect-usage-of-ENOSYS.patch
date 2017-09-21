@@ -1,7 +1,7 @@
 From b2f20b3cce5b3b7d1759bfe5e0da18f1abcd2026 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Tue, 21 Mar 2017 16:03:55 +0100
-Subject: [PATCH 38/60] clk: fix incorrect usage of ENOSYS
+Subject: [PATCH 38/67] clk: fix incorrect usage of ENOSYS
 
 ENOSYS is special and should only be used for incorrect syscall number.
 It does not seem to be the case here.

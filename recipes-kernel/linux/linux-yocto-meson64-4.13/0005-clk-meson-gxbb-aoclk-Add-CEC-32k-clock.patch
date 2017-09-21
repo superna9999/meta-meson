@@ -1,7 +1,7 @@
 From b5991ab2aacbba85ffa2c6b675c8fcb20ad55cb3 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Tue, 30 May 2017 16:45:28 +0200
-Subject: [PATCH 05/60] clk: meson: gxbb-aoclk: Add CEC 32k clock
+Subject: [PATCH 05/67] clk: meson: gxbb-aoclk: Add CEC 32k clock
 
 The CEC 32K AO Clock is a dual divider with dual counter to provide a more
 precise 32768Hz clock for the CEC subsystem from the external xtal.

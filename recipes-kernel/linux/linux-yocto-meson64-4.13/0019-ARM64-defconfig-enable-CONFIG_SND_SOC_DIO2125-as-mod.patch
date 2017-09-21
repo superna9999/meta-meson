@@ -1,7 +1,7 @@
 From 7f05b4f1ad31685a595d30ec300755369e42a5d9 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 31 Mar 2017 15:50:39 +0200
-Subject: [PATCH 19/60] ARM64: defconfig: enable CONFIG_SND_SOC_DIO2125 as
+Subject: [PATCH 19/67] ARM64: defconfig: enable CONFIG_SND_SOC_DIO2125 as
  module
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>

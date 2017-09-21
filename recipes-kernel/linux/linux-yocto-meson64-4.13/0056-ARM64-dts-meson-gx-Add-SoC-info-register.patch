@@ -1,7 +1,7 @@
 From aed787be243a3abc20233f08e2d590ab6af4ae33 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 23 Jun 2017 10:28:17 +0200
-Subject: [PATCH 56/60] ARM64: dts: meson-gx: Add SoC info register
+Subject: [PATCH 56/67] ARM64: dts: meson-gx: Add SoC info register
 
 Add node for the Amlogic Meson GX SoC information register.
 

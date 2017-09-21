@@ -1,7 +1,7 @@
 From c851377c8b312f45b20f6d980d997ec58b4ea132 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 18 May 2017 13:42:12 +0200
-Subject: [PATCH 35/60] clk: add clk_set_rate_protect
+Subject: [PATCH 35/67] clk: add clk_set_rate_protect
 
 clk_set_rate_protect is a combination of clk_set_rate and clk_rate_protect
 within a critical section. In case where several protecting consumers

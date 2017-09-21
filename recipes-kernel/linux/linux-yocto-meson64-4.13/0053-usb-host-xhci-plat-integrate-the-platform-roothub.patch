@@ -1,7 +1,7 @@
 From 3e260150ef67f134a19b6ab45f49aa7e7579be74 Mon Sep 17 00:00:00 2001
 From: Martin Blumenstingl <martin.blumenstingl@googlemail.com>
 Date: Wed, 11 Jan 2017 11:34:59 +0100
-Subject: [PATCH 53/60] usb: host: xhci: plat: integrate the platform-roothub
+Subject: [PATCH 53/67] usb: host: xhci: plat: integrate the platform-roothub
 
 This enables the platform-roothub for the xhci-plat driver. This allows
 specifying a PHY for each port via devicetree. All PHYs will then be

@@ -1,7 +1,7 @@
 From a4c06ee0c054fc85a350d57c88eb2c6dcb4cba0e Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 20 Mar 2017 12:04:14 +0100
-Subject: [PATCH 30/60] clk: take the prepare lock out of clk_core_set_parent
+Subject: [PATCH 30/67] clk: take the prepare lock out of clk_core_set_parent
 
 Rework set_parent core function so it can be called when the prepare lock
 is already held by the caller.

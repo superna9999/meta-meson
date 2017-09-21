@@ -1,7 +1,7 @@
 From 944a80a2dc39ba79972286d24d6bff88297fe601 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 20 Mar 2017 12:20:41 +0100
-Subject: [PATCH 31/60] clk: add clk_core_set_phase_nolock function
+Subject: [PATCH 31/67] clk: add clk_core_set_phase_nolock function
 
 Create a core function for set_phase, as it is done for set_rate and
 set_parent.

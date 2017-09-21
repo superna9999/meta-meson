@@ -1,7 +1,7 @@
 From bbb1bcdb148da4f15921084abb93eac9d84e7e26 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Thu, 13 Jul 2017 15:08:22 +0200
-Subject: [PATCH 55/60] ARM64: dts: meson-gxl: Enable HDMI audio on p212 based
+Subject: [PATCH 55/67] ARM64: dts: meson-gxl: Enable HDMI audio on p212 based
  boards
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>

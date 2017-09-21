@@ -1,7 +1,7 @@
 From 714c8c79f182f521b3ad6e7974a39cd5fa1e7fa1 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 17:53:57 +0200
-Subject: [PATCH 26/60] ARM64: dts: meson-gxl-p230: add spdif codec node
+Subject: [PATCH 26/67] ARM64: dts: meson-gxl-p230: add spdif codec node
 
 Add spdif-dit node to the meson gxl reference design
 

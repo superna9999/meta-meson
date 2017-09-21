@@ -1,7 +1,7 @@
 From c46a18f4d7d58cb662c282e5f48340b778eb01fc Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 28 Jul 2017 15:54:43 +0200
-Subject: [PATCH 57/60] ARM64: dts: meson-gxl-khadas-vim: Add GPIO lines names
+Subject: [PATCH 57/67] ARM64: dts: meson-gxl-khadas-vim: Add GPIO lines names
 
 This patch describes the GPIO lines usage on the Khadas VIM board.
 
@@ -10,8 +10,6 @@ This is useful in the debugfs gpio file and using the cdev gpio API.
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 [khilman: minor whitespace fix]
 Signed-off-by: Kevin Hilman <khilman@baylibre.com>
-
-Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---
  .../dts/amlogic/meson-gxl-s905x-khadas-vim.dts     | 56 ++++++++++++++++++++++
  1 file changed, 56 insertions(+)

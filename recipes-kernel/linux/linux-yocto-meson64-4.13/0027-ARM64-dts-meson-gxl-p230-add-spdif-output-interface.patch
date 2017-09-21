@@ -1,7 +1,7 @@
 From b993dfcb7005c89d55ef4b483d3f58fbe254f670 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 16:04:39 +0200
-Subject: [PATCH 27/60] ARM64: dts: meson-gxl-p230: add spdif output interface
+Subject: [PATCH 27/67] ARM64: dts: meson-gxl-p230: add spdif output interface
 
 Add the necessary pin for the spdif audio interface output and enable it
 

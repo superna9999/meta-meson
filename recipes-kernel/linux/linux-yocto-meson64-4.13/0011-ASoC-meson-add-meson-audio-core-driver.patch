@@ -1,7 +1,7 @@
 From 1d88f48b8595ba0eda47b7a40adeddfb29a63a95 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 11:49:55 +0200
-Subject: [PATCH 11/60] ASoC: meson: add meson audio core driver
+Subject: [PATCH 11/67] ASoC: meson: add meson audio core driver
 
 This patch adds support for the audio core driver for the Amlogic Meson SoC
 family. The purpose of this driver is to properly reset the audio block and

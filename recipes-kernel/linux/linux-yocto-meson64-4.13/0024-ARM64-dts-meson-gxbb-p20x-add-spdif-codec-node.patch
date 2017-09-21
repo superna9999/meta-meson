@@ -1,7 +1,7 @@
 From 4bf3370cc65e94222e322bb0457a0792acbc4ccc Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 17:49:00 +0200
-Subject: [PATCH 24/60] ARM64: dts: meson-gxbb-p20x: add spdif codec node
+Subject: [PATCH 24/67] ARM64: dts: meson-gxbb-p20x: add spdif codec node
 
 Add spdif-dit node to the meson gxbb reference design
 

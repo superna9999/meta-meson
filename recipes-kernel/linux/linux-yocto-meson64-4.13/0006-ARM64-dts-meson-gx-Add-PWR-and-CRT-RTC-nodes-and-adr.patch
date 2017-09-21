@@ -1,7 +1,7 @@
 From dfa5381f31d598620e4ad8eca7ff2f10b18eb27d Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 23 Jun 2017 15:27:38 +0200
-Subject: [PATCH 06/60] ARM64: dts: meson-gx: Add PWR and CRT/RTC nodes and
+Subject: [PATCH 06/67] ARM64: dts: meson-gx: Add PWR and CRT/RTC nodes and
  adresses
 
 The AO 32KHz generation registers are split among multiple registers :

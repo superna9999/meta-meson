@@ -1,7 +1,7 @@
 From cb18f55b63f1dba5d3ff8be3a189f8c33c0501df Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Tue, 28 Feb 2017 15:22:54 +0100
-Subject: [PATCH 01/60] Add HDMI support for Odroid-C2
+Subject: [PATCH 01/67] Add HDMI support for Odroid-C2
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---

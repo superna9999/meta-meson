@@ -1,7 +1,7 @@
 From db7f378b7aba26aeb3a37f86d9f03ef2e4d732cb Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Tue, 30 May 2017 16:45:06 +0200
-Subject: [PATCH 04/60] dt-bindings: clock: gxbb-aoclk: Add CEC 32k clock
+Subject: [PATCH 04/67] dt-bindings: clock: gxbb-aoclk: Add CEC 32k clock
 
 This patchadds the clock binding entry for the CEC 32K AO Clock.
 

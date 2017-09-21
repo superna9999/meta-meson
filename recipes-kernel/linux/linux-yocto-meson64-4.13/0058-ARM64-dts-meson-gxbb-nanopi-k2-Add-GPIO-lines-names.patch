@@ -1,7 +1,7 @@
 From a6cddb2edca836001120d4ca758696b8fd2a2c42 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 28 Jul 2017 15:54:44 +0200
-Subject: [PATCH 58/60] ARM64: dts: meson-gxbb-nanopi-k2: Add GPIO lines names
+Subject: [PATCH 58/67] ARM64: dts: meson-gxbb-nanopi-k2: Add GPIO lines names
 
 This patch describes the GPIO lines usage on the Nanopi K2 board.
 

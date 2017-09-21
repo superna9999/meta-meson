@@ -1,7 +1,7 @@
 From 93f29be53107755fd162c09104689c370f233704 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 15:40:20 +0200
-Subject: [PATCH 25/60] ARM64: dts: meson-gxbb-p20x: add i2s and spdif output
+Subject: [PATCH 25/67] ARM64: dts: meson-gxbb-p20x: add i2s and spdif output
  interfaces
 
 Add the necessary pins for the i2s and spdif audio interface output and

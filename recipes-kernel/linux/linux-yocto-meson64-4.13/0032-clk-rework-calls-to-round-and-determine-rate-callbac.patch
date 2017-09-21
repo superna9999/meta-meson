@@ -1,7 +1,7 @@
 From 5d8ab379f806bff986051e37812629cdb0c29783 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 20 Mar 2017 14:35:47 +0100
-Subject: [PATCH 32/60] clk: rework calls to round and determine rate callbacks
+Subject: [PATCH 32/67] clk: rework calls to round and determine rate callbacks
 
 Rework the way the callbacks round_rate and determine_rate are called. The
 goal is to do this at a single point and make it easier to add conditions

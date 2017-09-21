@@ -1,7 +1,7 @@
 From 4d2b498436902d2860c969c47a13fef25e8513c0 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 7 Jul 2017 17:47:47 +0200
-Subject: [PATCH 44/60] ARM64: dts: meson-gxbb-odroic2: Add HDMI audio output
+Subject: [PATCH 44/67] ARM64: dts: meson-gxbb-odroic2: Add HDMI audio output
  nodes
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>

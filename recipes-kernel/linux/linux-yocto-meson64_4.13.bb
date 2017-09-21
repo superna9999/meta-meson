@@ -68,6 +68,13 @@ SRC_URI += "file://defconfig \
 	    file://0058-ARM64-dts-meson-gxbb-nanopi-k2-Add-GPIO-lines-names.patch \
 	    file://0059-ARM64-dts-meson-gx-use-stable-UART-bindings-with-cor.patch \
 	    file://0060-ARM64-dts-meson-gxl-libretech-cc-Add-GPIO-lines-name.patch \
+            file://0061-phy-meson-add-USB3-PHY-support-for-Meson-GXL.patch \
+            file://0062-ARM64-dts-meson-gxl-Add-USB3-PHY-Node.patch \
+            file://0063-ARM64-dts-meson-gxl-libretech-cc-enable-saradc.patch \
+            file://0064-ARM64-dts-meson-gxl-libretech-cc-enable-internal-phy.patch \
+            file://0065-ARM64-dts-meson-gxl-s905x-libretech-cc-Enable-USB.patch \
+            file://0066-ARM64-dts-meson-activate-hdmi-audio-on-libretech.patch \
+            file://0067-ARM64-dts-meson-gx-Add-AO-CEC-nodes-for-libretech-cc.patch \
 "
 
 LINUX_VERSION ?= "4.13"

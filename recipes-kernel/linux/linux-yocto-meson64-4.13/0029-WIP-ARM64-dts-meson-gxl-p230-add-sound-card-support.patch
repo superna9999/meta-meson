@@ -1,7 +1,7 @@
 From d93a867340201064cc11c92b88641b8b8be2d05d Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 16:06:10 +0200
-Subject: [PATCH 29/60] WIP: ARM64: dts: meson-gxl-p230: add sound card support
+Subject: [PATCH 29/67] WIP: ARM64: dts: meson-gxl-p230: add sound card support
 
 This commit add sound card support to the meson-gxbb-p230
 his patch is not intended to be merged upstream. The architecture of

@@ -1,7 +1,7 @@
 From d151de59f318d70951b4a780d14c5c6ca1c9d718 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 7 Jul 2017 17:47:31 +0200
-Subject: [PATCH 43/60] ARM64: dts: meson-gx: Switch p20x and p230 to HDMI
+Subject: [PATCH 43/67] ARM64: dts: meson-gx: Switch p20x and p230 to HDMI
  output only
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>

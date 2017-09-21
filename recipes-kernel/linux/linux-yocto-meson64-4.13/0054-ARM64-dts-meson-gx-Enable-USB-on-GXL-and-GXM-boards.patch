@@ -1,7 +1,7 @@
 From f171c8543e6cbba80336afb2b14a6b115732bf99 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Thu, 13 Jul 2017 15:02:33 +0200
-Subject: [PATCH 54/60] ARM64: dts: meson-gx: Enable USB on GXL and GXM boards
+Subject: [PATCH 54/67] ARM64: dts: meson-gx: Enable USB on GXL and GXM boards
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---

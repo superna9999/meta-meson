@@ -1,7 +1,7 @@
 From 12ca3e58d956e5d83df0f34e8550236ba8403caa Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 7 Jul 2017 17:49:19 +0200
-Subject: [PATCH 45/60] ARM64: dts: meson: add sound-dai-cells to HDMI node
+Subject: [PATCH 45/67] ARM64: dts: meson: add sound-dai-cells to HDMI node
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---

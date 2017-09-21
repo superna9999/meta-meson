@@ -1,7 +1,7 @@
 From bba8e2c2262c351bbfc7ca86de4479506f31183c Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 12:00:10 +0200
-Subject: [PATCH 12/60] ASoC: meson: add register definitions
+Subject: [PATCH 12/67] ASoC: meson: add register definitions
 
 Add the register definition for the AIU and AUDIN blocks
 

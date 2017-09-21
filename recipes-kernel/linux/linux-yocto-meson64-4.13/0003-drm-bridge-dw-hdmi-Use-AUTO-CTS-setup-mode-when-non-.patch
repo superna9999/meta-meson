@@ -1,7 +1,7 @@
 From 718fae41291a0a4ccc3cf757b1e37bafd680feff Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Mon, 27 Mar 2017 11:08:24 +0200
-Subject: [PATCH 03/60] drm: bridge: dw-hdmi: Use AUTO CTS setup mode when
+Subject: [PATCH 03/67] drm: bridge: dw-hdmi: Use AUTO CTS setup mode when
  non-AHB audio
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>

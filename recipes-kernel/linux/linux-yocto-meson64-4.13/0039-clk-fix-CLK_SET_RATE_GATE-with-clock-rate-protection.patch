@@ -1,7 +1,7 @@
 From adc8dd5c3b80ed939c994210ff3098500c519f3e Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 18 May 2017 15:36:38 +0200
-Subject: [PATCH 39/60] clk: fix CLK_SET_RATE_GATE with clock rate protection
+Subject: [PATCH 39/67] clk: fix CLK_SET_RATE_GATE with clock rate protection
 
 Using clock rate protection, we can now enforce CLK_SET_RATE_GATE along the
 clock tree

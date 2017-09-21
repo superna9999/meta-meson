@@ -1,7 +1,7 @@
 From d0461a03d953b03b741b3a8093d87f8327cf3b46 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 19 May 2017 11:44:22 +0200
-Subject: [PATCH 33/60] clk: use round rate to bail out early in set_rate
+Subject: [PATCH 33/67] clk: use round rate to bail out early in set_rate
 
 The current implementation of clk_core_set_rate_nolock bails out early if
 the requested rate is exactly the same as the one set. It should bail out

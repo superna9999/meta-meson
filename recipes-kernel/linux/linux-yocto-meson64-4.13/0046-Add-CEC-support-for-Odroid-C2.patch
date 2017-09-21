@@ -1,7 +1,7 @@
 From f095af77a47741e162817f1534caf1606c4b498b Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 7 Jul 2017 18:08:36 +0200
-Subject: [PATCH 46/60] Add CEC support for Odroid-C2
+Subject: [PATCH 46/67] Add CEC support for Odroid-C2
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---

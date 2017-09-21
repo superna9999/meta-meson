@@ -1,7 +1,7 @@
 From 2bff369409aef6dc20882b1068c3e9db7b979386 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Tue, 30 May 2017 15:50:21 +0200
-Subject: [PATCH 09/60] platform: Add Amlogic Meson AO CEC Controller driver
+Subject: [PATCH 09/67] platform: Add Amlogic Meson AO CEC Controller driver
 
 The Amlogic SoC embeds a standalone CEC controller, this patch adds a driver
 for such controller.

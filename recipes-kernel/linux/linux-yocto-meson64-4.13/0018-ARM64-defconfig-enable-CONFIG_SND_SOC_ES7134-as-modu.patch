@@ -1,7 +1,7 @@
 From 3052948ce3761ebc4ac670bc914a52d748de03a9 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 31 Mar 2017 15:52:11 +0200
-Subject: [PATCH 18/60] ARM64: defconfig: enable CONFIG_SND_SOC_ES7134 as
+Subject: [PATCH 18/67] ARM64: defconfig: enable CONFIG_SND_SOC_ES7134 as
  module
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>

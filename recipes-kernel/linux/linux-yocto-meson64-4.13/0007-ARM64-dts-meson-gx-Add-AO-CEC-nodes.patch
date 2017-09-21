@@ -1,7 +1,7 @@
 From a15ba9ac9b3ec277a0ec3da98cf2764780682a61 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Tue, 30 May 2017 16:46:16 +0200
-Subject: [PATCH 07/60] ARM64: dts: meson-gx: Add AO CEC nodes
+Subject: [PATCH 07/67] ARM64: dts: meson-gx: Add AO CEC nodes
 
 This patch adds the AO CEC node in all the HDMI enabled boards DTS.
 

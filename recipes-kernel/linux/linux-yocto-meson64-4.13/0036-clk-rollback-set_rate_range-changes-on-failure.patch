@@ -1,7 +1,7 @@
 From e06c6122e9f93d6b8e5c72c3abaef54f5659532f Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 20 Mar 2017 15:02:19 +0100
-Subject: [PATCH 36/60] clk: rollback set_rate_range changes on failure
+Subject: [PATCH 36/67] clk: rollback set_rate_range changes on failure
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
