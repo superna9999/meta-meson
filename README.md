@@ -16,12 +16,12 @@ $ mkdir amlogic-bsp
 Checkout Yocto/Poky :
 ```
 $ cd amlogic-bsp
-amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b pyro poky
+amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b rocko poky
 ```
 
 Checkout meta-meson :
 ```
-amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b pyro
+amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b rocko
 ```
 
 Initialize environment :
