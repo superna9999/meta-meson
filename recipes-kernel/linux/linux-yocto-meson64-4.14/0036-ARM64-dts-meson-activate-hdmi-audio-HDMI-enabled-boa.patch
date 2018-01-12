@@ -1,7 +1,7 @@
 From db733b2bb5e2e26e1d977953c7c71b8986368cd7 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Wed, 20 Sep 2017 18:10:08 +0200
-Subject: [PATCH 36/36] ARM64: dts: meson: activate hdmi audio HDMI enabled
+Subject: [PATCH 36/38] ARM64: dts: meson: activate hdmi audio HDMI enabled
  boards
 
 This patch activate audio over HDMI on selected boards

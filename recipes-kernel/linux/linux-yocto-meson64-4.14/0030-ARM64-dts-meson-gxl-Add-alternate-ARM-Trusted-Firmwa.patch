@@ -1,7 +1,7 @@
 From 157f93b346ac791d42e7dc2e17a6f5540c045719 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Wed, 11 Oct 2017 17:23:12 +0200
-Subject: [PATCH 30/36] ARM64: dts: meson-gxl: Add alternate ARM Trusted
+Subject: [PATCH 30/38] ARM64: dts: meson-gxl: Add alternate ARM Trusted
  Firmware reserved memory zone
 
 This year, Amlogic updated the ARM Trusted Firmware reserved memory mapping

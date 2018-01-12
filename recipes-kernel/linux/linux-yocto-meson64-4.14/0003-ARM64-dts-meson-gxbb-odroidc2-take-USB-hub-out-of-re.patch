@@ -1,7 +1,7 @@
 From 53d19221222d8fe49aae75721a9547c7d104e9ed Mon Sep 17 00:00:00 2001
 From: Martin Blumenstingl <martin.blumenstingl@googlemail.com>
 Date: Thu, 12 Jan 2017 01:39:20 +0100
-Subject: [PATCH 03/36] ARM64: dts: meson-gxbb-odroidc2: take USB hub out of
+Subject: [PATCH 03/38] ARM64: dts: meson-gxbb-odroidc2: take USB hub out of
  reset
 
 This takes the USB hub out of reset, otherwise the hub is not working.

@@ -34,3 +34,5 @@ patch 0033-ARM64-dts-meson-gx-Add-HDMI_5V-regulator-on-selected.patch
 patch 0034-ARM64-dts-meson-gx-grow-reset-controller-memory-zone.patch
 patch 0035-ARM64-dts-odroid-c2-Add-HDMI-and-CEC-Nodes.patch
 patch 0036-ARM64-dts-meson-activate-hdmi-audio-HDMI-enabled-boa.patch
+patch 0037-net-phy-meson-gxl-detect-LPA-corruption.patch
+patch 0038-net-stmmac-enable-EEE-in-MII-GMII-or-RGMII-only.patch

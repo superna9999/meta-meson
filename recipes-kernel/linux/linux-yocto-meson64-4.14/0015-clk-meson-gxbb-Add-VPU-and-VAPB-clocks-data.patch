@@ -1,7 +1,7 @@
 From 89e3cdb01f2bf01810474984fd2c676a88973ac5 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Fri, 13 Oct 2017 14:38:37 +0200
-Subject: [PATCH 15/36] clk: meson: gxbb: Add VPU and VAPB clocks data
+Subject: [PATCH 15/38] clk: meson: gxbb: Add VPU and VAPB clocks data
 
 The Amlogic Meson GX SoCs needs these two clocks to power up the
 VPU power domain.

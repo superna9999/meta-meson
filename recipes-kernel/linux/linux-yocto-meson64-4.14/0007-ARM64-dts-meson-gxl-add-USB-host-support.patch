@@ -1,7 +1,7 @@
 From 8ef5d73fcc737279094fa9a904fdd45ddc2da765 Mon Sep 17 00:00:00 2001
 From: Martin Blumenstingl <martin.blumenstingl@googlemail.com>
 Date: Sun, 20 Nov 2016 00:23:52 +0100
-Subject: [PATCH 07/36] ARM64: dts: meson-gxl: add USB host support
+Subject: [PATCH 07/38] ARM64: dts: meson-gxl: add USB host support
 
 This adds USB host support to the Meson GXL SoC. A dwc3 controller is
 used for host-mode, while a dwc2 controller is used for device-mode only.

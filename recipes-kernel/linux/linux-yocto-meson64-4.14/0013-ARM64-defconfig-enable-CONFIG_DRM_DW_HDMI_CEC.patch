@@ -1,7 +1,7 @@
 From d537685003beb9f008c50075e66cb245e265dea2 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 13 Nov 2017 12:15:18 +0100
-Subject: [PATCH 13/36] ARM64: defconfig: enable CONFIG_DRM_DW_HDMI_CEC
+Subject: [PATCH 13/38] ARM64: defconfig: enable CONFIG_DRM_DW_HDMI_CEC
 
 Turn on CONFIG_DRM_DW_HDMI_CEC as module
 
