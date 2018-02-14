@@ -27,7 +27,6 @@ patch 0026-drm-meson-select-dw-hdmi-i2s-audio-for-meson-hdmi.patch
 patch 0027-ARM64-defconfig-enable-audio-support-for-meson-SoCs-.patch
 patch 0028-ARM64-dts-meson-gx-add-audio-controller-nodes.patch
 patch 0029-ARM64-dts-meson-gxl-add-sound-dai-cells-to-HDMI-node.patch
-patch 0030-ARM64-dts-meson-gxl-Add-alternate-ARM-Trusted-Firmwa.patch
 patch 0031-ARM64-dts-meson-gxl-Take-eMMC-data-strobe-out-of-eMM.patch
 patch 0032-ARM64-dts-meson-gx-add-VPU-power-domain.patch
 patch 0033-ARM64-dts-meson-gx-Add-HDMI_5V-regulator-on-selected.patch
@@ -35,4 +34,3 @@ patch 0034-ARM64-dts-meson-gx-grow-reset-controller-memory-zone.patch
 patch 0035-ARM64-dts-odroid-c2-Add-HDMI-and-CEC-Nodes.patch
 patch 0036-ARM64-dts-meson-activate-hdmi-audio-HDMI-enabled-boa.patch
 patch 0037-net-phy-meson-gxl-detect-LPA-corruption.patch
-patch 0038-net-stmmac-enable-EEE-in-MII-GMII-or-RGMII-only.patch
