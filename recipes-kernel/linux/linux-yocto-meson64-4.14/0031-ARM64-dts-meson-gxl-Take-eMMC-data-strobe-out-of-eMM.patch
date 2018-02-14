@@ -1,7 +1,7 @@
 From 5d15137e72c78be05dfa4a9228cd956733195dca Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Mon, 28 Aug 2017 12:01:09 +0200
-Subject: [PATCH 31/38] ARM64: dts: meson-gxl: Take eMMC data strobe out of
+Subject: [PATCH 31/36] ARM64: dts: meson-gxl: Take eMMC data strobe out of
  eMMC pins
 
 Since the Data Strobe pin is optional, take it out of the default
