@@ -1,7 +1,7 @@
-From 0682a78ae935a272c73a281d6c320a6cd017ce28 Mon Sep 17 00:00:00 2001
+From c71be51a7778a6aa6b784dd0edc57951acf63ef2 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 13 Nov 2017 12:11:41 +0100
-Subject: [PATCH 12/38] ARM64: defconfig: enable CONFIG_VIDEO_MESON_AO_CEC
+Subject: [PATCH 12/39] ARM64: defconfig: enable CONFIG_VIDEO_MESON_AO_CEC
 
 Turn on CONFIG_VIDEO_MESON_AO_CEC as module
 

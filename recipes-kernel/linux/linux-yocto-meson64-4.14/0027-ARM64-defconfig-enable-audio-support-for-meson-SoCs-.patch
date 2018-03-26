@@ -1,7 +1,7 @@
-From 89ae17b250034109205d300262e964dd7c2050fc Mon Sep 17 00:00:00 2001
+From d74574d0836155eadde90e9ba12b8c4d18202d8e Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 31 Mar 2017 15:55:03 +0200
-Subject: [PATCH 27/38] ARM64: defconfig: enable audio support for meson SoCs
+Subject: [PATCH 27/39] ARM64: defconfig: enable audio support for meson SoCs
  as module
 
 Add audio support for meson SoCs. This includes the audio core

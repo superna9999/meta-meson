@@ -4,9 +4,9 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-# tag: v4.14.19
-SRCREV_meson="1722fe3727845178e5d7fe3fdf35b8a5de230fdf"
-LINUX_VERSION ?= "4.14.19"
+# tag: v4.14.30
+SRCREV_meson="de8cdc5572311b0742eccf3c0cfd34af1e105904"
+LINUX_VERSION ?= "4.14.30"
 
 # Linux stable tree
 SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=https;branch=linux-4.14.y;name=meson \
@@ -39,13 +39,16 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
            file://0027-ARM64-defconfig-enable-audio-support-for-meson-SoCs-.patch \
            file://0028-ARM64-dts-meson-gx-add-audio-controller-nodes.patch \
            file://0029-ARM64-dts-meson-gxl-add-sound-dai-cells-to-HDMI-node.patch \
-           file://0031-ARM64-dts-meson-gxl-Take-eMMC-data-strobe-out-of-eMM.patch \
-           file://0032-ARM64-dts-meson-gx-add-VPU-power-domain.patch \
-           file://0033-ARM64-dts-meson-gx-Add-HDMI_5V-regulator-on-selected.patch \
-           file://0034-ARM64-dts-meson-gx-grow-reset-controller-memory-zone.patch \
-           file://0035-ARM64-dts-odroid-c2-Add-HDMI-and-CEC-Nodes.patch \
-           file://0036-ARM64-dts-meson-activate-hdmi-audio-HDMI-enabled-boa.patch \
-           file://0037-net-phy-meson-gxl-detect-LPA-corruption.patch \
+           file://0030-ARM64-dts-meson-gxl-Take-eMMC-data-strobe-out-of-eMM.patch \
+           file://0031-ARM64-dts-meson-gx-add-VPU-power-domain.patch \
+           file://0032-ARM64-dts-meson-gx-Add-HDMI_5V-regulator-on-selected.patch \
+           file://0033-ARM64-dts-meson-gx-grow-reset-controller-memory-zone.patch \
+           file://0034-ARM64-dts-odroid-c2-Add-HDMI-and-CEC-Nodes.patch \
+           file://0035-ARM64-dts-meson-activate-hdmi-audio-HDMI-enabled-boa.patch \
+           file://0036-net-phy-meson-gxl-detect-LPA-corruption.patch \
+	   file://0037-drm-meson-fix-vsync-buffer-update.patch \
+	   file://0038-ARM64-dts-meson-bump-mali450-clk-to-744MHz.patch \
+	   file://0039-drm-meson-Add-support-for-DMT-modes-on-HDMI.patch \
            file://defconfig \
 "
 

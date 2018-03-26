@@ -1,7 +1,7 @@
-From f1aaa72f808ab876ffe8c16820b5a4726b711933 Mon Sep 17 00:00:00 2001
+From eb29dbaf90e217978d8abfab1912b11020825e28 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 13 Nov 2017 12:02:59 +0100
-Subject: [PATCH 10/38] ARM64: defconfig: add CONFIG_MESON_EFUSE
+Subject: [PATCH 10/39] ARM64: defconfig: add CONFIG_MESON_EFUSE
 
 Turn on CONFIG_MESON_EFUSE as module
 
