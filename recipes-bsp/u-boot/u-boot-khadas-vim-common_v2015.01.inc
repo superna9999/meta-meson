@@ -6,18 +6,12 @@ PE = "1"
 
 S = "${WORKDIR}/git"
 
-require recipes-bsp/u-boot/u-boot.inc
-
 LIC_FILES_CHKSUM = "file://Licenses/README;md5=c7383a594871c03da76b3707929d2919"
-
-COMPATIBLE_MACHINE = "khadas-vim"
 
 SRCREV = "ffc14fcca35f499ba1489400dfe801901683ee60"
 
 PV = "v2015.01+git${SRCPV}"
 PR = "r0"
-
-PROVIDES =+ "u-boot"
 
 SRC_URI = "git://github.com/khadas/u-boot.git;branch=ubuntu \
 	   https://launchpad.net/gcc-arm-embedded/4.9/4.9-2015-q3-update/+download/gcc-arm-none-eabi-4_9-2015q3-20150921-linux.tar.bz2;md5sum=8a4a74872830f80c788c944877d3ad8c \
@@ -30,10 +24,6 @@ SRC_URI = "git://github.com/khadas/u-boot.git;branch=ubuntu \
 
 EXTRA_OEMAKE = 'CROSS_COMPILE=aarch64-linux-gnu- V=1'
 EXTRA_OEMAKE += 'HOSTCC="${BUILD_CC} ${BUILD_CFLAGS} ${BUILD_LDFLAGS}"'
-
-do_deploy_append () {
-    install ${S}/fip/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
-}
 
 do_compile_prepend() {
 	export PATH=${S}/../gcc-arm-none-eabi-4_9-2015q3/bin:$PATH
