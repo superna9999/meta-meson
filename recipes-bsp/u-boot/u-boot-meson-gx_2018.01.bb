@@ -3,6 +3,8 @@ require recipes-bsp/u-boot/u-boot.inc
 
 DEPENDS += "bc-native dtc-native python-native amlogic-fip-native"
 
+PROVIDES = "u-boot"
+
 do_deploy_append_meson-gxl () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
     DESTDIR="${B}/fip"
