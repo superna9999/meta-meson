@@ -16,12 +16,12 @@ $ mkdir amlogic-bsp
 Checkout Yocto/Poky :
 ```
 $ cd amlogic-bsp
-amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b rocko poky
+amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b sumo poky
 ```
 
 Checkout meta-meson :
 ```
-amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b rocko
+amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b sumo
 ```
 
 Initialize environment :
@@ -91,39 +91,14 @@ amlogic-bsp/build$ export MACHINE=amlogic-s9xxx
 amlogic-bsp/build$ bitbake amlogic-image-sato
 ```
 
-Install native tools :
+A .wic image will be generated in the tmp/deploy/images/$MACHINE/ directory.
+
+This Image contains a FAT32 BOOT partition will the kernel uImage and .dtb, compatible with Amlogic U-Boot already flashed on your device.
+
+For the amlogic-p212, khadas-vim and libretech-cc, Mainline U-Boot is automatically installed in a single ext4 partition .sdcard image in the tmp/deploy/images/$MACHINE/ directory.
+
+You will be able to dd the image onto the raw SDcard like :
+
 ```
-amlogic-bsp/build$ bitbake dosfstools-native mtools-native parted-native wic-tools
-```
-
-Then generate the SDCard image :
-```
-wic create ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks -e amlogic-image-sato
-```
-
-The wic tool should print :
-```
-Checking basic build environment...
-Done.
-
-Creating image(s)...
-
-Warning: bootloader config not specified, using defaults
-Info: The new image(s) can be found here:
-  /var/tmp/wic/build/sdimage-bootpart-201704180905-mmcblk.direct
-
-The following build artifacts were used to create the image(s):
-  ROOTFS_DIR:                   /path/to/amlogic-bsp/build/tmp/work/amlogic-s905x-poky-linux/amlogic-image-sd/1.0-r0/rootfs
-  BOOTIMG_DIR:                  
-  KERNEL_DIR:                   /path/to/amlogic-bsp/build/tmp/deploy/images/amlogic-s9xxx
-  NATIVE_SYSROOT:               /path/to/amlogic-bsp/build/tmp/sysroots/x86_64-linux
-
-
-The image(s) were created using OE kickstart file:
-  ../poky/scripts/lib/wic/canned-wks/sdimage-bootpart.wks
-```
-
-So, you can directly copy the content of the sdimage-bootpart-201704180905-mmcblk.direct to the SDCard :
-```
-amlogic-bsp/build$ sudo dd if=/var/tmp/wic/build/sdimage-bootpart-201704180905-mmcblk.direct of=/dev/mmcblk0 bs=1M
+sudo dd if=tmp/deploy/images/libretech-cc/core-image-sato-libretech-cc.sdcard of=/dev/mmcblk0
 ```
