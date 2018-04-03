@@ -1,6 +1,6 @@
 # Amlogic Meson SoCs configurations
 
-MACHINE_EXTRA_RRECOMMENDS = " kernel-modules kernel-devicetree"
+MACHINE_EXTRA_RRECOMMENDS = " kernel-modules kernel-devicetree linux-firmware"
 
 SERIAL_CONSOLE = "115200 ttyAML0"
 
