@@ -1,0 +1,27 @@
+From 4275b432970259f1a6e492ccb2fb5ee7baa8de7c Mon Sep 17 00:00:00 2001
+From: Ayaka <ayaka@soulik.info>
+Date: Mon, 5 Oct 2015 16:30:46 +0100
+Subject: [PATCH 3/7] v4l2pool: Fix wrong error message
+
+https://bugzilla.gnome.org/show_bug.cgi?id=728438
+(cherry picked from commit 17e52f6ac26f46b0155137a741f428a71febe996)
+---
+ sys/v4l2/gstv4l2bufferpool.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sys/v4l2/gstv4l2bufferpool.c b/sys/v4l2/gstv4l2bufferpool.c
+index 48cda0f7e..629e4b129 100644
+--- a/sys/v4l2/gstv4l2bufferpool.c
++++ b/sys/v4l2/gstv4l2bufferpool.c
+@@ -857,7 +857,7 @@ no_buffers:
+   }
+ start_failed:
+   {
+-    GST_ERROR_OBJECT (pool, "failed to start streaming");
++    GST_ERROR_OBJECT (pool, "allocate failed");
+     return FALSE;
+   }
+ other_pool_failed:
+-- 
+2.13.3
+
