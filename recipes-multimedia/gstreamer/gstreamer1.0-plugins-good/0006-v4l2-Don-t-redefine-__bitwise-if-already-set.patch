@@ -1,0 +1,47 @@
+From a14a920e816016d10ef85d2db5e3b0585c35810d Mon Sep 17 00:00:00 2001
+From: Nicolas Dufresne <nicolas.dufresne@collabora.com>
+Date: Sun, 21 May 2017 15:29:11 +0200
+Subject: [PATCH 6/7] v4l2: Don't redefine __bitwise if already set
+
+https://bugzilla.gnome.org/show_bug.cgi?id=728438
+(cherry picked from commit 9f936c92446e25a3759136ad7abf5ac36db5b7b7)
+---
+ sys/v4l2/ext/types-compat.h | 21 +++++++++++++--------
+ 1 file changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/sys/v4l2/ext/types-compat.h b/sys/v4l2/ext/types-compat.h
+index f1095cb06..0126d7e23 100644
+--- a/sys/v4l2/ext/types-compat.h
++++ b/sys/v4l2/ext/types-compat.h
+@@ -25,15 +25,20 @@
+ #define __TYPES_COMPAT_H__
+ 
+ /* From linux/types.h */
+-#ifdef __CHECKER__
+-#define __bitwise__ __attribute__((bitwise))
+-#else
+-#define __bitwise__
++#ifndef __bitwise__
++#  ifdef __CHECKER__
++#    define __bitwise__ __attribute__((bitwise))
++#  else
++#    define __bitwise__
++#  endif
+ #endif
+-#ifdef __CHECK_ENDIAN__
+-#define __bitwise __bitwise__
+-#else
+-#define __bitwise
++
++#ifndef __bitwise
++#  ifdef __CHECK_ENDIAN__
++#    define __bitwise __bitwise__
++#  else
++#    define __bitwise
++#  endif
+ #endif
+ 
+ #define __u64 guint64
+-- 
+2.13.3
+

@@ -1,0 +1,30 @@
+From 89ce162bccbc2cfca6d1ef70ca804b1e1c116b46 Mon Sep 17 00:00:00 2001
+From: Ayaka <ayaka@soulik.info>
+Date: Mon, 5 Oct 2015 16:20:19 +0100
+Subject: [PATCH 2/7] v4l2: increase pre-allocated encoded buffer size
+
+As of today, the MFC encoder often need to exceed that 1 MB
+size for encoded buffer we fixed earlier for decoding.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=728438
+(cherry picked from commit 342de49bf64e80a7d331156c22d10f54d415fb2c)
+---
+ sys/v4l2/gstv4l2object.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sys/v4l2/gstv4l2object.c b/sys/v4l2/gstv4l2object.c
+index aae2c55e7..4bc17ee11 100644
+--- a/sys/v4l2/gstv4l2object.c
++++ b/sys/v4l2/gstv4l2object.c
+@@ -51,7 +51,7 @@ GST_DEBUG_CATEGORY_EXTERN (v4l2_debug);
+ #define DEFAULT_PROP_FREQUENCY          0
+ #define DEFAULT_PROP_IO_MODE            GST_V4L2_IO_AUTO
+ 
+-#define ENCODED_BUFFER_SIZE             (1 * 1024 * 1024)
++#define ENCODED_BUFFER_SIZE             (2 * 1024 * 1024)
+ 
+ enum
+ {
+-- 
+2.13.3
+
