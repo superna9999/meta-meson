@@ -1,0 +1,124 @@
+From ce690bde832da06ee292166e98da2e03c4d525af Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 25 Jun 2017 13:38:49 +0800
+Subject: [PATCH] drm/lima: use pd/pt dma to reference count page
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_vm.c | 47 +++++++++++++++++++++++++++++-------------
+ drivers/gpu/drm/lima/lima_vm.h |  1 +
+ 2 files changed, 34 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index a6b7311..8de42df 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -34,11 +34,32 @@
+ 		LIMA_VM_FLAG_WRITE_PERMISSION )
+ 
+ 
++static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
++{
++	u32 addr;
++
++	for (addr = start; addr < end; addr += LIMA_PAGE_SIZE) {
++		u32 pde = LIMA_PDE(addr);
++		u32 pte = LIMA_PTE(addr);
++
++		vm->pts[pde].cpu[pte] = 0;
++		vm->pts[pde].dma--;
++		if (!(vm->pts[pde].dma & LIMA_PAGE_MASK)) {
++			vm->pd.cpu[pde] = 0;
++			vm->pd.dma--;
++
++			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
++					  vm->pts[pde].cpu, vm->pts[pde].dma);
++			vm->pts[pde].cpu = 0;
++		}
++	}
++}
++
+ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+ {
+ 	int err;
+ 	struct interval_tree_node *it;
+-	u32 addr, faddr;
++	u32 addr;
+ 
+ 	mutex_lock(&vm->lock);
+ 
+@@ -74,8 +95,13 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+ 			}
+ 			memset(vm->pts[pde].cpu, 0, LIMA_PAGE_SIZE);
+ 			vm->pd.cpu[pde] = vm->pts[pde].dma | LIMA_VM_FLAG_PRESENT;
++			vm->pd.dma++;
+ 		}
+ 
++		/* dma address should be 4K aligned, so use the lower 12 bit
++		 * as a reference count, 12bit is enough for 1024 max count
++		 */
++		vm->pts[pde].dma++;
+ 		vm->pts[pde].cpu[pte] = dma | LIMA_VM_FLAGS_CACHE;
+ 	}
+ 
+@@ -83,11 +109,7 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+ 	return 0;
+ 
+ err_out1:
+-	for (faddr = va; faddr < addr; faddr += LIMA_PAGE_SIZE) {
+-		u32 pde = LIMA_PDE(faddr);
+-		u32 pte = LIMA_PTE(faddr);
+-		vm->pts[pde].cpu[pte] = 0;
+-	}
++	lima_vm_unmap_page_table(vm, va, addr);
+ 	interval_tree_remove(it, &vm->va);
+ 	kfree(it);
+ err_out0:
+@@ -99,7 +121,6 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
+ {
+ 	int err, i, j;
+ 	struct interval_tree_node *it;
+-	u32 addr;
+ 	struct lima_device *dev = vm->dev;
+ 
+ 	mutex_lock(&vm->lock);
+@@ -118,11 +139,7 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
+ 	else
+ 		goto err_out;
+ 
+-	for (addr = va; addr < va + size; addr += LIMA_PAGE_SIZE) {
+-		u32 pde = LIMA_PDE(addr);
+-		u32 pte = LIMA_PTE(addr);
+-		vm->pts[pde].cpu[pte] = 0;
+-	}
++	lima_vm_unmap_page_table(vm, va, va + size);
+ 
+ 	mutex_unlock(&vm->lock);
+ 
+@@ -187,10 +204,12 @@ void lima_vm_release(struct kref *kref)
+ 		kfree(it);
+ 	}
+ 
+-	for (i = 0; i < LIMA_PAGE_ENT_NUM; i++) {
+-		if (vm->pts[i].cpu)
++	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
++		if (vm->pts[i].cpu) {
+ 			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
+ 					  vm->pts[i].cpu, vm->pts[i].dma);
++			vm->pd.dma--;
++		}
+ 	}
+ 
+ 	if (vm->pd.cpu)
+diff --git a/drivers/gpu/drm/lima/lima_vm.h b/drivers/gpu/drm/lima/lima_vm.h
+index 2848e4b..f423ec9 100644
+--- a/drivers/gpu/drm/lima/lima_vm.h
++++ b/drivers/gpu/drm/lima/lima_vm.h
+@@ -27,6 +27,7 @@
+ #include <linux/kref.h>
+ 
+ #define LIMA_PAGE_SIZE    4096
++#define LIMA_PAGE_MASK    (LIMA_PAGE_SIZE - 1)
+ #define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
+ 
+ struct lima_device;

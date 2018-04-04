@@ -1,0 +1,43 @@
+From cb97c3aa41fe3cce74e9d85f5d03a4368117711f Mon Sep 17 00:00:00 2001
+From: Alban Browaeys <alban.browaeys@gmail.com>
+Date: Thu, 12 Apr 2018 15:12:14 +0200
+Subject: [PATCH] drm/lima: don't use GFP_KERNEL under spin lock
+
+Try to preallocate the memory with idr_prealloc(GFP_KERNEL)
+and change the allocation flags under spin lock.
+
+Based on commit 2c8468dcf830
+("net: sched: don't use GFP_KERNEL under spin lock")
+
+Signed-off-by: Alban Browaeys <alban.browaeys@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_ctx.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_ctx.c b/drivers/gpu/drm/lima/lima_ctx.c
+index 2836cca..24ca647 100644
+--- a/drivers/gpu/drm/lima/lima_ctx.c
++++ b/drivers/gpu/drm/lima/lima_ctx.c
+@@ -39,17 +39,17 @@ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
+ 			goto err_out0;
+ 	}
+ 
++	idr_preload(GFP_KERNEL);
+ 	spin_lock(&mgr->lock);
+-	err = idr_alloc(&mgr->handles, ctx, 1, 0, GFP_KERNEL);
+-	if (err < 0)
+-		goto err_out1;
++	err = idr_alloc(&mgr->handles, ctx, 1, 0, GFP_ATOMIC);
+ 	spin_unlock(&mgr->lock);
++	idr_preload_end();
++	if (err < 0)
++		goto err_out0;
+ 
+ 	*id = err;
+ 	return 0;
+ 
+-err_out1:
+-	spin_unlock(&mgr->lock);
+ err_out0:
+ 	for (i--; i >= 0; i--)
+ 		lima_sched_context_fini(dev->pipe[i], ctx->context + i);

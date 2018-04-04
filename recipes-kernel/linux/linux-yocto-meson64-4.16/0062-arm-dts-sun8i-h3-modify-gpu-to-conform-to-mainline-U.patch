@@ -1,0 +1,56 @@
+From a781d0faa100406f7a12bfda5684049e3b402450 Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Sun, 3 Sep 2017 22:46:40 +0200
+Subject: [PATCH] arm/dts/sun8i-h3: modify gpu to conform to mainline Utgard
+ binding
+
+Modify the gpu node to use register areas, irqs and clocks as specified
+in the mainline kernels Utgard bindings.
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+Reviewed-by: Qiang Yu <yuq825@gmail.com>
+---
+ arch/arm/boot/dts/sun8i-h3.dtsi | 21 +++++----------------
+ 1 file changed, 5 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/boot/dts/sun8i-h3.dtsi b/arch/arm/boot/dts/sun8i-h3.dtsi
+index 3c690b6..cc2603b 100644
+--- a/arch/arm/boot/dts/sun8i-h3.dtsi
++++ b/arch/arm/boot/dts/sun8i-h3.dtsi
+@@ -82,17 +82,8 @@
+ 
+ 	soc {
+ 		gpu@01c40000 {
+-			compatible = "arm,mali400";
+-			reg = <0x01c40000 0x1000
+-			       0x01c41000 0x1000
+-			       0x01c42000 0x1000
+-			       0x01c43000 0x1000
+-			       0x01c44000 0x1000
+-			       0x01c45000 0x1000
+-			       0x01c48000 0x2000
+-			       0x01c4a000 0x2000>;
+-			reg-names = "gp", "l2-cache", "pmu", "gp-mmu", "pp0-mmu",
+-				    "pp1-mmu", "pp0", "pp1";
++			compatible = "arm,mali-400";
++			reg = <0x01c40000 0x10000>;
+ 			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>,
+ 					   <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>,
+ 					   <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>,
+@@ -100,13 +91,11 @@
+ 					   <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>,
+ 					   <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>,
+ 					   <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>;
+-			interrupt-names = "gp", "gp-mmu", "pp0", "pp0-mmu", "pmu",
+-					  "pp1", "pp1-mmu";
++			interrupt-names = "gp", "gpmmu", "pp0", "pp0mmu", "pmu",
++					  "pp1", "pp1mmu";
+ 			clocks = <&ccu CLK_BUS_GPU>, <&ccu CLK_GPU>;
+-			clock-names = "bus", "gpu";
++			clock-names = "bus", "core";
+ 			resets = <&ccu RST_BUS_GPU>;
+-			reset-names = "ahb";
+-			num-pp = <2>;
+ 		};
+ 	};
+ };

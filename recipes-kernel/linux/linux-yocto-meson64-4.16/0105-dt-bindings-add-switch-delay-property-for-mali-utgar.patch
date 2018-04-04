@@ -1,0 +1,25 @@
+From b767d0a0bdff7654d30347e22f1ab11a32a5ee43 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 21 Mar 2018 14:58:02 +0800
+Subject: [PATCH] dt-bindings: add switch-delay property for mali-utgard
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ Documentation/devicetree/bindings/gpu/arm,mali-utgard.txt | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/gpu/arm,mali-utgard.txt b/Documentation/devicetree/bindings/gpu/arm,mali-utgard.txt
+index ad87654..99d1c0a 100644
+--- a/Documentation/devicetree/bindings/gpu/arm,mali-utgard.txt
++++ b/Documentation/devicetree/bindings/gpu/arm,mali-utgard.txt
+@@ -57,6 +57,10 @@ Optional properties:
+     A power domain consumer specifier as defined in
+     Documentation/devicetree/bindings/power/power_domain.txt
+ 
++  - switch-delay:
++    This value is the number of Mali clock cycles it takes to
++    enable the power gates and turn on the power mesh.
++
+ Vendor-specific bindings
+ ------------------------
+ 

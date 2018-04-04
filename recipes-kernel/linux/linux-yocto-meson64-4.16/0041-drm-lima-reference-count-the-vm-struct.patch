@@ -1,0 +1,432 @@
+From 9ab3f24ee4faa82a2aee0857c1323c779f792440 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Fri, 5 May 2017 09:35:48 +0800
+Subject: [PATCH] drm/lima: reference count the vm struct
+
+in case the user process exit but still task pending.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h        |  8 +++--
+ drivers/gpu/drm/lima/lima_device.c |  8 +++--
+ drivers/gpu/drm/lima/lima_drv.c    |  9 ++++--
+ drivers/gpu/drm/lima/lima_gem.c    | 12 ++++----
+ drivers/gpu/drm/lima/lima_mmu.c    | 20 +++++++++----
+ drivers/gpu/drm/lima/lima_sched.c  |  7 +++--
+ drivers/gpu/drm/lima/lima_vm.c     | 60 ++++++++++++++++++++------------------
+ drivers/gpu/drm/lima/lima_vm.h     | 25 +++++++++++++---
+ 8 files changed, 94 insertions(+), 55 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 861fd4c..fd1b72d 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -52,6 +52,8 @@ struct lima_l2_cache {
+ 
+ struct lima_mmu {
+ 	struct lima_ip ip;
++
++	spinlock_t lock;
+ 	struct lima_vm *vm;
+ };
+ 
+@@ -92,11 +94,11 @@ struct lima_device {
+ 	struct lima_pp *pp[LIMA_MAX_PP];
+ 	int num_pp;
+ 
+-	struct lima_vm empty_vm;
++	struct lima_vm *empty_vm;
+ };
+ 
+ struct lima_drm_priv {
+-	struct lima_vm vm;
++	struct lima_vm *vm;
+ };
+ 
+ int lima_device_init(struct lima_device *ldev, struct drm_device *dev);
+@@ -110,7 +112,7 @@ void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
+ 
+ int lima_mmu_init(struct lima_mmu *mmu);
+ void lima_mmu_fini(struct lima_mmu *mmu);
+-void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm);
++void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset);
+ 
+ int lima_gp_init(struct lima_gp *gp);
+ void lima_gp_fini(struct lima_gp *gp);
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index a52980a..12fa5bd 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -189,9 +189,11 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
+ 		return err;
+ 	}
+ 
+-	err = lima_vm_init(&ldev->empty_vm, ldev->dev, true);
+-	if (err)
++	ldev->empty_vm = lima_vm_create(ldev);
++	if (!ldev->empty_vm) {
++		err = -ENOMEM;
+ 		goto err_out;
++	}
+ 
+ 	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
+ 	if (!ldev->pmu) {
+@@ -261,7 +263,7 @@ void lima_device_fini(struct lima_device *ldev)
+ 		kfree(ldev->pmu);
+ 	}
+ 
+-	lima_vm_fini(&ldev->empty_vm);
++	lima_vm_put(ldev->empty_vm);
+ 
+ 	lima_clk_fini(ldev);
+ }
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 5e528e8..4dae515 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -162,14 +162,17 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
+ {
+ 	int err;
+ 	struct lima_drm_priv *priv;
++	struct lima_device *ldev = to_lima_dev(dev);
+ 
+ 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+ 	if (!priv)
+ 		return -ENOMEM;
+ 
+-	err = lima_vm_init(&priv->vm, dev->dev, false);
+-	if (err)
++	priv->vm = lima_vm_create(ldev);
++	if (!priv->vm) {
++		err = -ENOMEM;
+ 		goto err_out0;
++	}
+ 
+ 	file->driver_priv = priv;
+ 	return 0;
+@@ -183,7 +186,7 @@ static void lima_drm_driver_preclose(struct drm_device *dev, struct drm_file *fi
+ {
+ 	struct lima_drm_priv *priv = file->driver_priv;
+ 
+-	lima_vm_fini(&priv->vm);
++	lima_vm_put(priv->vm);
+ 	kfree(priv);
+ }
+ 
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 07e06e6..2372c59 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -179,7 +179,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 		goto err_out0;
+ 	}
+ 
+-	err = lima_vm_map(&priv->vm, bo->dma_addr, va, obj->size);
++	err = lima_vm_map(priv->vm, bo->dma_addr, va, obj->size);
+ 	if (err)
+ 		goto err_out0;
+ 
+@@ -189,7 +189,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 		goto err_out1;
+ 	}
+ 	INIT_LIST_HEAD(&bo_va->list);
+-	bo_va->vm = &priv->vm;
++	bo_va->vm = priv->vm;
+ 	bo_va->va = va;
+ 
+ 	mutex_lock(&bo->lock);
+@@ -202,7 +202,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 	return 0;
+ 
+ err_out1:
+-	lima_vm_unmap(&priv->vm, va, obj->size);
++	lima_vm_unmap(priv->vm, va, obj->size);
+ err_out0:
+ 	drm_gem_object_unreference_unlocked(obj);
+ 	return err;
+@@ -226,7 +226,7 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
+ 	mutex_lock(&bo->lock);
+ 
+ 	list_for_each_entry_safe(bo_va, tmp, &bo->va, list) {
+-		if (bo_va->vm == &priv->vm && bo_va->va == va) {
++		if (bo_va->vm == priv->vm && bo_va->va == va) {
+ 			list_del(&bo_va->list);
+ 			kfree(bo_va);
+ 			found = true;
+@@ -241,7 +241,7 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
+ 		goto out;
+ 	}
+ 
+-	err = lima_vm_unmap(&priv->vm, va, obj->size);
++	err = lima_vm_unmap(priv->vm, va, obj->size);
+ 
+ out:
+ 	drm_gem_object_unreference_unlocked(obj);
+@@ -360,7 +360,7 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
+ 	if (err)
+ 		goto out0;
+ 
+-	task = lima_sched_task_create(&priv->vm, frame);
++	task = lima_sched_task_create(priv->vm, frame);
+ 	if (IS_ERR(task)) {
+ 		err = PTR_ERR(task);
+ 		goto out1;
+diff --git a/drivers/gpu/drm/lima/lima_mmu.c b/drivers/gpu/drm/lima/lima_mmu.c
+index c3ba389..a80e783 100644
+--- a/drivers/gpu/drm/lima/lima_mmu.c
++++ b/drivers/gpu/drm/lima/lima_mmu.c
+@@ -92,13 +92,14 @@ int lima_mmu_init(struct lima_mmu *mmu)
+ 	}
+ 
+ 	mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
+-	mmu_write(DTE_ADDR, dev->empty_vm.pd.dma);
++	mmu_write(DTE_ADDR, dev->empty_vm->pd.dma);
+ 	err = lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
+ 				    mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
+ 	if (err)
+ 		return err;
+ 
+-	mmu->vm = &dev->empty_vm;
++	mmu->vm = dev->empty_vm;
++	spin_lock_init(&mmu->lock);
+ 
+ 	return 0;
+ }
+@@ -108,12 +109,18 @@ void lima_mmu_fini(struct lima_mmu *mmu)
+ 
+ }
+ 
+-void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm)
++void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset)
+ {
+ 	struct lima_device *dev = mmu->ip.dev;
+ 
+-	if (mmu->vm == vm)
+-		return;
++	spin_lock(&mmu->lock);
++
++	if (mmu->vm == vm) {
++		if (reset)
++			vm = dev->empty_vm;
++		else
++			goto out;
++	}
+ 
+ 	lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_STALL,
+ 			      mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE);
+@@ -123,4 +130,7 @@ void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm)
+ 	lima_mmu_send_command(LIMA_MMU_COMMAND_DISABLE_STALL,
+ 			      !(mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE));
+ 	mmu->vm = vm;
++
++out:
++	spin_unlock(&mmu->lock);
+ }
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index d33dc7b..885cdc6 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -52,7 +52,7 @@ struct lima_sched_task *lima_sched_task_create(struct lima_vm *vm, void *frame)
+ 	if (!task)
+ 		return ERR_PTR(-ENOMEM);
+ 
+-	task->vm = vm;
++	task->vm = lima_vm_get(vm);
+ 	task->frame = frame;
+ 
+ 	return task;
+@@ -74,6 +74,9 @@ void lima_sched_task_delete(struct lima_sched_task *task)
+ 	if (task->frame)
+ 		kfree(task->frame);
+ 
++	if (task->vm)
++		lima_vm_put(task->vm);
++
+ 	kfree(task);
+ }
+ 
+@@ -170,7 +173,7 @@ static int lima_sched_pipe_worker(void *param)
+ 			}
+ 		}
+ 
+-		lima_mmu_switch_vm(pipe->mmu, task->vm);
++		lima_mmu_switch_vm(pipe->mmu, task->vm, false);
+ 
+ 		if (!pipe->start_task(pipe->data, task)) {
+ 			while (dma_fence_wait(task->fence, true) == -ERESTARTSYS) {
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 06e8197..f1d9295 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -1,11 +1,8 @@
+-#include <drm/drmP.h>
++#include <linux/slab.h>
+ #include <linux/interval_tree.h>
+ #include <linux/dma-mapping.h>
+ 
+-#include "lima_vm.h"
+-
+-#define LIMA_PAGE_SIZE    4096
+-#define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
++#include "lima.h"
+ 
+ #define LIMA_PDE(va) (va >> 22)
+ #define LIMA_PTE(va) ((va << 10) >> 22)
+@@ -47,7 +44,7 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+ 
+ 	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
+ 	if (it) {
+-		dev_err(vm->dev, "lima vm map va overlap %x-%x %lx-%lx\n",
++		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %lx-%lx\n",
+ 			va, va + size -1, it->start, it->last);
+ 		err = -EINVAL;
+ 		goto err_out0;
+@@ -69,7 +66,7 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+ 
+ 		if (!vm->pts[pde].cpu) {
+ 			vm->pts[pde].cpu = dma_alloc_coherent(
+-				vm->dev, LIMA_PAGE_SIZE,
++				vm->dev->dev, LIMA_PAGE_SIZE,
+ 				&vm->pts[pde].dma, GFP_KERNEL);
+ 			if (!vm->pts[pde].cpu) {
+ 				err = -ENOMEM;
+@@ -109,7 +106,7 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
+ 	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
+ 	if (it) {
+ 		if (it->start != va || it->last != va + size - 1) {
+-			dev_err(vm->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
++			dev_err(vm->dev->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
+ 				va, va + size -1, it->start, it->last);
+ 			err = -EINVAL;
+ 			goto out;
+@@ -131,40 +128,46 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
+ 	return err;
+ }
+ 
+-int lima_vm_init(struct lima_vm *vm, struct device *dev, bool empty)
++struct lima_vm *lima_vm_create(struct lima_device *dev)
+ {
+-	int err;
++	struct lima_vm *vm;
++
++	vm = drm_calloc_large(1, sizeof(*vm));
++	if (!vm)
++		return NULL;
+ 
+ 	vm->dev = dev;
+ 	vm->va = RB_ROOT;
+ 	mutex_init(&vm->lock);
++	kref_init(&vm->refcount);
+ 
+-	vm->pd.cpu = dma_alloc_coherent(dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
++	vm->pd.cpu = dma_alloc_coherent(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
+ 	if (!vm->pd.cpu)
+-		return -ENOMEM;
++		goto err_out;
+ 	memset(vm->pd.cpu, 0, LIMA_PAGE_SIZE);
+ 
+-	if (!empty) {
+-		vm->pts = drm_calloc_large(LIMA_PAGE_ENT_NUM, sizeof(vm->pts[0]));
+-		if (!vm->pts) {
+-			err = -ENOMEM;
+-			goto err_out;
+-		}
+-	}
+-
+-	return 0;
++	return vm;
+ 
+ err_out:
+-	dma_free_coherent(dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
+-	return err;
++	drm_free_large(vm);
++	return NULL;
+ }
+ 
+-void lima_vm_fini(struct lima_vm *vm)
++void lima_vm_release(struct kref *kref)
+ {
++	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
+ 	struct interval_tree_node *it, *tmp;
++	struct lima_device *dev = vm->dev;
++	int i;
++
++	/* switch mmu vm to empty vm if this vm is used by it */
++	if (vm != dev->empty_vm) {
++		for (i = 0; i < dev->num_pipe; i++)
++			lima_mmu_switch_vm(dev->pipe[i]->mmu, vm, true);
++	}
+ 
+ 	if (!RB_EMPTY_ROOT(&vm->va)) {
+-		dev_err(vm->dev, "still active bo inside vm\n");
++		dev_err(vm->dev->dev, "still active bo inside vm\n");
+ 	}
+ 
+ 	rbtree_postorder_for_each_entry_safe(it, tmp, &vm->va, rb) {
+@@ -172,11 +175,10 @@ void lima_vm_fini(struct lima_vm *vm)
+ 		kfree(it);
+ 	}
+ 
+-	if (vm->pts)
+-		drm_free_large(vm->pts);
+-
+ 	if (vm->pd.cpu)
+-		dma_free_coherent(vm->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
++		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
++
++	drm_free_large(vm);
+ }
+ 
+ void lima_vm_print(struct lima_vm *vm)
+diff --git a/drivers/gpu/drm/lima/lima_vm.h b/drivers/gpu/drm/lima/lima_vm.h
+index 86e8860..2848e4b 100644
+--- a/drivers/gpu/drm/lima/lima_vm.h
++++ b/drivers/gpu/drm/lima/lima_vm.h
+@@ -24,7 +24,12 @@
+ 
+ #include <linux/mutex.h>
+ #include <linux/rbtree.h>
++#include <linux/kref.h>
+ 
++#define LIMA_PAGE_SIZE    4096
++#define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
++
++struct lima_device;
+ 
+ struct lima_vm_page {
+ 	u32 *cpu;
+@@ -33,18 +38,30 @@ struct lima_vm_page {
+ 
+ struct lima_vm {
+ 	struct mutex lock;
++	struct kref refcount;
+ 
+-	struct device *dev;
++	struct lima_device *dev;
+ 
+ 	/* tree of virtual addresses mapped */
+ 	struct rb_root va;
+ 
+         struct lima_vm_page pd;
+-	struct lima_vm_page *pts;
++	struct lima_vm_page pts[LIMA_PAGE_ENT_NUM];
+ };
+ 
+-int lima_vm_init(struct lima_vm *vm, struct device *dev, bool empty);
+-void lima_vm_fini(struct lima_vm *vm);
++struct lima_vm *lima_vm_create(struct lima_device *dev);
++void lima_vm_release(struct kref *kref);
++
++static inline struct lima_vm *lima_vm_get(struct lima_vm *vm)
++{
++	kref_get(&vm->refcount);
++	return vm;
++}
++
++static inline void lima_vm_put(struct lima_vm *vm)
++{
++	kref_put(&vm->refcount, lima_vm_release);
++}
+ 
+ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size);
+ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size);

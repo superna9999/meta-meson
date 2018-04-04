@@ -1,0 +1,28 @@
+From 0566f4bc8b40cc18df98152c8d01936892df5c56 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 20 Mar 2018 18:09:11 +0800
+Subject: [PATCH] arm/dts/sun8i-h3: set GPU clock frequency
+
+H3 GPU is able to work at <= 600MHz mclk, so instead of
+using the boot time 297MHz, set it to 576MHz in dts.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ arch/arm/boot/dts/sun8i-h3.dtsi | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm/boot/dts/sun8i-h3.dtsi b/arch/arm/boot/dts/sun8i-h3.dtsi
+index 11a6047..771f0ae 100644
+--- a/arch/arm/boot/dts/sun8i-h3.dtsi
++++ b/arch/arm/boot/dts/sun8i-h3.dtsi
+@@ -96,6 +96,10 @@
+ 			clocks = <&ccu CLK_BUS_GPU>, <&ccu CLK_GPU>;
+ 			clock-names = "bus", "core";
+ 			resets = <&ccu RST_BUS_GPU>;
++
++			assigned-clocks = <&ccu CLK_GPU>;
++			assigned-clock-parents = <0>;
++			assigned-clock-rates = <576000000>;
+ 		};
+ 	};
+ };

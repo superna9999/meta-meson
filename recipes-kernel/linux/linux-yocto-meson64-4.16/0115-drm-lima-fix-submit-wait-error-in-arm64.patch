@@ -1,0 +1,65 @@
+From 69af3835b3e1f6e78e0b396986c04e93daffc7e9 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 3 Apr 2018 19:01:54 +0800
+Subject: [PATCH] drm/lima: fix submit wait error in arm64
+
+This error is due to assigned long return value
+to int which may cause overflow in 64bit arch.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_gem.c   | 6 +++++-
+ drivers/gpu/drm/lima/lima_sched.c | 7 +++++--
+ 2 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 0a408df..9f5a539 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -530,7 +530,7 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
+ 	bool write = op & LIMA_GEM_WAIT_WRITE;
+ 	struct drm_gem_object *obj;
+ 	struct lima_bo *bo;
+-	int ret;
++	signed long ret;
+ 	unsigned long timeout;
+ 
+ 	obj = drm_gem_object_lookup(file, handle);
+@@ -540,6 +540,10 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
+ 	bo = to_lima_bo(obj);
+ 
+ 	timeout = timeout_ns ? lima_timeout_to_jiffies(timeout_ns) : 0;
++
++	/* must use long for result check because in 64bit arch int
++	 * will overflow if timeout is too large and get <0 result
++	 */
+ 	ret = reservation_object_wait_timeout_rcu(bo->resv, write, true, timeout);
+ 	if (ret == 0)
+ 		ret = timeout ? -ETIMEDOUT : -EBUSY;
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 630b628..5c3c80a 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -258,7 +258,7 @@ uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
+ int lima_sched_context_wait_fence(struct lima_sched_context *context,
+ 				  u32 fence, u64 timeout_ns)
+ {
+-	int ret;
++	signed long ret;
+ 	struct dma_fence *f = lima_sched_context_get_fence(context, fence);
+ 
+ 	if (IS_ERR(f))
+@@ -271,9 +271,12 @@ int lima_sched_context_wait_fence(struct lima_sched_context *context,
+ 	else {
+ 		unsigned long timeout = lima_timeout_to_jiffies(timeout_ns);
+ 
++		/* must use long for result check because in 64bit arch int
++		 * will overflow if timeout is too large and get <0 result
++		 */
+ 		ret = dma_fence_wait_timeout(f, true, timeout);
+ 		if (ret == 0)
+-			ret = -ETIMEDOUT;
++			ret = timeout ? -ETIMEDOUT : -EBUSY;
+ 		else if (ret > 0)
+ 			ret = 0;
+ 	}

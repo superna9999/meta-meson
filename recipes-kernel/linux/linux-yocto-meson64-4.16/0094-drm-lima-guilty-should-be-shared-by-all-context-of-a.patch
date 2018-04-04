@@ -1,0 +1,83 @@
+From d1a4207c6b4321f349a886f27d37f4298fb14058 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 8 Feb 2018 20:44:05 +0800
+Subject: [PATCH] drm/lima: guilty should be shared by all context of a fd
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h       | 1 +
+ drivers/gpu/drm/lima/lima_drv.c   | 2 +-
+ drivers/gpu/drm/lima/lima_sched.c | 5 +++--
+ drivers/gpu/drm/lima/lima_sched.h | 4 ++--
+ 4 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index ee11b45..621d69d 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -126,6 +126,7 @@ struct lima_device {
+ struct lima_drm_priv {
+ 	struct lima_vm *vm;
+ 	struct lima_sched_context context[LIMA_MAX_PIPE];
++	atomic_t guilty;
+ };
+ 
+ struct lima_bo_va_mapping {
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 90bfc94..800ebf6 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -158,7 +158,7 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
+ 	}
+ 
+ 	for (i = 0; i < LIMA_MAX_PIPE; i++) {
+-		err = lima_sched_context_init(ldev->pipe[i], priv->context + i);
++		err = lima_sched_context_init(ldev->pipe[i], priv->context + i, &priv->guilty);
+ 		if (err)
+ 			goto err_out1;
+ 	}
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index fb76f81..f1354bf 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -179,7 +179,8 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
+ }
+ 
+ int lima_sched_context_init(struct lima_sched_pipe *pipe,
+-			    struct lima_sched_context *context)
++			    struct lima_sched_context *context,
++			    atomic_t *guilty)
+ {
+ 	struct drm_sched_rq *rq = pipe->base.sched_rq + DRM_SCHED_PRIORITY_NORMAL;
+ 	int err;
+@@ -191,7 +192,7 @@ int lima_sched_context_init(struct lima_sched_pipe *pipe,
+ 
+ 	spin_lock_init(&context->lock);
+ 	err = drm_sched_entity_init(&pipe->base, &context->base, rq,
+-				    lima_sched_max_tasks, &context->guilty);
++				    lima_sched_max_tasks, guilty);
+ 	if (err) {
+ 		kfree(context->fences);
+ 		context->fences = NULL;
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index d768fd0..0241aa1 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -43,7 +43,6 @@ struct lima_sched_context {
+ 	spinlock_t lock;
+ 	struct dma_fence **fences;
+ 	uint32_t sequence;
+-	atomic_t guilty;
+ };
+ 
+ #define LIMA_SCHED_PIPE_MAX_MMU 4
+@@ -75,7 +74,8 @@ void lima_sched_task_delete(struct lima_sched_task *task);
+ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
+ 
+ int lima_sched_context_init(struct lima_sched_pipe *pipe,
+-			    struct lima_sched_context *context);
++			    struct lima_sched_context *context,
++			    atomic_t *guilty);
+ void lima_sched_context_fini(struct lima_sched_pipe *pipe,
+ 			     struct lima_sched_context *context);
+ uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,

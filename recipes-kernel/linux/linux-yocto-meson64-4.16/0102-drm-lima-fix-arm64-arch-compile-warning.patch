@@ -1,0 +1,29 @@
+From b9799bcb1a66674361856cbbe06fe803cfad3b8f Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 13 Mar 2018 17:22:00 +0800
+Subject: [PATCH] drm/lima: fix arm64 arch compile warning
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_vm.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 6284f82..c65acbf 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -210,10 +210,12 @@ void lima_vm_print(struct lima_vm *vm)
+ 		if (vm->pd.cpu[i]) {
+ 			printk(KERN_INFO "lima vm pd %03x:%08x\n", i, vm->pd.cpu[i]);
+ 			if ((vm->pd.cpu[i] & ~LIMA_VM_FLAG_MASK) != vm->pts[i].dma)
+-				printk(KERN_INFO "pd %x not match pt %x\n", i, vm->pts[i].dma);
++				printk(KERN_INFO "pd %x not match pt %x\n",
++				       i, (u32)vm->pts[i].dma);
+ 			for (j = 0; j < LIMA_PAGE_ENT_NUM; j++) {
+ 				if (vm->pts[i].cpu[j])
+-					printk(KERN_INFO "  pt %03x:%08x\n", j, vm->pts[i].cpu[j]);
++					printk(KERN_INFO "  pt %03x:%08x\n",
++					       j, vm->pts[i].cpu[j]);
+ 			}
+ 		}
+ 	}

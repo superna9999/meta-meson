@@ -1,0 +1,27 @@
+From c55f774147f74b6446d96e8ff5bfab5782ad4721 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 25 Jun 2017 11:38:52 +0800
+Subject: [PATCH] drm/lima: fix memory leak when release vm
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_vm.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index a396765..a6b7311 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -187,6 +187,12 @@ void lima_vm_release(struct kref *kref)
+ 		kfree(it);
+ 	}
+ 
++	for (i = 0; i < LIMA_PAGE_ENT_NUM; i++) {
++		if (vm->pts[i].cpu)
++			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
++					  vm->pts[i].cpu, vm->pts[i].dma);
++	}
++
+ 	if (vm->pd.cpu)
+ 		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
+ 

@@ -1,0 +1,23 @@
+From 5d20724a14e7987adc85bed11f01f909dfff00c7 Mon Sep 17 00:00:00 2001
+From: Simon Shields <simon@lineageos.org>
+Date: Sat, 13 Jan 2018 13:28:25 +1100
+Subject: [PATCH] drm: lima: also allow on ARCH_EXYNOS
+
+Signed-off-by: Simon Shields <simon@lineageos.org>
+---
+ drivers/gpu/drm/lima/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/lima/Kconfig b/drivers/gpu/drm/lima/Kconfig
+index 772b417..03501ce 100644
+--- a/drivers/gpu/drm/lima/Kconfig
++++ b/drivers/gpu/drm/lima/Kconfig
+@@ -2,7 +2,7 @@
+ config DRM_LIMA
+        tristate "LIMA (DRM support for ARM Mali 400 GPU)"
+        depends on DRM
+-       depends on ARCH_SUNXI || ARCH_ROCKCHIP
++       depends on ARCH_SUNXI || ARCH_ROCKCHIP || ARCH_EXYNOS
+        select INTERVAL_TREE
+        help
+          DRM driver for ARM Mali 400 GPUs.

@@ -1,0 +1,251 @@
+From b5177a28ddae42a3eee65784330b1d59a45b70d2 Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Fri, 8 Dec 2017 16:04:46 +0100
+Subject: [PATCH] drm/lima: add basic support for Mali-450
+
+Mali-450 is a bit different compared to Mali-400.
+Not only does it support up to 8 PPs grouped into 2 groups but also
+uses separate L2 caches for GP, PP0-3 and PP4-7.
+
+Additionally it also provides some new components like a broadcast
+unit, a load balancer and dma block.
+
+This only supports the Mali-450 in a trimmed down variant using the
+separate caches but limiting the PPs to the first group and thus a
+maximum of 4 PPs and ignoring the other blocks for now.
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+---
+ drivers/gpu/drm/lima/lima.h        |  3 ++
+ drivers/gpu/drm/lima/lima_device.c | 76 ++++++++++++++++++++++++++++++--------
+ drivers/gpu/drm/lima/lima_drv.c    |  6 +++
+ drivers/gpu/drm/lima/lima_sched.c  |  7 +++-
+ include/uapi/drm/lima_drm.h        |  1 +
+ 5 files changed, 76 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index a7240c0..81a0cf6 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -29,6 +29,7 @@
+ 
+ enum lima_gpu_type {
+ 	GPU_MALI400 = 0,
++	GPU_MALI450,
+ };
+ 
+ struct lima_device;
+@@ -66,6 +67,7 @@ struct lima_gp {
+ 	struct lima_ip ip;
+ 	struct lima_mmu mmu;
+ 	struct lima_sched_pipe pipe;
++	struct lima_l2_cache *l2_cache;
+ 
+ 	int task;
+ 	bool async_reset;
+@@ -83,6 +85,7 @@ struct lima_pp {
+ 	struct lima_pp_core core[LIMA_MAX_PP];
+ 	int num_core;
+ 	struct lima_sched_pipe pipe;
++	struct lima_l2_cache *l2_cache;
+ 	atomic_t task;
+ };
+ 
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index b153afd..797fb8d 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -106,27 +106,46 @@ static int lima_gp_group_init(struct lima_device *dev)
+ 	if (!gp)
+ 		return -ENOMEM;
+ 
++	/* Init GP-group L2 cache on Mali450 */
++	if (dev->gpu_type == GPU_MALI450) {
++		gp->l2_cache = kzalloc(sizeof(*gp->l2_cache), GFP_KERNEL);
++		if (!gp->l2_cache) {
++			err = -ENOMEM;
++			goto err_out0;
++		}
++		gp->l2_cache->ip.irq = -1;
++		if ((err = lima_init_ip(dev, "gp-l2-cache", &gp->l2_cache->ip, LIMA450_GPL2_BASE)) ||
++		    (err = lima_l2_cache_init(gp->l2_cache))) {
++			goto err_out1;
++		}
++	}
++
+ 	if ((err = lima_init_ip(dev, "gpmmu", &gp->mmu.ip, LIMA_GPMMU_BASE)) ||
+ 	    (err = lima_mmu_init(&gp->mmu)))
+-		goto err_out0;
++		goto err_out1;
+ 
+ 	if ((err = lima_init_ip(dev, "gp", &gp->ip, LIMA_GP_BASE)) ||
+ 	    (err = lima_gp_init(gp)))
+-		goto err_out1;
++		goto err_out2;
+ 
+ 	if ((err = lima_sched_pipe_init(&gp->pipe, gp->ip.name)))
+-		goto err_out2;
++		goto err_out3;
+ 
+ 	dev->pipe[LIMA_PIPE_GP] = &gp->pipe;
+ 	gp->mmu.pipe = &gp->pipe;
+ 	dev->gp = gp;
+ 	return 0;
+ 
+-err_out2:
++err_out3:
+ 	lima_gp_fini(gp);
+-err_out1:
++err_out2:
+ 	lima_mmu_fini(&gp->mmu);
++err_out1:
++	if (gp->l2_cache)
++		lima_l2_cache_fini(gp->l2_cache);
+ err_out0:
++	if (gp->l2_cache)
++		kfree(gp->l2_cache);
+ 	kfree(gp);
+ 	return err;
+ }
+@@ -142,6 +161,17 @@ static int lima_pp_group_init(struct lima_device *dev)
+ 		return -ENOMEM;
+ 	dev->pp = pp;
+ 
++	/* Init PP-group L2 cache on Mali450 */
++	if (dev->gpu_type == GPU_MALI450) {
++		pp->l2_cache = kzalloc(sizeof(*pp->l2_cache), GFP_KERNEL);
++		if (!pp->l2_cache)
++			return -ENOMEM;
++		pp->l2_cache->ip.irq = -1;
++		if ((err = lima_init_ip(dev, "pp-l2-cache", &pp->l2_cache->ip, LIMA450_PP03L2_BASE)) ||
++		    (err = lima_l2_cache_init(pp->l2_cache)))
++			return err;
++	}
++
+ 	for (i = 0; i < dev->num_pp; i++) {
+ 		struct lima_pp_core *core = pp->core + pp->num_core;
+ 
+@@ -233,17 +263,19 @@ int lima_device_init(struct lima_device *ldev)
+ 		ldev->pmu = NULL;
+ 	}
+ 
+-	ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
+-	if (!ldev->l2_cache) {
+-		err = -ENOMEM;
+-		goto err_out;
+-	}
+-	ldev->l2_cache->ip.irq = -1;
+-	if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip, LIMA_L2_BASE)) ||
+-	    (err = lima_l2_cache_init(ldev->l2_cache))) {
+-		kfree(ldev->l2_cache);
+-		ldev->l2_cache = NULL;
+-		goto err_out;
++	if (ldev->gpu_type != GPU_MALI450) {
++		ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
++		if (!ldev->l2_cache) {
++			err = -ENOMEM;
++			goto err_out;
++		}
++		ldev->l2_cache->ip.irq = -1;
++		if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip, LIMA_L2_BASE)) ||
++		    (err = lima_l2_cache_init(ldev->l2_cache))) {
++			kfree(ldev->l2_cache);
++			ldev->l2_cache = NULL;
++			goto err_out;
++		}
+ 	}
+ 
+ 	if ((err = lima_gp_group_init(ldev)))
+@@ -273,12 +305,24 @@ void lima_device_fini(struct lima_device *ldev)
+ 			lima_pp_core_fini(ldev->pp->core + i);
+ 			lima_mmu_fini(&ldev->pp->core[i].mmu);
+ 		}
++
++		if (ldev->pp->l2_cache) {
++			lima_l2_cache_fini(ldev->pp->l2_cache);
++			kfree(ldev->pp->l2_cache);
++		}
++
+ 		kfree(ldev->pp);
+ 	}
+ 
+ 	if (ldev->gp) {
+ 		lima_gp_fini(ldev->gp);
+ 		lima_mmu_fini(&ldev->gp->mmu);
++
++		if (ldev->gp->l2_cache) {
++			lima_l2_cache_fini(ldev->gp->l2_cache);
++			kfree(ldev->gp->l2_cache);
++		}
++
+ 		kfree(ldev->gp);
+ 	}
+ 
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 50fd078..7e15b3d 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -19,6 +19,9 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
+ 	case GPU_MALI400:
+ 		info->gpu_id = LIMA_INFO_GPU_MALI400;
+ 		break;
++	case GPU_MALI450:
++		info->gpu_id = LIMA_INFO_GPU_MALI450;
++		break;
+ 	default:
+ 		return -ENODEV;
+ 	}
+@@ -70,6 +73,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 
+ 	switch (ldev->gpu_type) {
+ 	case GPU_MALI400:
++	case GPU_MALI450:
+ 		if (args->pipe == LIMA_PIPE_GP) {
+ 			if (args->frame_size != sizeof(struct drm_lima_m400_gp_frame))
+ 				return -EINVAL;
+@@ -103,6 +107,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 
+ 	switch (ldev->gpu_type) {
+ 	case GPU_MALI400:
++	case GPU_MALI450:
+ 		if (args->pipe == LIMA_PIPE_PP) {
+ 			struct drm_lima_m400_pp_frame *f = frame;
+ 			if (f->num_pp > ldev->pp->num_core) {
+@@ -283,6 +288,7 @@ static int lima_pdev_remove(struct platform_device *pdev)
+ 
+ static const struct of_device_id dt_match[] = {
+ 	{ .compatible = "arm,mali-400", .data = (void *)GPU_MALI400 },
++	{ .compatible = "arm,mali-450", .data = (void *)GPU_MALI450 },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, dt_match);
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index dc5b11f..7995f51 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -243,7 +243,12 @@ static int lima_sched_pipe_worker(void *param)
+ 		 * 3. can we reduce the calling of this function because all
+ 		 *    GP/PP use the same L2 cache
+ 		 */
+-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
++		if (pipe->mmu[0]->ip.dev->gpu_type == GPU_MALI450) {
++			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->gp->l2_cache);
++			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->pp->l2_cache);
++		} else {
++			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
++		}
+ 
+ 		for (i = 0; i < pipe->num_mmu; i++)
+ 			lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index 917431d..45fcd26 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -29,6 +29,7 @@ extern "C" {
+ #endif
+ 
+ #define LIMA_INFO_GPU_MALI400 0x00
++#define LIMA_INFO_GPU_MALI450 0x01
+ 
+ struct drm_lima_info {
+ 	__u32 gpu_id;  /* out */

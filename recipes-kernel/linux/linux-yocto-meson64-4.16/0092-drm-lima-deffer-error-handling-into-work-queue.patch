@@ -1,0 +1,71 @@
+From d8b5dcab6fd3c17f7ccfa34d217f6eba0e1b0fe4 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 8 Feb 2018 16:56:41 +0800
+Subject: [PATCH] drm/lima: deffer error handling into work queue
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_sched.c | 20 ++++++++++++++------
+ drivers/gpu/drm/lima/lima_sched.h |  2 ++
+ 2 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index f485554..c8ebaea 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -376,6 +376,15 @@ const struct drm_sched_backend_ops lima_sched_ops = {
+ 	.free_job = lima_sched_free_job,
+ };
+ 
++static void lima_sched_error_work(struct work_struct *work)
++{
++	struct lima_sched_pipe *pipe =
++		container_of(work, struct lima_sched_pipe, error_work);
++	struct lima_sched_task *task = pipe->current_task;
++
++	lima_sched_handle_error_task(pipe, task);
++}
++
+ int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
+ {
+ 	long timeout;
+@@ -388,6 +397,8 @@ int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
+ 	pipe->fence_context = dma_fence_context_alloc(1);
+ 	spin_lock_init(&pipe->fence_lock);
+ 
++	INIT_WORK(&pipe->error_work, lima_sched_error_work);
++
+ 	return drm_sched_init(&pipe->base, &lima_sched_ops, 1, 0, timeout, name);
+ }
+ 
+@@ -419,14 +430,11 @@ unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
+ 
+ void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
+ {
+-	struct lima_sched_task *task = pipe->current_task;
+-
+-	if (!task)
+-		return;
+-
+ 	if (error)
+-	        lima_sched_handle_error_task(pipe, task);
++	        schedule_work(&pipe->error_work);
+ 	else {
++		struct lima_sched_task *task = pipe->current_task;
++
+ 		pipe->task_fini(pipe->data);
+ 		dma_fence_signal(task->fence);
+ 	}
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index 97fed62..ea83ca1 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -65,6 +65,8 @@ struct lima_sched_pipe {
+ 	void (*task_error)(void *data);
+ 	void (*task_mmu_error)(void *data);
+ 	void *data;
++
++	struct work_struct error_work;
+ };
+ 
+ struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *context,

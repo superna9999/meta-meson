@@ -1,0 +1,27 @@
+From 9fb64e38e61363fa934ec3c2689d95dd76f1693a Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 4 Sep 2017 16:00:08 +0800
+Subject: [PATCH] drm/lima: fix lima_device.c compile warning
+
+declare pp_name strings to be allocated locally to avoid
+writing to read only memory.
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+Reviewed-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_device.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index efc7ae3..194c301 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -127,7 +127,7 @@ static int lima_pp_group_init(struct lima_device *dev, int n)
+ {
+ 	int err, i;
+ 	struct lima_pp *pp;
+-	char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
++	char pp_name[] = "pp0", pp_mmu_name[] = "pp0-mmu";
+ 
+ 	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
+ 	if (!pp)

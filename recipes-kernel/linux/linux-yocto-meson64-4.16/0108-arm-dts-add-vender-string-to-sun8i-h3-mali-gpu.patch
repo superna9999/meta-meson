@@ -1,0 +1,23 @@
+From c4b6ec91adb4af6dfc5fc7ca110f9cf929c00ecc Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 21 Mar 2018 15:48:47 +0800
+Subject: [PATCH] arm/dts: add vender string to sun8i h3 mali gpu
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ arch/arm/boot/dts/sun8i-h3.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/sun8i-h3.dtsi b/arch/arm/boot/dts/sun8i-h3.dtsi
+index 771f0ae..b54e88c 100644
+--- a/arch/arm/boot/dts/sun8i-h3.dtsi
++++ b/arch/arm/boot/dts/sun8i-h3.dtsi
+@@ -82,7 +82,7 @@
+ 
+ 	soc {
+ 		gpu@01c40000 {
+-			compatible = "arm,mali-400";
++			compatible = "allwinner,sun8i-h3-mali", "arm,mali-400";
+ 			reg = <0x01c40000 0x10000>;
+ 			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>,
+ 					   <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>,

@@ -1,0 +1,23 @@
+From e8ccc28b0130457f87f3e87d849675e82ecba8f8 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 21 Mar 2018 15:52:32 +0800
+Subject: [PATCH] arm/dts: add vender string to sun7i a20 mali gpu
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ arch/arm/boot/dts/sun7i-a20.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/sun7i-a20.dtsi b/arch/arm/boot/dts/sun7i-a20.dtsi
+index 3edea27..d3932ee 100644
+--- a/arch/arm/boot/dts/sun7i-a20.dtsi
++++ b/arch/arm/boot/dts/sun7i-a20.dtsi
+@@ -307,7 +307,7 @@
+ 		};
+ 
+ 		gpu: gpu@01c40000 {
+-			compatible = "arm,mali-400";
++			compatible = "allwinner,sun7i-a20-mali", "arm,mali-400";
+ 			reg = <0x01c40000 0x10000>;
+ 			interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>,
+ 					   <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>,

@@ -1,0 +1,139 @@
+From f2f0c0683db40599264a2f19fe0c373a04adacf9 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 11 Jun 2017 15:48:56 +0800
+Subject: [PATCH] drm/lima: add DRM_LIMA_GEM_WAIT ioctl
+
+For CPU to wait GPU ops finish before access.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h       |  3 +++
+ drivers/gpu/drm/lima/lima_drv.c   | 11 +++++++++++
+ drivers/gpu/drm/lima/lima_gem.c   | 25 +++++++++++++++++++++++++
+ drivers/gpu/drm/lima/lima_sched.c |  2 +-
+ include/uapi/drm/lima_drm.h       | 11 +++++++++++
+ 5 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 262fd4e..6d99e94 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -145,5 +145,8 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
+ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
+ 		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
+ 		    void *frame, u32 *fence);
++int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
++
++unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
+ 
+ #endif
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 347eb83..b8625fa 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -134,6 +134,16 @@ static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_
+ 	return lima_sched_pipe_wait_fence(ldev->pipe[args->pipe], args->fence, args->timeout_ns);
+ }
+ 
++static int lima_ioctl_gem_wait(struct drm_device *dev, void *data, struct drm_file *file)
++{
++	struct drm_lima_gem_wait *args = data;
++
++	if (!(args->op & (LIMA_GEM_WAIT_READ|LIMA_GEM_WAIT_WRITE)))
++	    return -EINVAL;
++
++	return lima_gem_wait(file, args->handle, args->op, args->timeout_ns);
++}
++
+ static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
+ {
+ 	struct lima_device *ldev;
+@@ -209,6 +219,7 @@ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
+ 	DRM_IOCTL_DEF_DRV(LIMA_GEM_VA, lima_ioctl_gem_va, DRM_AUTH|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(LIMA_GEM_SUBMIT, lima_ioctl_gem_submit, DRM_AUTH|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(LIMA_WAIT_FENCE, lima_ioctl_wait_fence, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(LIMA_GEM_WAIT, lima_ioctl_gem_wait, DRM_AUTH|DRM_RENDER_ALLOW),
+ };
+ 
+ extern const struct vm_operations_struct lima_gem_vm_ops;
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 2372c59..f56a8bf 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -400,3 +400,28 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
+ 	kfree(lbos);
+ 	return err;
+ }
++
++int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
++{
++	bool write = op & LIMA_GEM_WAIT_WRITE;
++	struct drm_gem_object *obj;
++	struct lima_bo *bo;
++	int ret;
++	unsigned long timeout;
++
++	obj = drm_gem_object_lookup(file, handle);
++	if (!obj)
++		return -ENOENT;
++
++	bo = to_lima_bo(obj);
++
++	timeout = timeout_ns ? lima_timeout_to_jiffies(timeout_ns) : 0;
++	ret = reservation_object_wait_timeout_rcu(&bo->resv, write, true, timeout);
++	if (ret == 0)
++		ret = timeout ? -ETIMEDOUT : -EBUSY;
++	else if (ret > 0)
++		ret = 0;
++
++	drm_gem_object_unreference_unlocked(obj);
++	return ret;
++}
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 2d92ee2..aad6ba3 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -297,7 +297,7 @@ void lima_sched_pipe_fini(struct lima_sched_pipe *pipe)
+ 	}
+ }
+ 
+-static unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
++unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
+ {
+ 	unsigned long timeout_jiffies;
+ 	ktime_t timeout;
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index 7546a2b..917431d 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -144,12 +144,22 @@ struct drm_lima_wait_fence {
+ 	__u64 timeout_ns;  /* in */
+ };
+ 
++#define LIMA_GEM_WAIT_READ   0x01
++#define LIMA_GEM_WAIT_WRITE  0x02
++
++struct drm_lima_gem_wait {
++	__u32 handle;      /* in */
++	__u32 op;          /* in */
++	__u64 timeout_ns;  /* in */
++};
++
+ #define DRM_LIMA_INFO        0x00
+ #define DRM_LIMA_GEM_CREATE  0x01
+ #define DRM_LIMA_GEM_INFO    0x02
+ #define DRM_LIMA_GEM_VA      0x03
+ #define DRM_LIMA_GEM_SUBMIT  0x04
+ #define DRM_LIMA_WAIT_FENCE  0x05
++#define DRM_LIMA_GEM_WAIT    0x06
+ 
+ #define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
+ #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
+@@ -157,6 +167,7 @@ struct drm_lima_wait_fence {
+ #define DRM_IOCTL_LIMA_GEM_VA DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_VA, struct drm_lima_gem_va)
+ #define DRM_IOCTL_LIMA_GEM_SUBMIT DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_SUBMIT, struct drm_lima_gem_submit)
+ #define DRM_IOCTL_LIMA_WAIT_FENCE DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_WAIT_FENCE, struct drm_lima_wait_fence)
++#define DRM_IOCTL_LIMA_GEM_WAIT DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_WAIT, struct drm_lima_gem_wait)
+ 
+ #if defined(__cplusplus)
+ }
