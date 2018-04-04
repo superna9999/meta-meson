@@ -1,0 +1,31 @@
+From ee04d85889d4162b0a13ce5b193973b458a73897 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 25 Jun 2017 15:53:17 +0800
+Subject: [PATCH] drm/lima: mask reference count when free page table
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_vm.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 8de42df..008391e 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -207,13 +207,14 @@ void lima_vm_release(struct kref *kref)
+ 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
+ 		if (vm->pts[i].cpu) {
+ 			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
+-					  vm->pts[i].cpu, vm->pts[i].dma);
++					  vm->pts[i].cpu, vm->pts[i].dma & ~LIMA_PAGE_MASK);
+ 			vm->pd.dma--;
+ 		}
+ 	}
+ 
+ 	if (vm->pd.cpu)
+-		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
++		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
++				  vm->pd.dma & ~LIMA_PAGE_MASK);
+ 
+ 	drm_free_large(vm);
+ }

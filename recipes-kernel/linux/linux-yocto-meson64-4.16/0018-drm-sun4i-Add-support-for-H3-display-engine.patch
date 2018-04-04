@@ -1,0 +1,25 @@
+From 019a554d7450ddb2cdfcfcd2c10bf16d67eaef8e Mon Sep 17 00:00:00 2001
+From: Jernej Skrabec <jernej.skrabec@siol.net>
+Date: Sun, 14 Jan 2018 12:16:31 +0100
+Subject: [PATCH] drm/sun4i: Add support for H3 display engine
+
+H3 display engine has two mixers which are connected to HDMI and TV
+output.
+
+Signed-off-by: Jernej Skrabec <jernej.skrabec@siol.net>
+---
+ drivers/gpu/drm/sun4i/sun4i_drv.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/gpu/drm/sun4i/sun4i_drv.c b/drivers/gpu/drm/sun4i/sun4i_drv.c
+index d9a71f3..31e6e20 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_drv.c
++++ b/drivers/gpu/drm/sun4i/sun4i_drv.c
+@@ -339,6 +339,7 @@ static const struct of_device_id sun4i_drv_of_table[] = {
+ 	{ .compatible = "allwinner,sun7i-a20-display-engine" },
+ 	{ .compatible = "allwinner,sun8i-a33-display-engine" },
+ 	{ .compatible = "allwinner,sun8i-a83t-display-engine" },
++	{ .compatible = "allwinner,sun8i-h3-display-engine" },
+ 	{ .compatible = "allwinner,sun8i-v3s-display-engine" },
+ 	{ }
+ };

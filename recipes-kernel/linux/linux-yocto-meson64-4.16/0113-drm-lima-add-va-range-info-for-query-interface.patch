@@ -1,0 +1,85 @@
+From ce64cb086ba2bb99a71736aebbf1ebfcb49d0548 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 28 Mar 2018 20:52:35 +0800
+Subject: [PATCH] drm/lima: add va range info for query interface
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h        | 2 ++
+ drivers/gpu/drm/lima/lima_device.c | 2 ++
+ drivers/gpu/drm/lima/lima_drv.c    | 2 ++
+ drivers/gpu/drm/lima/lima_gem.c    | 4 ++--
+ include/uapi/drm/lima_drm.h        | 6 ++++--
+ 5 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index f380ba0..df43384 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -133,6 +133,8 @@ struct lima_device {
+ 	struct lima_bcast *bcast;
+ 
+ 	struct lima_vm *empty_vm;
++	uint64_t va_start;
++	uint64_t va_end;
+ };
+ 
+ struct lima_ctx {
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index 4c4bec4..f57b989 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -271,6 +271,8 @@ int lima_device_init(struct lima_device *ldev)
+ 		err = -ENOMEM;
+ 		goto err_out;
+ 	}
++	ldev->va_start = 0;
++	ldev->va_end = 0x100000000;
+ 
+ 	res = platform_get_resource(ldev->pdev, IORESOURCE_MEM, 0);
+ 	ldev->iomem = devm_ioremap_resource(ldev->dev, res);
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 21feb89..e4653f4 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -38,6 +38,8 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
+ 		return -ENODEV;
+ 	}
+ 	info->num_pp = ldev->pp->num_core;
++	info->va_start = ldev->va_start;
++	info->va_end = ldev->va_end;
+ 	return 0;
+ }
+ 
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index cbe9453..0a408df 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -310,8 +310,8 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 
+ 	bo = to_lima_bo(obj);
+ 
+-	/* overflow */
+-	if (va + obj->size < va) {
++	/* carefully handle overflow when calculate range */
++	if (va < vm->dev->va_start || vm->dev->va_end - obj->size < va) {
+ 		err = -EINVAL;
+ 		goto err_out0;
+ 	}
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index 6dfd8b4..56fc019 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -32,8 +32,10 @@ extern "C" {
+ #define LIMA_INFO_GPU_MALI450 0x01
+ 
+ struct drm_lima_info {
+-	__u32 gpu_id;  /* out */
+-	__u32 num_pp;  /* out */
++	__u32 gpu_id;   /* out */
++	__u32 num_pp;   /* out */
++	__u64 va_start; /* out */
++	__u64 va_end;   /* out */
+ };
+ 
+ struct drm_lima_gem_create {

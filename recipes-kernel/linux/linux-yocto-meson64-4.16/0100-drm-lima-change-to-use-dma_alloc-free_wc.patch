@@ -1,0 +1,43 @@
+From ca5306dbb12bba86ec1b9335c458446ce8eca5d5 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 11 Mar 2018 19:05:00 +0800
+Subject: [PATCH] drm/lima: change to use dma_alloc/free_wc
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_vm.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 1abbcaf..6284f82 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -152,7 +152,7 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
+ 	mutex_init(&vm->lock);
+ 	kref_init(&vm->refcount);
+ 
+-	vm->pd.cpu = dma_alloc_coherent(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
++	vm->pd.cpu = dma_alloc_wc(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
+ 	if (!vm->pd.cpu)
+ 		goto err_out;
+ 	memset(vm->pd.cpu, 0, LIMA_PAGE_SIZE);
+@@ -183,15 +183,15 @@ void lima_vm_release(struct kref *kref)
+ 
+ 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
+ 		if (vm->pts[i].cpu) {
+-			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
+-					  vm->pts[i].cpu, vm->pts[i].dma & ~LIMA_PAGE_MASK);
++			dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE,
++				    vm->pts[i].cpu, vm->pts[i].dma & ~LIMA_PAGE_MASK);
+ 			vm->pd.dma--;
+ 		}
+ 	}
+ 
+ 	if (vm->pd.cpu)
+-		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
+-				  vm->pd.dma & ~LIMA_PAGE_MASK);
++		dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
++			    vm->pd.dma & ~LIMA_PAGE_MASK);
+ 
+ 	kvfree(vm);
+ }

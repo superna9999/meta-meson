@@ -1,0 +1,27 @@
+From 154cf148b9d0998740780696fc5ae984a24ddf9e Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Tue, 4 Jul 2017 22:08:34 +0200
+Subject: [PATCH] drm/lima: also allow on ARCH_ROCKCHIP
+
+Rockchip socs also can use this driver, so add it to allowed
+architectures.
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+Reviewed-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/lima/Kconfig b/drivers/gpu/drm/lima/Kconfig
+index f238362..772b417 100644
+--- a/drivers/gpu/drm/lima/Kconfig
++++ b/drivers/gpu/drm/lima/Kconfig
+@@ -2,7 +2,7 @@
+ config DRM_LIMA
+        tristate "LIMA (DRM support for ARM Mali 400 GPU)"
+        depends on DRM
+-       depends on ARCH_SUNXI
++       depends on ARCH_SUNXI || ARCH_ROCKCHIP
+        select INTERVAL_TREE
+        help
+          DRM driver for ARM Mali 400 GPUs.

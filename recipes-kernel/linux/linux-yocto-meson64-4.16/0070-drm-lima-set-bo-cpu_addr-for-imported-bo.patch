@@ -1,0 +1,30 @@
+From 073c5cba6b29c41a88a847a820982a50f7412955 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 11 Oct 2017 10:34:35 +0800
+Subject: [PATCH] drm/lima: set bo->cpu_addr for imported bo
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_gem.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 2158331..440d4b4 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -441,13 +441,13 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
+ 						      struct sg_table *sgt)
+ {
+ 	struct lima_bo *bo;
+-	dma_addr_t dma_addr = sg_dma_address(sgt->sgl);
+ 
+ 	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
+ 	if (!bo)
+ 		return ERR_PTR(-ENOMEM);
+ 
+-	bo->dma_addr = dma_addr;
++	bo->cpu_addr = sg_virt(sgt->sgl);
++	bo->dma_addr = sg_dma_address(sgt->sgl);
+ 	bo->resv = attach->dmabuf->resv;
+ 
+ 	return &bo->gem;

@@ -1,0 +1,456 @@
+From 7549e3e04998bc32d3a9d1c7b68434200402e3e3 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 29 Mar 2017 18:15:44 +0800
+Subject: [PATCH] drm/lima: add gpu per-ip init/fini framework
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/Makefile        |   7 +-
+ drivers/gpu/drm/lima/lima.h          |  67 ++++++++++-
+ drivers/gpu/drm/lima/lima_device.c   | 217 ++++++++++++++++++++++++++++++++++-
+ drivers/gpu/drm/lima/lima_gp.c       |  11 ++
+ drivers/gpu/drm/lima/lima_l2_cache.c |  11 ++
+ drivers/gpu/drm/lima/lima_mmu.c      |  11 ++
+ drivers/gpu/drm/lima/lima_pmu.c      |  11 ++
+ drivers/gpu/drm/lima/lima_pp.c       |  11 ++
+ 8 files changed, 342 insertions(+), 4 deletions(-)
+ create mode 100644 drivers/gpu/drm/lima/lima_gp.c
+ create mode 100644 drivers/gpu/drm/lima/lima_l2_cache.c
+ create mode 100644 drivers/gpu/drm/lima/lima_mmu.c
+ create mode 100644 drivers/gpu/drm/lima/lima_pmu.c
+ create mode 100644 drivers/gpu/drm/lima/lima_pp.c
+
+diff --git a/drivers/gpu/drm/lima/Makefile b/drivers/gpu/drm/lima/Makefile
+index 911d7a6..9dd7b58 100644
+--- a/drivers/gpu/drm/lima/Makefile
++++ b/drivers/gpu/drm/lima/Makefile
+@@ -1,5 +1,10 @@
+ lima-y := \
+ 	lima_drv.o \
+-	lima_device.o
++	lima_device.o \
++	lima_pmu.o \
++	lima_l2_cache.o \
++	lima_mmu.o \
++	lima_gp.o \
++	lima_pp.o
+ 
+ obj-$(CONFIG_DRM_LIMA) += lima.o
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 5ac7ba3b..fa808ef 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -27,16 +27,81 @@ enum lima_gpu_type {
+ 	GPU_MALI400 = 0,
+ };
+ 
++struct lima_device;
++
++#define LIMA_IP_MAX_NAME_LEN 32
++
++struct lima_ip {
++	struct lima_device *dev;
++	char name[LIMA_IP_MAX_NAME_LEN];
++	void __iomem *iomem;
++	int irq;
++};
++
++struct lima_pmu {
++	struct lima_ip ip;
++};
++
++struct lima_l2_cache {
++	struct lima_ip ip;
++};
++
++struct lima_mmu {
++	struct lima_ip ip;
++};
++
++struct lima_gp {
++	struct lima_ip ip;
++	struct lima_mmu *mmu;
++};
++
++struct lima_pp {
++	struct lima_ip ip;
++	struct lima_mmu *mmu;
++};
++
++#define LIMA_MAX_PP 4
++
+ struct lima_device {
+ 	struct device *dev;
+ 	struct drm_device *ddev;
+ 	struct platform_device *pdev;
+ 
+ 	enum lima_gpu_type gpu_type;
+-	u32 num_pp;
++
++	struct clk *clk_bus;
++	struct clk *clk_gpu;
++	struct reset_control *reset;
++
++	struct lima_pmu *pmu;
++
++	struct lima_l2_cache *l2_cache;
++
++	struct lima_mmu *mmu[LIMA_MAX_PP + 1];
++	int num_mmu;
++
++	struct lima_gp *gp;
++
++	struct lima_pp *pp[LIMA_MAX_PP];
++	int num_pp;
+ };
+ 
+ int lima_device_init(struct lima_device *ldev, struct drm_device *dev);
+ void lima_device_fini(struct lima_device *ldev);
+ 
++int lima_pmu_init(struct lima_pmu *pmu);
++void lima_pmu_fini(struct lima_pmu *pmu);
++
++int lima_l2_cache_init(struct lima_l2_cache *l2_cache);
++void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
++
++int lima_mmu_init(struct lima_mmu *mmu);
++void lima_mmu_fini(struct lima_mmu *mmu);
++
++int lima_gp_init(struct lima_gp *gp);
++void lima_gp_fini(struct lima_gp *gp);
++
++int lima_pp_init(struct lima_pp *pp);
++void lima_pp_fini(struct lima_pp *pp);
++
+ #endif
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index 590ebb7..45c6b0f 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -1,9 +1,99 @@
++#include <linux/reset.h>
++#include <linux/clk.h>
++
+ #include "lima.h"
+ 
+-int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
++static int lima_clk_init(struct lima_device *dev)
+ {
+ 	int err;
++	unsigned long bus_rate, gpu_rate;
++
++	dev->clk_bus = devm_clk_get(dev->dev, "bus");
++	if (IS_ERR(dev->clk_bus)) {
++		dev_err(dev->dev, "get bus clk fail %ld\n", PTR_ERR(dev->clk_bus));
++		return PTR_ERR(dev->clk_bus);
++	}
++
++	dev->clk_gpu = devm_clk_get(dev->dev, "gpu");
++	if (IS_ERR(dev->clk_gpu)) {
++		dev_err(dev->dev, "get gpu clk fail %ld\n", PTR_ERR(dev->clk_gpu));
++		return PTR_ERR(dev->clk_gpu);
++	}
++
++	bus_rate = clk_get_rate(dev->clk_bus);
++	dev_info(dev->dev, "bus rate = %lu\n", bus_rate);
++
++	gpu_rate = clk_get_rate(dev->clk_gpu);
++	dev_info(dev->dev, "mod rate = %lu", gpu_rate);
++
++	if ((err = clk_prepare_enable(dev->clk_bus)))
++		return err;
++	if ((err = clk_prepare_enable(dev->clk_gpu)))
++		goto error_out0;
++
++	dev->reset = devm_reset_control_get(dev->dev, "ahb");
++	if (IS_ERR(dev->reset)) {
++		err = PTR_ERR(dev->reset);
++		goto error_out1;
++	}
++
++	if ((err = reset_control_deassert(dev->reset)))
++		goto error_out1;
++
++	return 0;
++
++error_out1:
++	clk_disable_unprepare(dev->clk_gpu);
++error_out0:
++	clk_disable_unprepare(dev->clk_bus);
++	return err;
++}
++
++static void lima_clk_fini(struct lima_device *dev)
++{
++	reset_control_assert(dev->reset);
++	clk_disable_unprepare(dev->clk_gpu);
++	clk_disable_unprepare(dev->clk_bus);
++}
++
++static int lima_init_ip(struct lima_device *dev, const char *name,
++			struct lima_ip *ip)
++{
++	struct resource *res;
++
++	if (ip->irq == 0) {
++		ip->irq = platform_get_irq_byname(dev->pdev, name);
++		if (ip->irq < 0) {
++			dev_err(dev->dev, "fail to get irq %s\n", name);
++			return ip->irq;
++		}
++	}
++
++	res = platform_get_resource_byname(dev->pdev, IORESOURCE_MEM, name);
++	if (!res) {
++		dev_err(dev->dev, "fail to get iomem %s\n", name);
++		return -EINVAL;
++	}
++
++	ip->iomem = devm_ioremap_resource(dev->dev, res);
++	if (IS_ERR(ip->iomem)) {
++		dev_err(dev->dev, "fail to ioremap iomem %s\n", name);
++		return PTR_ERR(ip->iomem);
++	}
++
++	ip->dev = dev;
++	strncpy(ip->name, name, LIMA_IP_MAX_NAME_LEN);
++	ip->name[LIMA_IP_MAX_NAME_LEN - 1] = '\0';
++
++	return 0;
++}
++
++int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
++{
++	int err, i;
+ 	struct device_node *np;
++	u32 num_pp;
++	struct lima_mmu *mmu;
+ 
+ 	ldev->pdev = dev->platformdev;
+ 	ldev->dev = &dev->platformdev->dev;
+@@ -12,16 +102,139 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
+ 	ldev->gpu_type = GPU_MALI400;
+ 
+ 	np = ldev->dev->of_node;
+-	err = of_property_read_u32(np, "num-pp", &ldev->num_pp);
++	err = of_property_read_u32(np, "num-pp", &num_pp);
+ 	if (err) {
+ 		dev_err(ldev->dev, "no num-pp property defined\n");
+ 		return err;
+ 	}
++	if (num_pp > LIMA_MAX_PP) {
++		dev_err(ldev->dev, "too many pp %u\n", num_pp);
++		return -EINVAL;
++	}
++
++	err = lima_clk_init(ldev);
++	if (err) {
++		dev_err(ldev->dev, "clk init fail %d\n", err);
++		return err;
++	}
++
++	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
++	if (!ldev->pmu) {
++		err = -ENOMEM;
++		goto err_out;
++	}
++	if ((err = lima_init_ip(ldev, "pmu", &ldev->pmu->ip)) ||
++	    (err = lima_pmu_init(ldev->pmu))) {
++		kfree(ldev->pmu);
++		ldev->pmu = NULL;
++		goto err_out;
++	}
++
++	ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
++	if (!ldev->l2_cache) {
++		err = -ENOMEM;
++		goto err_out;
++	}
++	ldev->l2_cache->ip.irq = -1;
++	if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip)) ||
++	    (err = lima_l2_cache_init(ldev->l2_cache))) {
++		kfree(ldev->l2_cache);
++		ldev->l2_cache = NULL;
++		goto err_out;
++	}
++
++	mmu = kzalloc(sizeof(*ldev->mmu[0]), GFP_KERNEL);
++	if (!mmu) {
++		err = -ENOMEM;
++		goto err_out;
++	}
++	if ((err = lima_init_ip(ldev, "gp-mmu", &mmu->ip)) ||
++	    (err = lima_mmu_init(mmu))) {
++		kfree(mmu);
++		goto err_out;
++	}
++	ldev->mmu[ldev->num_mmu++] = mmu;
++
++	ldev->gp = kzalloc(sizeof(*ldev->gp), GFP_KERNEL);
++	if (!ldev->gp) {
++		err = -ENOMEM;
++		goto err_out;
++	}
++	ldev->gp->mmu = mmu;
++	if ((err = lima_init_ip(ldev, "gp", &ldev->gp->ip)) ||
++	    (err = lima_gp_init(ldev->gp))) {
++		kfree(ldev->gp);
++		ldev->gp = NULL;
++		goto err_out;
++	}
++
++	for (i = 0; i < num_pp; i++) {
++		struct lima_pp *pp;
++		char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
++
++		pp_name[2] += i; pp_mmu_name[2] += i;
++
++		mmu = kzalloc(sizeof(*mmu), GFP_KERNEL);
++		if (!mmu) {
++			err = -ENOMEM;
++			goto err_out;
++		}
++		if ((err = lima_init_ip(ldev, pp_mmu_name, &mmu->ip)) ||
++		    (err = lima_mmu_init(mmu))) {
++			kfree(mmu);
++			goto err_out;
++		}
++		ldev->mmu[ldev->num_mmu++] = mmu;
++
++		pp = kzalloc(sizeof(*pp), GFP_KERNEL);
++		if (!pp) {
++			err = -ENOMEM;
++			goto err_out;
++		}
++		pp->mmu = mmu;
++		if ((err = lima_init_ip(ldev, pp_name, &pp->ip)) ||
++		    (err = lima_pp_init(pp))) {
++			kfree(pp);
++			goto err_out;
++		}
++		ldev->pp[ldev->num_pp++] = pp;
++	}
+ 
+ 	return 0;
++
++err_out:
++	lima_device_fini(ldev);
++	return err;
+ }
+ 
+ void lima_device_fini(struct lima_device *ldev)
+ {
++	int i;
++
++	for (i = 0; i < ldev->num_pp; i++) {
++		lima_pp_fini(ldev->pp[i]);
++		kfree(ldev->pp[i]);
++	}
++
++	if (ldev->gp) {
++		lima_gp_fini(ldev->gp);
++		kfree(ldev->gp);
++	}
++
++	for (i = 0; i < ldev->num_mmu; i++) {
++		lima_mmu_fini(ldev->mmu[i]);
++		kfree(ldev->mmu[i]);
++	}
++
++	if (ldev->l2_cache) {
++		lima_l2_cache_fini(ldev->l2_cache);
++		kfree(ldev->l2_cache);
++	}
++
++	if (ldev->pmu) {
++		lima_pmu_fini(ldev->pmu);
++		kfree(ldev->pmu);
++	}
+ 
++	lima_clk_fini(ldev);
+ }
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+new file mode 100644
+index 0000000..2b741e7
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -0,0 +1,11 @@
++#include "lima.h"
++
++int lima_gp_init(struct lima_gp *gp)
++{
++	return 0;
++}
++
++void lima_gp_fini(struct lima_gp *gp)
++{
++	
++}
+diff --git a/drivers/gpu/drm/lima/lima_l2_cache.c b/drivers/gpu/drm/lima/lima_l2_cache.c
+new file mode 100644
+index 0000000..ac0ea23
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_l2_cache.c
+@@ -0,0 +1,11 @@
++#include "lima.h"
++
++int lima_l2_cache_init(struct lima_l2_cache *l2_cache)
++{
++	return 0;
++}
++
++void lima_l2_cache_fini(struct lima_l2_cache *l2_cache)
++{
++
++}
+diff --git a/drivers/gpu/drm/lima/lima_mmu.c b/drivers/gpu/drm/lima/lima_mmu.c
+new file mode 100644
+index 0000000..707328f
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_mmu.c
+@@ -0,0 +1,11 @@
++#include "lima.h"
++
++int lima_mmu_init(struct lima_mmu *mmu)
++{
++	return 0;
++}
++
++void lima_mmu_fini(struct lima_mmu *mmu)
++{
++
++}
+diff --git a/drivers/gpu/drm/lima/lima_pmu.c b/drivers/gpu/drm/lima/lima_pmu.c
+new file mode 100644
+index 0000000..c4fa7c7
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_pmu.c
+@@ -0,0 +1,11 @@
++#include "lima.h"
++
++int lima_pmu_init(struct lima_pmu *pmu)
++{
++	return 0;
++}
++
++void lima_pmu_fini(struct lima_pmu *pmu)
++{
++
++}
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+new file mode 100644
+index 0000000..408d23e
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -0,0 +1,11 @@
++#include "lima.h"
++
++int lima_pp_init(struct lima_pp *pp)
++{
++	return 0;
++}
++
++void lima_pp_fini(struct lima_pp *pp)
++{
++	
++}

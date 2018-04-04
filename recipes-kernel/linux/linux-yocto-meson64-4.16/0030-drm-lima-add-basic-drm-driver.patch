@@ -1,0 +1,264 @@
+From d735a10f57edea011e5c0154a4edd55acac90aa7 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 26 Mar 2017 16:39:52 +0800
+Subject: [PATCH] drm/lima: add basic drm driver
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/Makefile      |  3 +-
+ drivers/gpu/drm/lima/lima.h        | 42 +++++++++++++++++++
+ drivers/gpu/drm/lima/lima_device.c | 27 ++++++++++++
+ drivers/gpu/drm/lima/lima_drv.c    | 86 +++++++++++++++++++++++++++++++++++++-
+ include/uapi/drm/lima_drm.h        | 46 ++++++++++++++++++++
+ 5 files changed, 202 insertions(+), 2 deletions(-)
+ create mode 100644 drivers/gpu/drm/lima/lima.h
+ create mode 100644 drivers/gpu/drm/lima/lima_device.c
+ create mode 100644 include/uapi/drm/lima_drm.h
+
+diff --git a/drivers/gpu/drm/lima/Makefile b/drivers/gpu/drm/lima/Makefile
+index a1ab2ea..911d7a6 100644
+--- a/drivers/gpu/drm/lima/Makefile
++++ b/drivers/gpu/drm/lima/Makefile
+@@ -1,4 +1,5 @@
+ lima-y := \
+-	lima_drv.o
++	lima_drv.o \
++	lima_device.o
+ 
+ obj-$(CONFIG_DRM_LIMA) += lima.o
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+new file mode 100644
+index 0000000..5ac7ba3b
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (C) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_H__
++
++#include <drm/drmP.h>
++
++enum lima_gpu_type {
++	GPU_MALI400 = 0,
++};
++
++struct lima_device {
++	struct device *dev;
++	struct drm_device *ddev;
++	struct platform_device *pdev;
++
++	enum lima_gpu_type gpu_type;
++	u32 num_pp;
++};
++
++int lima_device_init(struct lima_device *ldev, struct drm_device *dev);
++void lima_device_fini(struct lima_device *ldev);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+new file mode 100644
+index 0000000..590ebb7
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -0,0 +1,27 @@
++#include "lima.h"
++
++int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
++{
++	int err;
++	struct device_node *np;
++
++	ldev->pdev = dev->platformdev;
++	ldev->dev = &dev->platformdev->dev;
++	ldev->ddev = dev;
++
++	ldev->gpu_type = GPU_MALI400;
++
++	np = ldev->dev->of_node;
++	err = of_property_read_u32(np, "num-pp", &ldev->num_pp);
++	if (err) {
++		dev_err(ldev->dev, "no num-pp property defined\n");
++		return err;
++	}
++
++	return 0;
++}
++
++void lima_device_fini(struct lima_device *ldev)
++{
++
++}
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index df13108..88a62fa 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -1,13 +1,97 @@
+ #include <linux/module.h>
+ #include <linux/of_platform.h>
++#include <drm/lima_drm.h>
+ 
+-static int lima_pdev_probe(struct platform_device *pdev)
++#include "lima.h"
++
++static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *file)
++{
++	struct drm_lima_info *info = data;
++	struct lima_device *ldev = dev->dev_private;
++
++	switch (ldev->gpu_type) {
++	case GPU_MALI400:
++		info->gpu_id = LIMA_INFO_GPU_MALI400;
++		break;
++	default:
++		return -ENODEV;
++	}
++	info->num_pp = ldev->num_pp;
++	return 0;
++}
++
++static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
++{
++	struct lima_device *ldev;
++	int err;
++
++	ldev = kzalloc(sizeof(*ldev), GFP_KERNEL);
++	if (!ldev)
++		return -ENOMEM;
++
++	dev->dev_private = (void *)ldev;
++
++	err = lima_device_init(ldev, dev);
++	if (err) {
++		dev_err(&dev->platformdev->dev, "Fatal error during GPU init\n");
++		goto err0;
++	}
++
++	platform_set_drvdata(dev->platformdev, dev);
++
++	return 0;
++
++err0:
++	kfree(ldev);
++	return err;
++}
++
++static int lima_drm_driver_unload(struct drm_device *dev)
+ {
++	struct lima_device *ldev = dev->dev_private;
++
++	lima_device_fini(ldev);
++	kfree(ldev);
++	dev->dev_private = NULL;
+ 	return 0;
+ }
+ 
++static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
++        DRM_IOCTL_DEF_DRV(LIMA_INFO, lima_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
++};
++
++static const struct file_operations lima_drm_driver_fops = {
++	.owner              = THIS_MODULE,
++	.open               = drm_open,
++	.release            = drm_release,
++	.unlocked_ioctl     = drm_ioctl,
++#ifdef CONFIG_COMPAT
++	.compat_ioctl       = drm_compat_ioctl,
++#endif
++};
++
++static struct drm_driver lima_drm_driver = {
++	.driver_features    = DRIVER_RENDER,
++	.load		    = lima_drm_driver_load,
++	.unload             = lima_drm_driver_unload,
++	.ioctls             = lima_drm_driver_ioctls,
++	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
++	.fops               = &lima_drm_driver_fops,
++	.name               = "lima",
++	.desc               = "lima DRM",
++	.date               = "20170325",
++	.major              = 1,
++	.minor              = 0,
++};
++
++static int lima_pdev_probe(struct platform_device *pdev)
++{
++	return drm_platform_init(&lima_drm_driver, pdev);
++}
++
+ static int lima_pdev_remove(struct platform_device *pdev)
+ {
++	drm_put_dev(platform_get_drvdata(pdev));
+ 	return 0;
+ }
+ 
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+new file mode 100644
+index 0000000..f065b46
+--- /dev/null
++++ b/include/uapi/drm/lima_drm.h
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (C) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_DRM_H__
++#define __LIMA_DRM_H__
++
++#include "drm.h"
++
++#if defined(__cplusplus)
++extern "C" {
++#endif
++
++#define LIMA_INFO_GPU_MALI400 0x00
++
++struct drm_lima_info {
++	__u32 gpu_id;  /* out */
++	__u32 num_pp;  /* out */
++};
++
++#define DRM_LIMA_INFO 0x00
++
++#define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
++
++#if defined(__cplusplus)
++}
++#endif
++
++#endif /* __LIMA_DRM_H__ */

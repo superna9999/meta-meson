@@ -1,0 +1,43 @@
+From cc07081c363a571415ba4816b44f844bb1a80f5b Mon Sep 17 00:00:00 2001
+From: Erico Nunes <nunes.erico@gmail.com>
+Date: Sat, 19 Aug 2017 01:22:19 +0200
+Subject: [PATCH] ARM: dts: sun7i: add mali400 gpu device node
+
+This is the mali400 gpu device node with clocks and interrupts adapted
+from the sun8i device tree.
+
+Tested on Allwinner A20 (Cubieboard2) with mesa-lima.
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+---
+ arch/arm/boot/dts/sun7i-a20.dtsi | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/arm/boot/dts/sun7i-a20.dtsi b/arch/arm/boot/dts/sun7i-a20.dtsi
+index bd0cd32..b4431e7 100644
+--- a/arch/arm/boot/dts/sun7i-a20.dtsi
++++ b/arch/arm/boot/dts/sun7i-a20.dtsi
+@@ -306,6 +306,23 @@
+ 			#size-cells = <0>;
+ 		};
+ 
++		gpu: gpu@01c40000 {
++			compatible = "arm,mali-400";
++			reg = <0x01c40000 0x10000>;
++			interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>,
++					   <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>,
++					   <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>,
++					   <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>,
++					   <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>,
++					   <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>,
++					   <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "gp", "gpmmu", "pp0", "pp0mmu", "pmu",
++					  "pp1", "pp1mmu";
++			clocks = <&ccu CLK_AHB_GPU>, <&ccu CLK_GPU>;
++			clock-names = "bus", "core";
++			resets = <&ccu RST_GPU>;
++		};
++
+ 		spi0: spi@1c05000 {
+ 			compatible = "allwinner,sun4i-a10-spi";
+ 			reg = <0x01c05000 0x1000>;

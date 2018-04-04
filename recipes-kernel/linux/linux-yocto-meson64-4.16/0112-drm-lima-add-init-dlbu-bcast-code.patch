@@ -1,0 +1,308 @@
+From 633b64d9410f324bea364ced5057938e3f5da572 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 27 Mar 2018 19:07:12 +0800
+Subject: [PATCH] drm/lima: add init dlbu/bcast code
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/Makefile      |  4 ++-
+ drivers/gpu/drm/lima/lima.h        | 11 ++++++++
+ drivers/gpu/drm/lima/lima_bcast.c  | 47 +++++++++++++++++++++++++++++++++++
+ drivers/gpu/drm/lima/lima_bcast.h  | 29 ++++++++++++++++++++++
+ drivers/gpu/drm/lima/lima_device.c | 40 +++++++++++++++++++++++++++++-
+ drivers/gpu/drm/lima/lima_dlbu.c   | 51 ++++++++++++++++++++++++++++++++++++++
+ drivers/gpu/drm/lima/lima_dlbu.h   | 29 ++++++++++++++++++++++
+ 7 files changed, 209 insertions(+), 2 deletions(-)
+ create mode 100644 drivers/gpu/drm/lima/lima_bcast.c
+ create mode 100644 drivers/gpu/drm/lima/lima_bcast.h
+ create mode 100644 drivers/gpu/drm/lima/lima_dlbu.c
+ create mode 100644 drivers/gpu/drm/lima/lima_dlbu.h
+
+diff --git a/drivers/gpu/drm/lima/Makefile b/drivers/gpu/drm/lima/Makefile
+index 5e9ad08..a5ecdb0 100644
+--- a/drivers/gpu/drm/lima/Makefile
++++ b/drivers/gpu/drm/lima/Makefile
+@@ -10,6 +10,8 @@ lima-y := \
+ 	lima_vm.o \
+ 	lima_sched.o \
+ 	lima_ctx.o \
+-	lima_gem_prime.o
++	lima_gem_prime.o \
++	lima_dlbu.o \
++	lima_bcast.o
+ 
+ obj-$(CONFIG_DRM_LIMA) += lima.o
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 377410d..f380ba0 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -98,6 +98,14 @@ struct lima_pp {
+ 
+ #define LIMA_MAX_PIPE 2
+ 
++struct lima_dlbu {
++	struct lima_ip ip;
++};
++
++struct lima_bcast {
++	struct lima_ip ip;
++};
++
+ struct lima_device {
+ 	struct device *dev;
+ 	struct drm_device *ddev;
+@@ -121,6 +129,9 @@ struct lima_device {
+ 	struct lima_pp *pp;
+ 	int num_pp;
+ 
++	struct lima_dlbu *dlbu;
++	struct lima_bcast *bcast;
++
+ 	struct lima_vm *empty_vm;
+ };
+ 
+diff --git a/drivers/gpu/drm/lima/lima_bcast.c b/drivers/gpu/drm/lima/lima_bcast.c
+new file mode 100644
+index 0000000..1e4f9fe
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_bcast.c
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include "lima.h"
++#include "lima_bcast.h"
++
++#define LIMA_BCAST_BROADCAST_MASK    0x0
++#define LIMA_BCAST_INTERRUPT_MASK    0x4
++
++#define bcast_write(reg, data) writel(data, bcast->ip.iomem + LIMA_BCAST_##reg)
++#define bcast_read(reg) readl(bcast->ip.iomem + LIMA_BCAST_##reg)
++
++int lima_bcast_init(struct lima_bcast *bcast)
++{
++	struct lima_device *dev = bcast->ip.dev;
++
++	dev_info(dev->dev, "bcast %x %x\n",
++		 bcast_read(BROADCAST_MASK),
++		 bcast_read(INTERRUPT_MASK));
++
++	return 0;
++}
++
++void lima_bcast_fini(struct lima_bcast *bcast)
++{
++	
++}
++
+diff --git a/drivers/gpu/drm/lima/lima_bcast.h b/drivers/gpu/drm/lima/lima_bcast.h
+new file mode 100644
+index 0000000..3619bad
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_bcast.h
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#ifndef __LIMA_BCAST_H__
++#define __LIMA_BCAST_H__
++
++int lima_bcast_init(struct lima_bcast *bcast);
++void lima_bcast_fini(struct lima_bcast *bcast);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index aaaa4c7..4c4bec4 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -4,6 +4,8 @@
+ #include <linux/dma-mapping.h>
+ 
+ #include "lima.h"
++#include "lima_dlbu.h"
++#include "lima_bcast.h"
+ 
+ #define LIMA_GP_BASE           0x0000
+ #define LIMA_L2_BASE           0x1000
+@@ -313,7 +315,33 @@ int lima_device_init(struct lima_device *ldev)
+ 		}
+ 	}
+ 
+-	if (ldev->gpu_type != GPU_MALI450) {
++	if (ldev->gpu_type == GPU_MALI450) {
++		ldev->dlbu = kzalloc(sizeof(*ldev->dlbu), GFP_KERNEL);
++		if (!ldev->dlbu) {
++			err = -ENOMEM;
++			goto err_out;
++		}
++		ldev->dlbu->ip.irq = -1;
++		if ((err = lima_init_ip(ldev, "dlbu", &ldev->dlbu->ip, LIMA_DLBU_BASE)) ||
++		    (err = lima_dlbu_init(ldev->dlbu))) {
++			kfree(ldev->dlbu);
++			ldev->dlbu = NULL;
++			goto err_out;
++		}
++
++	        ldev->bcast = kzalloc(sizeof(*ldev->bcast), GFP_KERNEL);
++		if (!ldev->bcast) {
++			err = -ENOMEM;
++			goto err_out;
++		}
++		if ((err = lima_init_ip(ldev, "pp", &ldev->bcast->ip, LIMA_BCAST_BASE)) ||
++		    (err = lima_bcast_init(ldev->bcast))) {
++			kfree(ldev->bcast);
++			ldev->bcast = NULL;
++			goto err_out;
++		}
++	}
++	else {
+ 		ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
+ 		if (!ldev->l2_cache) {
+ 			err = -ENOMEM;
+@@ -378,6 +406,16 @@ void lima_device_fini(struct lima_device *ldev)
+ 		kfree(ldev->gp);
+ 	}
+ 
++	if (ldev->bcast) {
++		lima_bcast_fini(ldev->bcast);
++		kfree(ldev->bcast);
++	}
++
++	if (ldev->dlbu) {
++		lima_dlbu_fini(ldev->dlbu);
++		kfree(ldev->dlbu);
++	}
++
+ 	if (ldev->l2_cache) {
+ 		lima_l2_cache_fini(ldev->l2_cache);
+ 		kfree(ldev->l2_cache);
+diff --git a/drivers/gpu/drm/lima/lima_dlbu.c b/drivers/gpu/drm/lima/lima_dlbu.c
+new file mode 100644
+index 0000000..ffd6813
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_dlbu.c
+@@ -0,0 +1,51 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include "lima.h"
++#include "lima_dlbu.h"
++
++#define LIMA_DLBU_MASTER_TLLIST_PHYS_ADDR  0x0000
++#define	LIMA_DLBU_MASTER_TLLIST_VADDR      0x0004
++#define	LIMA_DLBU_TLLIST_VBASEADDR         0x0008
++#define	LIMA_DLBU_FB_DIM                   0x000C
++#define	LIMA_DLBU_TLLIST_CONF              0x0010
++#define	LIMA_DLBU_START_TILE_POS           0x0014
++#define	LIMA_DLBU_PP_ENABLE_MASK           0x0018
++
++#define dlbu_write(reg, data) writel(data, dlbu->ip.iomem + LIMA_DLBU_##reg)
++#define dlbu_read(reg) readl(dlbu->ip.iomem + LIMA_DLBU_##reg)
++
++int lima_dlbu_init(struct lima_dlbu *dlbu)
++{
++	struct lima_device *dev = dlbu->ip.dev;
++
++	dev_info(dev->dev, "dlbu %x %x\n",
++		 dlbu_read(MASTER_TLLIST_PHYS_ADDR),
++		 dlbu_read(PP_ENABLE_MASK));
++
++	return 0;
++}
++
++void lima_dlbu_fini(struct lima_dlbu *dlbu)
++{
++	
++}
+diff --git a/drivers/gpu/drm/lima/lima_dlbu.h b/drivers/gpu/drm/lima/lima_dlbu.h
+new file mode 100644
+index 0000000..182cc785
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_dlbu.h
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#ifndef __LIMA_DLBU_H__
++#define __LIMA_DLBU_H__
++
++int lima_dlbu_init(struct lima_dlbu *dlbu);
++void lima_dlbu_fini(struct lima_dlbu *dlbu);
++
++#endif

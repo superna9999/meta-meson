@@ -1,0 +1,105 @@
+From 252a5ab4ec9ba0a5c199e2059a72f2f52cb7b72f Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 4 Sep 2017 20:36:07 +0800
+Subject: [PATCH] drm/lima: add gp/pp version print
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_gp.c | 31 +++++++++++++++++++++++++++++++
+ drivers/gpu/drm/lima/lima_pp.c | 31 +++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+)
+
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+index 9ecb459..68cd081 100644
+--- a/drivers/gpu/drm/lima/lima_gp.c
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -247,11 +247,42 @@ static int lima_gp_end_task(void *data, bool fail)
+ 	return 0;
+ }
+ 
++static void lima_gp_print_version(struct lima_gp *gp)
++{
++	u32 version, major, minor;
++	char *name;
++
++	version = gp_read(VERSION);
++	major = (version >> 8) & 0xFF;
++	minor = version & 0xFF;
++	switch (version >> 16) {
++	case 0xA07:
++	    name = "mali200";
++		break;
++	case 0xC07:
++		name = "mali300";
++		break;
++	case 0xB07:
++		name = "mali400";
++		break;
++	case 0xD07:
++		name = "mali450";
++		break;
++	default:
++		name = "unknow";
++		break;
++	}
++	dev_info(gp->ip.dev->dev, "%s - %s version major %d minor %d\n",
++		 gp->ip.name, name, major, minor);
++}
++
+ int lima_gp_init(struct lima_gp *gp)
+ {
+ 	struct lima_device *dev = gp->ip.dev;
+ 	int err;
+ 
++	lima_gp_print_version(gp);
++
+ 	gp->async_reset = false;
+ 	lima_gp_soft_reset_async(gp);
+ 	err = lima_gp_soft_reset_async_wait(gp);
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+index 751c55f..e8ea92c 100644
+--- a/drivers/gpu/drm/lima/lima_pp.c
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -194,11 +194,42 @@ static int lima_pp_core_hard_reset(struct lima_pp_core *core)
+ 	return 0;
+ }
+ 
++static void lima_pp_print_version(struct lima_pp_core *core)
++{
++	u32 version, major, minor;
++	char *name;
++
++	version = pp_read(VERSION);
++	major = (version >> 8) & 0xFF;
++	minor = version & 0xFF;
++	switch (version >> 16) {
++	case 0xC807:
++	    name = "mali200";
++		break;
++	case 0xCE07:
++		name = "mali300";
++		break;
++	case 0xCD07:
++		name = "mali400";
++		break;
++	case 0xCF07:
++		name = "mali450";
++		break;
++	default:
++		name = "unknow";
++		break;
++	}
++	dev_info(core->ip.dev->dev, "%s - %s version major %d minor %d\n",
++		 core->ip.name, name, major, minor);
++}
++
+ int lima_pp_core_init(struct lima_pp_core *core)
+ {
+ 	struct lima_device *dev = core->ip.dev;
+ 	int err;
+ 
++	lima_pp_print_version(core);
++
+ 	core->async_reset = false;
+ 	lima_pp_core_soft_reset_async(core);
+ 	err = lima_pp_core_soft_reset_async_wait(core);
