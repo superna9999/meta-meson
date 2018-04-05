@@ -1,0 +1,21 @@
+From c1d2cb0a11fad42982c83e37162edd71878084cf Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 4 Apr 2018 16:05:16 +0000
+Subject: [PATCH] Add meson DRM driver as native
+
+---
+ src/native-state-drm.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/native-state-drm.cpp b/src/native-state-drm.cpp
+index ecebfa0..6efd552 100644
+--- a/src/native-state-drm.cpp
++++ b/src/native-state-drm.cpp
+@@ -361,6 +361,7 @@ static int open_using_module_checking()
+         "exynos",
+         "pl111",
+         "vc4",
++	"meson",
+     };
+ 
+     int fd = -1;

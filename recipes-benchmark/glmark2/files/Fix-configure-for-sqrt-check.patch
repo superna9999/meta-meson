@@ -1,0 +1,21 @@
+From f09b78109a51c7f7010e75bd2cfdd2805f217891 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 4 Apr 2018 15:24:30 +0000
+
+---
+ wscript | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/wscript b/wscript
+index 3ba167f..e416c49 100644
+--- a/wscript
++++ b/wscript
+@@ -87,7 +87,7 @@ def configure(ctx):
+         ctx.check_cc(lib = lib, uselib_store = uselib)
+ 
+     # Check required functions
+-    req_funcs = [('memset', 'string.h', []) ,('sqrt', 'math.h', ['m'])]
++    req_funcs = [('memset', 'string.h', [])]
+     for func, header, uselib in req_funcs:
+         ctx.check_cc(function_name = func, header_name = header,
+                       uselib = uselib, mandatory = True)
