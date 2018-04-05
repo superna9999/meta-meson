@@ -1,27 +1,24 @@
 SUMMARY = "Amlogic FIP Binaries distributed in U-Boot"
 PROVIDES = "amlogic-fip-native"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/u-boot-amlogic:"
+LICENSE = "Proprietary"
+LIC_FILES_CHKSUM = "file://fip/blx_fix.sh;md5=12ad2eef4a1dcc98f9eda15224b92836"
 
-B = "${WORKDIR}/build"
+SRC_URI = "https://github.com/BayLibre/u-boot/releases/download/v2017.11-libretech-cc/libretech-cc_fip_20170606.tar.gz"
+SRC_URI[md5sum] = "ac86b984a2eb027633b72cb4f7dcf5dd"
+SRC_URI[sha256sum] = "957c96037bcd792a4139cc33eded2f006d55a82c0c56ae69ef43bdcb76a255e2"
 
-PACKAGE_ARCH = "${MACHINE_ARCH}"
+S = "${WORKDIR}/"
 
 inherit deploy native
 
 COMPATIBLE_MACHINE_libretech-cc = "libretech-cc"
 
-PACKAGECONFIG ??= "openssl"
-PACKAGECONFIG[openssl] = ",,openssl-native"
-
-require u-boot-amlogic-common_${PV}.inc
-
-DEPENDS += "bc-native dtc-native"
-
 do_compile () {
-	oe_runmake -C ${S} O=${B} gxl_p212_v1_config
-	oe_runmake -C ${S} O=${B}
+	:
 }
+
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 do_deploy () {
     mkdir -p ${DEPLOYDIR}/fip/
