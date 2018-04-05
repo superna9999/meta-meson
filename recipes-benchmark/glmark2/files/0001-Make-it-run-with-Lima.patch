@@ -1,0 +1,22 @@
+From fa25f8557e93e0d5047ad45c13a2c89f88e18608 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 4 Apr 2018 15:44:45 +0000
+Subject: [PATCH] Make it run with Lima
+
+---
+ src/gl-state-egl.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gl-state-egl.cpp b/src/gl-state-egl.cpp
+index 5b98110..4521c7e 100644
+--- a/src/gl-state-egl.cpp
++++ b/src/gl-state-egl.cpp
+@@ -557,7 +557,7 @@ GLStateEGL::gotValidConfig()
+         EGL_GREEN_SIZE, requested_visual_config_.green,
+         EGL_BLUE_SIZE, requested_visual_config_.blue,
+         EGL_ALPHA_SIZE, requested_visual_config_.alpha,
+-        EGL_DEPTH_SIZE, requested_visual_config_.depth,
++        //EGL_DEPTH_SIZE, requested_visual_config_.depth,
+         EGL_STENCIL_SIZE, requested_visual_config_.stencil,
+ #if GLMARK2_USE_GLESv2
+         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,

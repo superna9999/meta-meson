@@ -1,0 +1,26 @@
+From 2d45cbd7795a7e15d6ee6e6623e3db319cc25b68 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Thu, 5 Apr 2018 07:58:54 +0000
+Subject: [PATCH] Disable udev detection, it selects the wrong DRM driver...
+
+---
+ src/native-state-drm.cpp | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/src/native-state-drm.cpp b/src/native-state-drm.cpp
+index 6efd552..627a70f 100644
+--- a/src/native-state-drm.cpp
++++ b/src/native-state-drm.cpp
+@@ -445,11 +445,7 @@ NativeStateDRM::init()
+     // TODO: The user should be able to define *exactly* which device
+     //       node to open and the program should try to open only
+     //       this node, in order to take care of unknown use cases.
+-    int fd = open_using_udev_scan();
+-
+-    if (!valid_fd(fd)) {
+-        fd = open_using_module_checking();
+-    }
++    int fd = open_using_module_checking();
+ 
+     if (!valid_fd(fd)) {
+         Log::error("Failed to find a suitable DRM device\n");
