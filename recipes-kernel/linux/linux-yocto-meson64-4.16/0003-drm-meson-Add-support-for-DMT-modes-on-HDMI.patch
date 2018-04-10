@@ -1,7 +1,7 @@
-From 8840d459f56ec51581f31831abadd943a237353a Mon Sep 17 00:00:00 2001
+From cbe70ea11a9807f3a493bbbd044c2f76d2a193a9 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Thu, 8 Mar 2018 16:35:34 +0100
-Subject: [PATCH] drm/meson: Add support for DMT modes on HDMI
+Subject: [PATCH 03/39] drm/meson: Add support for DMT modes on HDMI
 
 This patch adds support for DMT display modes over HDMI.
 The modes timings configurations are from the Amlogic Vendor linux tree
@@ -768,3 +768,6 @@ index a1b96e8..7c18a36 100644
  bool meson_venc_hdmi_supported_vic(int vic);
  bool meson_venc_hdmi_venc_repeat(int vic);
  
+-- 
+2.7.4
+
