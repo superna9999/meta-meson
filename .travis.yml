@@ -1,0 +1,47 @@
+#
+# -*- coding: utf-8; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*-
+#
+
+git:
+  depth: 150
+
+branches:
+  only:
+    - master
+
+language: bash
+
+before_script:
+  - sudo apt-get update -qq
+
+  # Install OE dependencies
+  # -----------------------
+  - sudo apt-get install -qq gawk
+  - sudo apt-get install -qq wget
+  - sudo apt-get install -qq git-core
+  - sudo apt-get install -qq diffstat
+  - sudo apt-get install -qq unzip
+  - sudo apt-get install -qq texinfo
+  - sudo apt-get install -qq gcc-multilib
+  - sudo apt-get install -qq build-essential
+  - sudo apt-get install -qq chrpath
+  - sudo apt-get install -qq socat
+  - sudo apt-get install -qq libsdl1.2-dev
+  - sudo apt-get install -qq xterm
+
+  # Install git
+  # -----------
+  - sudo apt-get install -qq git
+
+  # Create and initialize the build environment
+  # -------------------------------------------
+  - rm -rf /tmp/build_env
+  - git clone git://github.com/openembedded/openembedded-core --branch=master --depth=1 /tmp/build_env
+  - git clone git://github.com/openembedded/bitbake --branch=master --depth=1 /tmp/build_env/bitbake
+  - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
+
+script:
+  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p200 bitbake core-image-base | tee -a world.log
+  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p212 bitbake core-image-base | tee -a world.log
+  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=libretech-cc bitbake core-image-base | tee -a world.log
+  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=khadas-vim bitbake core-image-base | tee -a world.log
