@@ -45,3 +45,24 @@ do_deploy_append_meson-gxl () {
     # eMMC
     install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
 } 
+
+do_deploy_append_hardkernel-odroidc2 () {
+    FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
+    DESTDIR="${B}/fip"
+    
+    mkdir -p ${DESTDIR}
+
+    ${FIPDIR}/fip_create --bl30 ${FIPDIR}/bl30.bin \
+			 --bl301 ${FIPDIR}/bl301.bin \
+			 --bl31 ${FIPDIR}/bl31.bin \
+			 --bl33 ${B}/u-boot.bin \
+			 ${DESTDIR}/fip.bin
+    ${FIPDIR}/fip_create --dump ${DESTDIR}/fip.bin
+    cat ${FIPDIR}/bl2.package ${DESTDIR}/fip.bin > ${DESTDIR}/boot_new.bin
+
+    ${FIPDIR}/aml_encrypt_gxb --bootsig \
+			      --input ${DESTDIR}/boot_new.bin \
+			      --output ${DESTDIR}/u-boot.img
+
+    install ${DESTDIR}/u-boot.img ${DEPLOYDIR}/u-boot.img
+} 

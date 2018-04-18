@@ -20,9 +20,16 @@ do_image_sdcard[depends] += "\
 
 SDCARD = "${IMGDEPLOYDIR}/${IMAGE_NAME}.rootfs.sdcard"
 SDCARD_ROOTFS ?= "${IMGDEPLOYDIR}/${IMAGE_NAME}.rootfs.ext4"
+SDCARD_GENERATION_COMMAND_hardkernel-odroidc2 = "generate_odroid_c2_sdcard"
 SDCARD_GENERATION_COMMAND_meson-gxbb = "generate_meson_gxbb_sdcard"
 SDCARD_GENERATION_COMMAND_meson-gxl = "generate_meson_gxl_sdcard"
 SDCARD_GENERATION_COMMAND_meson-gxm = "generate_meson_gxl_sdcard"
+
+generate_odroid_c2_sdcard () {
+	dd if=${DEPLOY_DIR_IMAGE}/bl1.bin.hardkernel of=${SDCARD} conv=notrunc bs=1 count=442
+	dd if=${DEPLOY_DIR_IMAGE}/bl1.bin.hardkernel of=${SDCARD} conv=notrunc bs=512 skip=1 seek=1
+	dd if=${DEPLOY_DIR_IMAGE}/u-boot.img of=${SDCARD} conv=notrunc bs=512 skip=96 seek=97
+}
 
 generate_meson_gxl_sdcard () {
 	dd if=${DEPLOY_DIR_IMAGE}/u-boot.bin.sd.bin of=${SDCARD} conv=notrunc bs=1 count=444
