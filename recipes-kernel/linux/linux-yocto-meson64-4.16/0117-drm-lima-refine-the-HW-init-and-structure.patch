@@ -1,0 +1,2966 @@
+From 6b4413b5e33a1ec47398bf8e6af31a88bb0c1a5e Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sat, 14 Apr 2018 09:52:42 +0800
+Subject: [PATCH 117/120] drm/lima: refine the HW init and structure
+
+Prepare for full mali450 support.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h          | 218 -----------------
+ drivers/gpu/drm/lima/lima_bcast.c    |  15 +-
+ drivers/gpu/drm/lima/lima_bcast.h    |   6 +-
+ drivers/gpu/drm/lima/lima_ctx.c      |  15 +-
+ drivers/gpu/drm/lima/lima_ctx.h      |  48 ++++
+ drivers/gpu/drm/lima/lima_device.c   | 463 +++++++++++++++--------------------
+ drivers/gpu/drm/lima/lima_device.h   | 114 +++++++++
+ drivers/gpu/drm/lima/lima_dlbu.c     |  15 +-
+ drivers/gpu/drm/lima/lima_dlbu.h     |   6 +-
+ drivers/gpu/drm/lima/lima_drv.c      |  48 +++-
+ drivers/gpu/drm/lima/lima_drv.h      |  63 +++++
+ drivers/gpu/drm/lima/lima_gem.c      |  27 +-
+ drivers/gpu/drm/lima/lima_gem.h      |   1 +
+ drivers/gpu/drm/lima/lima_gp.c       | 188 ++++++++------
+ drivers/gpu/drm/lima/lima_gp.h       |  34 +++
+ drivers/gpu/drm/lima/lima_l2_cache.c |  60 ++++-
+ drivers/gpu/drm/lima/lima_l2_cache.h |  32 +++
+ drivers/gpu/drm/lima/lima_mmu.c      | 125 ++++------
+ drivers/gpu/drm/lima/lima_mmu.h      |  34 +++
+ drivers/gpu/drm/lima/lima_pmu.c      |  78 +++---
+ drivers/gpu/drm/lima/lima_pmu.h      |  30 +++
+ drivers/gpu/drm/lima/lima_pp.c       | 171 +++++++------
+ drivers/gpu/drm/lima/lima_pp.h       |  34 +++
+ drivers/gpu/drm/lima/lima_sched.c    |  64 ++++-
+ drivers/gpu/drm/lima/lima_sched.h    |  39 ++-
+ drivers/gpu/drm/lima/lima_vm.c       |  26 +-
+ drivers/gpu/drm/lima/lima_vm.h       |  10 +-
+ 27 files changed, 1135 insertions(+), 829 deletions(-)
+ delete mode 100644 drivers/gpu/drm/lima/lima.h
+ create mode 100644 drivers/gpu/drm/lima/lima_ctx.h
+ create mode 100644 drivers/gpu/drm/lima/lima_device.h
+ create mode 100644 drivers/gpu/drm/lima/lima_drv.h
+ create mode 100644 drivers/gpu/drm/lima/lima_gp.h
+ create mode 100644 drivers/gpu/drm/lima/lima_l2_cache.h
+ create mode 100644 drivers/gpu/drm/lima/lima_mmu.h
+ create mode 100644 drivers/gpu/drm/lima/lima_pmu.h
+ create mode 100644 drivers/gpu/drm/lima/lima_pp.h
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+deleted file mode 100644
+index df43384..0000000
+--- a/drivers/gpu/drm/lima/lima.h
++++ /dev/null
+@@ -1,218 +0,0 @@
+-/*
+- * Copyright (C) 2017 Lima Project
+- *
+- * Permission is hereby granted, free of charge, to any person obtaining a
+- * copy of this software and associated documentation files (the "Software"),
+- * to deal in the Software without restriction, including without limitation
+- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+- * and/or sell copies of the Software, and to permit persons to whom the
+- * Software is furnished to do so, subject to the following conditions:
+- *
+- * The above copyright notice and this permission notice shall be included in
+- * all copies or substantial portions of the Software.
+- *
+- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+- * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+- * OTHER DEALINGS IN THE SOFTWARE.
+- */
+-#ifndef __LIMA_H__
+-
+-#include <linux/rbtree.h>
+-
+-#include <drm/drmP.h>
+-#include <drm/lima_drm.h>
+-
+-#include "lima_vm.h"
+-#include "lima_sched.h"
+-
+-extern int lima_sched_timeout_ms;
+-extern int lima_sched_max_tasks;
+-
+-enum lima_gpu_type {
+-	GPU_MALI400 = 0,
+-	GPU_MALI450,
+-};
+-
+-struct lima_device;
+-
+-#define LIMA_IP_MAX_NAME_LEN 32
+-
+-struct lima_ip {
+-	struct lima_device *dev;
+-	char name[LIMA_IP_MAX_NAME_LEN];
+-	void __iomem *iomem;
+-	int irq;
+-};
+-
+-struct lima_pmu {
+-	struct lima_ip ip;
+-	uint32_t switch_delay;
+-};
+-
+-struct lima_l2_cache {
+-	struct lima_ip ip;
+-};
+-
+-struct lima_mmu {
+-	struct lima_ip ip;
+-	struct lima_sched_pipe *pipe;
+-
+-	spinlock_t lock;
+-	struct lima_vm *vm;
+-	bool zap_all;
+-};
+-
+-#define LIMA_GP_TASK_VS    0x01
+-#define LIMA_GP_TASK_PLBU  0x02
+-
+-struct lima_gp {
+-	struct lima_ip ip;
+-	struct lima_mmu mmu;
+-	struct lima_sched_pipe pipe;
+-	struct lima_l2_cache *l2_cache;
+-
+-	int task;
+-	bool async_reset;
+-};
+-
+-struct lima_pp_core {
+-	struct lima_ip ip;
+-	struct lima_mmu mmu;
+-	bool async_reset;
+-};
+-
+-#define LIMA_MAX_PP 4
+-
+-struct lima_pp {
+-	struct lima_pp_core core[LIMA_MAX_PP];
+-	int num_core;
+-	struct lima_sched_pipe pipe;
+-	struct lima_l2_cache *l2_cache;
+-	atomic_t task;
+-	bool error;
+-};
+-
+-#define LIMA_MAX_PIPE 2
+-
+-struct lima_dlbu {
+-	struct lima_ip ip;
+-};
+-
+-struct lima_bcast {
+-	struct lima_ip ip;
+-};
+-
+-struct lima_device {
+-	struct device *dev;
+-	struct drm_device *ddev;
+-	struct platform_device *pdev;
+-
+-	enum lima_gpu_type gpu_type;
+-	void __iomem *iomem;
+-
+-	struct clk *clk_bus;
+-	struct clk *clk_gpu;
+-	struct reset_control *reset;
+-	struct regulator *regulator;
+-
+-	struct lima_pmu *pmu;
+-
+-	struct lima_l2_cache *l2_cache;
+-
+-	struct lima_sched_pipe *pipe[LIMA_MAX_PIPE];
+-
+-	struct lima_gp *gp;
+-	struct lima_pp *pp;
+-	int num_pp;
+-
+-	struct lima_dlbu *dlbu;
+-	struct lima_bcast *bcast;
+-
+-	struct lima_vm *empty_vm;
+-	uint64_t va_start;
+-	uint64_t va_end;
+-};
+-
+-struct lima_ctx {
+-	struct kref refcnt;
+-	struct lima_device *dev;
+-	struct lima_sched_context context[LIMA_MAX_PIPE];
+-	atomic_t guilty;
+-};
+-
+-struct lima_ctx_mgr {
+-	spinlock_t lock;
+-	struct idr handles;
+-};
+-
+-struct lima_drm_priv {
+-	struct lima_vm *vm;
+-	struct lima_ctx_mgr ctx_mgr;
+-};
+-
+-struct lima_bo_va_mapping {
+-	struct list_head list;
+-	struct rb_node rb;
+-	uint32_t start;
+-	uint32_t last;
+-	uint32_t __subtree_last;
+-};
+-
+-struct lima_submit {
+-	struct lima_ctx *ctx;
+-	int pipe;
+-
+-	struct drm_lima_gem_submit_bo *bos;
+-	struct lima_bo **lbos;
+-	u32 nr_bos;
+-
+-	struct lima_sched_task *task;
+-
+-	uint32_t fence;
+-	uint32_t done;
+-};
+-
+-static inline struct lima_drm_priv *
+-to_lima_drm_priv(struct drm_file *file)
+-{
+-	return file->driver_priv;
+-}
+-
+-int lima_device_init(struct lima_device *ldev);
+-void lima_device_fini(struct lima_device *ldev);
+-
+-int lima_pmu_init(struct lima_pmu *pmu);
+-void lima_pmu_fini(struct lima_pmu *pmu);
+-
+-int lima_l2_cache_init(struct lima_l2_cache *l2_cache);
+-void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
+-int lima_l2_cache_flush(struct lima_l2_cache *l2_cache);
+-
+-int lima_mmu_init(struct lima_mmu *mmu);
+-void lima_mmu_fini(struct lima_mmu *mmu);
+-void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset);
+-void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size);
+-void lima_mmu_page_fault_resume(struct lima_mmu *mmu);
+-
+-int lima_gp_init(struct lima_gp *gp);
+-void lima_gp_fini(struct lima_gp *gp);
+-
+-int lima_pp_core_init(struct lima_pp_core *core);
+-void lima_pp_core_fini(struct lima_pp_core *core);
+-int lima_pp_init(struct lima_pp *pp);
+-void lima_pp_fini(struct lima_pp *pp);
+-
+-unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
+-
+-int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id);
+-int lima_ctx_free(struct lima_ctx_mgr *mgr, u32 id);
+-struct lima_ctx *lima_ctx_get(struct lima_ctx_mgr *mgr, u32 id);
+-void lima_ctx_put(struct lima_ctx *ctx);
+-void lima_ctx_mgr_init(struct lima_ctx_mgr *mgr);
+-void lima_ctx_mgr_fini(struct lima_ctx_mgr *mgr);
+-
+-#endif
+diff --git a/drivers/gpu/drm/lima/lima_bcast.c b/drivers/gpu/drm/lima/lima_bcast.c
+index 1e4f9fe..86ea48c 100644
+--- a/drivers/gpu/drm/lima/lima_bcast.c
++++ b/drivers/gpu/drm/lima/lima_bcast.c
+@@ -20,18 +20,21 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
+-#include "lima.h"
++#include <linux/io.h>
++#include <linux/device.h>
++
++#include "lima_device.h"
+ #include "lima_bcast.h"
+ 
+ #define LIMA_BCAST_BROADCAST_MASK    0x0
+ #define LIMA_BCAST_INTERRUPT_MASK    0x4
+ 
+-#define bcast_write(reg, data) writel(data, bcast->ip.iomem + LIMA_BCAST_##reg)
+-#define bcast_read(reg) readl(bcast->ip.iomem + LIMA_BCAST_##reg)
++#define bcast_write(reg, data) writel(data, ip->iomem + LIMA_BCAST_##reg)
++#define bcast_read(reg) readl(ip->iomem + LIMA_BCAST_##reg)
+ 
+-int lima_bcast_init(struct lima_bcast *bcast)
++int lima_bcast_init(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = bcast->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 
+ 	dev_info(dev->dev, "bcast %x %x\n",
+ 		 bcast_read(BROADCAST_MASK),
+@@ -40,7 +43,7 @@ int lima_bcast_init(struct lima_bcast *bcast)
+ 	return 0;
+ }
+ 
+-void lima_bcast_fini(struct lima_bcast *bcast)
++void lima_bcast_fini(struct lima_ip *ip)
+ {
+ 	
+ }
+diff --git a/drivers/gpu/drm/lima/lima_bcast.h b/drivers/gpu/drm/lima/lima_bcast.h
+index 3619bad..f2c67b8 100644
+--- a/drivers/gpu/drm/lima/lima_bcast.h
++++ b/drivers/gpu/drm/lima/lima_bcast.h
+@@ -23,7 +23,9 @@
+ #ifndef __LIMA_BCAST_H__
+ #define __LIMA_BCAST_H__
+ 
+-int lima_bcast_init(struct lima_bcast *bcast);
+-void lima_bcast_fini(struct lima_bcast *bcast);
++struct lima_ip;
++
++int lima_bcast_init(struct lima_ip *ip);
++void lima_bcast_fini(struct lima_ip *ip);
+ 
+ #endif
+diff --git a/drivers/gpu/drm/lima/lima_ctx.c b/drivers/gpu/drm/lima/lima_ctx.c
+index 24ca647..39c2dfa 100644
+--- a/drivers/gpu/drm/lima/lima_ctx.c
++++ b/drivers/gpu/drm/lima/lima_ctx.c
+@@ -20,7 +20,10 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
+-#include "lima.h"
++#include <linux/slab.h>
++
++#include "lima_device.h"
++#include "lima_ctx.h"
+ 
+ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
+ {
+@@ -33,8 +36,8 @@ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
+ 	ctx->dev = dev;
+ 	kref_init(&ctx->refcnt);
+ 
+-	for (i = 0; i < LIMA_MAX_PIPE; i++) {
+-		err = lima_sched_context_init(dev->pipe[i], ctx->context + i, &ctx->guilty);
++	for (i = 0; i < lima_pipe_num; i++) {
++		err = lima_sched_context_init(dev->pipe + i, ctx->context + i, &ctx->guilty);
+ 		if (err)
+ 			goto err_out0;
+ 	}
+@@ -52,7 +55,7 @@ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
+ 
+ err_out0:
+ 	for (i--; i >= 0; i--)
+-		lima_sched_context_fini(dev->pipe[i], ctx->context + i);
++		lima_sched_context_fini(dev->pipe + i, ctx->context + i);
+ 	kfree(ctx);
+ 	return err;
+ }
+@@ -62,8 +65,8 @@ static void lima_ctx_do_release(struct kref *ref)
+ 	struct lima_ctx *ctx = container_of(ref, struct lima_ctx, refcnt);
+ 	int i;
+ 
+-	for (i = 0; i < LIMA_MAX_PIPE; i++)
+-		lima_sched_context_fini(ctx->dev->pipe[i], ctx->context + i);
++	for (i = 0; i < lima_pipe_num; i++)
++		lima_sched_context_fini(ctx->dev->pipe + i, ctx->context + i);
+ 	kfree(ctx);
+ }
+ 
+diff --git a/drivers/gpu/drm/lima/lima_ctx.h b/drivers/gpu/drm/lima/lima_ctx.h
+new file mode 100644
+index 0000000..49c9727
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_ctx.h
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_CTX_H__
++#define __LIMA_CTX_H__
++
++#include <linux/idr.h>
++
++#include "lima_device.h"
++
++struct lima_ctx {
++	struct kref refcnt;
++	struct lima_device *dev;
++	struct lima_sched_context context[lima_pipe_num];
++	atomic_t guilty;
++};
++
++struct lima_ctx_mgr {
++	spinlock_t lock;
++	struct idr handles;
++};
++
++int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id);
++int lima_ctx_free(struct lima_ctx_mgr *mgr, u32 id);
++struct lima_ctx *lima_ctx_get(struct lima_ctx_mgr *mgr, u32 id);
++void lima_ctx_put(struct lima_ctx *ctx);
++void lima_ctx_mgr_init(struct lima_ctx_mgr *mgr);
++void lima_ctx_mgr_fini(struct lima_ctx_mgr *mgr);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index f57b989..9b22a36 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -1,31 +1,99 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
+ #include <linux/regulator/consumer.h>
+ #include <linux/reset.h>
+ #include <linux/clk.h>
+ #include <linux/dma-mapping.h>
+-
+-#include "lima.h"
++#include <linux/platform_device.h>
++
++#include "lima_device.h"
++#include "lima_gp.h"
++#include "lima_pp.h"
++#include "lima_mmu.h"
++#include "lima_pmu.h"
++#include "lima_l2_cache.h"
+ #include "lima_dlbu.h"
+ #include "lima_bcast.h"
++#include "lima_vm.h"
++
++struct lima_ip_desc {
++	char *name;
++	char *irq_name;
++	bool must_have[lima_gpu_num];
++	int offset[lima_gpu_num];
++
++	int (*init)(struct lima_ip *);
++	void (*fini)(struct lima_ip *);
++};
++
++#define LIMA_IP_DESC(ipname, mst0, mst1, off0, off1, func, irq) \
++	[lima_ip_##ipname] = { \
++		.name = #ipname, \
++		.irq_name = irq, \
++		.must_have = { \
++			[lima_gpu_mali400] = mst0, \
++			[lima_gpu_mali450] = mst1, \
++		}, \
++		.offset = { \
++			[lima_gpu_mali400] = off0, \
++			[lima_gpu_mali450] = off1, \
++		}, \
++		.init = lima_##func##_init, \
++		.fini = lima_##func##_fini, \
++	}
+ 
+-#define LIMA_GP_BASE           0x0000
+-#define LIMA_L2_BASE           0x1000
+-#define LIMA_PMU_BASE          0x2000
+-#define LIMA_GPMMU_BASE        0x3000
+-#define LIMA_PPMMU_BASE(i)     ((i < 4) ? 0x4000 + 0x1000 * (i) : \
+-					  0x1C000 + 0x1000 * (i - 4))
+-#define LIMA_PP_BASE(i)        ((i < 4) ? 0x8000 + 0x2000 * (i) : \
+-					  0x28000 + 0x2000 * (i - 4))
+-
+-/* Separate L2-caches per group on Mali450 */
+-#define LIMA450_GPL2_BASE      0x10000
+-#define LIMA450_PP03L2_BASE    0x01000
+-#define LIMA450_PP47L2_BASE    0x11000
+-
+-#define LIMA_BCAST_BASE        0x13000
+-#define LIMA_PPBCAST_BASE      0x16000
+-#define LIMA_PPBCASTMMU_BASE   0x15000
+-#define LIMA_DLBU_BASE         0x14000
+-#define LIMA_DMA_BASE          0x12000
++static struct lima_ip_desc lima_ip_desc[lima_ip_num] = {
++	LIMA_IP_DESC(pmu,         false, false, 0x02000, 0x02000, pmu,      "pmu"),
++	LIMA_IP_DESC(l2_cache0,   true,  true,  0x01000, 0x10000, l2_cache, NULL),
++	LIMA_IP_DESC(l2_cache1,   false, true,  -1,      0x01000, l2_cache, NULL),
++	LIMA_IP_DESC(l2_cache2,   false, false, -1,      0x11000, l2_cache, NULL),
++	LIMA_IP_DESC(gp,          true,  true,  0x00000, 0x00000, gp,       "gp"),
++	LIMA_IP_DESC(pp0,         true,  true,  0x08000, 0x08000, pp,       "pp0"),
++	LIMA_IP_DESC(pp1,         false, false, 0x0A000, 0x0A000, pp,       "pp1"),
++	LIMA_IP_DESC(pp2,         false, false, 0x0C000, 0x0C000, pp,       "pp2"),
++	LIMA_IP_DESC(pp3,         false, false, 0x0E000, 0x0E000, pp,       "pp3"),
++	LIMA_IP_DESC(pp4,         false, false, -1,      0x28000, pp,       "pp4"),
++	LIMA_IP_DESC(pp5,         false, false, -1,      0x2A000, pp,       "pp5"),
++	LIMA_IP_DESC(pp6,         false, false, -1,      0x2C000, pp,       "pp6"),
++	LIMA_IP_DESC(pp7,         false, false, -1,      0x2D000, pp,       "pp7"),
++	LIMA_IP_DESC(gpmmu,       true,  true,  0x03000, 0x03000, mmu,      "gpmmu"),
++	LIMA_IP_DESC(ppmmu0,      true,  true,  0x04000, 0x04000, mmu,      "ppmmu0"),
++	LIMA_IP_DESC(ppmmu1,      false, false, 0x05000, 0x05000, mmu,      "ppmmu1"),
++	LIMA_IP_DESC(ppmmu2,      false, false, 0x06000, 0x06000, mmu,      "ppmmu2"),
++	LIMA_IP_DESC(ppmmu3,      false, false, 0x07000, 0x07000, mmu,      "ppmmu3"),
++	LIMA_IP_DESC(ppmmu4,      false, false, -1,      0x1C000, mmu,      "ppmmu4"),
++	LIMA_IP_DESC(ppmmu5,      false, false, -1,      0x1D000, mmu,      "ppmmu5"),
++	LIMA_IP_DESC(ppmmu6,      false, false, -1,      0x1E000, mmu,      "ppmmu6"),
++	LIMA_IP_DESC(ppmmu7,      false, false, -1,      0x1F000, mmu,      "ppmmu7"),
++	LIMA_IP_DESC(dlbu,        false, true,  -1,      0x14000, dlbu,     NULL),
++	LIMA_IP_DESC(bcast,       false, true,  -1,      0x13000, bcast,    NULL),
++	LIMA_IP_DESC(pp_bcast,    false, true,  -1,      0x16000, pp,       "pp"),
++	LIMA_IP_DESC(ppmmu_bcast, false, true,  -1,      0x15000, mmu,      NULL),
++};
++
++const char *lima_ip_name(struct lima_ip *ip)
++{
++	return lima_ip_desc[ip->id].name;
++}
+ 
+ static int lima_clk_init(struct lima_device *dev)
+ {
+@@ -109,153 +177,123 @@ static void lima_regulator_fini(struct lima_device *dev)
+ 		regulator_disable(dev->regulator);
+ }
+ 
+-
+-static int lima_init_ip(struct lima_device *dev, const char *name,
+-			struct lima_ip *ip, u32 offset)
++static int lima_init_ip(struct lima_device *dev, int index)
+ {
+-	ip->iomem = dev->iomem + offset;
+-	ip->dev = dev;
++	struct lima_ip_desc *desc = lima_ip_desc + index;
++	struct lima_ip *ip = dev->ip + index;
++	int offset = desc->offset[dev->id];
++	bool must = desc->must_have[dev->id];
++	int err;
+ 
+-	strncpy(ip->name, name, LIMA_IP_MAX_NAME_LEN);
+-	ip->name[LIMA_IP_MAX_NAME_LEN - 1] = '\0';
++	if (offset < 0)
++		return 0;
+ 
+-	if (ip->irq == 0) {
+-		ip->irq = platform_get_irq_byname(dev->pdev, name);
+-		if (ip->irq < 0) {
+-			dev_err(dev->dev, "fail to get irq %s\n", name);
+-			return ip->irq;
+-		}
++	ip->dev = dev;
++	ip->id = index;
++	ip->iomem = dev->iomem + offset;
++	if (desc->irq_name) {
++		err = platform_get_irq_byname(dev->pdev, desc->irq_name);
++		if (err < 0)
++			goto out;
++		ip->irq = err;
+ 	}
+ 
+-	return 0;
++	err = desc->init(ip);
++	if (!err) {
++		ip->present = true;
++		return 0;
++	}
++
++out:
++	return must ? err : 0;
+ }
+ 
+-static int lima_gp_group_init(struct lima_device *dev)
++static void lima_fini_ip(struct lima_device *ldev, int index)
+ {
++	struct lima_ip_desc *desc = lima_ip_desc + index;
++	struct lima_ip *ip = ldev->ip + index;
++
++	if (ip->present)
++		desc->fini(ip);
++}
++
++static int lima_init_gp_pipe(struct lima_device *dev)
++{
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
+ 	int err;
+-	struct lima_gp *gp;
+-
+-	gp = kzalloc(sizeof(*gp), GFP_KERNEL);
+-	if (!gp)
+-		return -ENOMEM;
+-
+-	/* Init GP-group L2 cache on Mali450 */
+-	if (dev->gpu_type == GPU_MALI450) {
+-		gp->l2_cache = kzalloc(sizeof(*gp->l2_cache), GFP_KERNEL);
+-		if (!gp->l2_cache) {
+-			err = -ENOMEM;
+-			goto err_out0;
+-		}
+-		gp->l2_cache->ip.irq = -1;
+-		if ((err = lima_init_ip(dev, "gp-l2-cache", &gp->l2_cache->ip, LIMA450_GPL2_BASE)) ||
+-		    (err = lima_l2_cache_init(gp->l2_cache))) {
+-			goto err_out1;
+-		}
+-	}
+ 
+-	if ((err = lima_init_ip(dev, "gpmmu", &gp->mmu.ip, LIMA_GPMMU_BASE)) ||
+-	    (err = lima_mmu_init(&gp->mmu)))
+-		goto err_out1;
++	if ((err = lima_sched_pipe_init(pipe, "gp")))
++		return err;
+ 
+-	if ((err = lima_init_ip(dev, "gp", &gp->ip, LIMA_GP_BASE)) ||
+-	    (err = lima_gp_init(gp)))
+-		goto err_out2;
++	pipe->l2_cache[pipe->num_l2_cache++] = dev->ip + lima_ip_l2_cache0;
++	pipe->mmu[pipe->num_mmu++] = dev->ip + lima_ip_gpmmu;
++	pipe->processor[pipe->num_processor++] = dev->ip + lima_ip_gp;
+ 
+-	if ((err = lima_sched_pipe_init(&gp->pipe, gp->ip.name)))
+-		goto err_out3;
++	if ((err = lima_gp_pipe_init(dev))) {
++		lima_sched_pipe_fini(pipe);
++		return err;
++	}
+ 
+-	dev->pipe[LIMA_PIPE_GP] = &gp->pipe;
+-	gp->mmu.pipe = &gp->pipe;
+-	dev->gp = gp;
+ 	return 0;
+-
+-err_out3:
+-	lima_gp_fini(gp);
+-err_out2:
+-	lima_mmu_fini(&gp->mmu);
+-err_out1:
+-	if (gp->l2_cache)
+-		lima_l2_cache_fini(gp->l2_cache);
+-err_out0:
+-	if (gp->l2_cache)
+-		kfree(gp->l2_cache);
+-	kfree(gp);
+-	return err;
+ }
+ 
+-static int lima_pp_group_init(struct lima_device *dev)
++static void lima_fini_gp_pipe(struct lima_device *dev)
+ {
+-	int err, i;
+-	struct lima_pp *pp;
+-	char pp_name[] = "pp0", pp_mmu_name[] = "ppmmu0";
+-
+-	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
+-	if (!pp)
+-		return -ENOMEM;
+-	dev->pp = pp;
+-
+-	/* Init PP-group L2 cache on Mali450 */
+-	if (dev->gpu_type == GPU_MALI450) {
+-		pp->l2_cache = kzalloc(sizeof(*pp->l2_cache), GFP_KERNEL);
+-		if (!pp->l2_cache)
+-			return -ENOMEM;
+-		pp->l2_cache->ip.irq = -1;
+-		if ((err = lima_init_ip(dev, "pp-l2-cache", &pp->l2_cache->ip, LIMA450_PP03L2_BASE)) ||
+-		    (err = lima_l2_cache_init(pp->l2_cache)))
+-			return err;
+-	}
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
+ 
+-	for (i = 0; i < dev->num_pp; i++) {
+-		struct lima_pp_core *core = pp->core + pp->num_core;
++	lima_gp_pipe_fini(dev);
++	lima_sched_pipe_fini(pipe);
++}
+ 
+-		pp_name[2] = '0' + i; pp_mmu_name[5] = '0' + i;
++static int lima_init_pp_pipe(struct lima_device *dev)
++{
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
++	int err, i;
+ 
+-		if ((err = lima_init_ip(dev, pp_mmu_name, &core->mmu.ip, LIMA_PPMMU_BASE(i))) ||
+-		    (err = lima_mmu_init(&core->mmu))) {
+-			memset(core, 0, sizeof(*core));
+-			continue;
+-		}
++	if ((err = lima_sched_pipe_init(pipe, "pp")))
++		return err;
+ 
+-		if ((err = lima_init_ip(dev, pp_name, &core->ip, LIMA_PP_BASE(i))) ||
+-		    (err = lima_pp_core_init(core))) {
+-			lima_mmu_fini(&core->mmu);
+-			memset(core, 0, sizeof(*core));
+-			continue;
++	for (i = 0; i < LIMA_SCHED_PIPE_MAX_PROCESSOR; i++) {
++		struct lima_ip *pp = dev->ip + lima_ip_pp0 + i;
++		struct lima_ip *ppmmu = dev->ip + lima_ip_ppmmu0 + i;
++		struct lima_ip *l2_cache;
++
++		if (dev->id == lima_gpu_mali400)
++			l2_cache = dev->ip + lima_ip_l2_cache0;
++		else
++			l2_cache = dev->ip + lima_ip_l2_cache1 + (i >> 2);
++
++		if (pp->present && ppmmu->present && l2_cache->present) {
++			pipe->mmu[pipe->num_mmu++] = ppmmu;
++			pipe->processor[pipe->num_processor++] = pp;
++			if (!pipe->l2_cache[i >> 2])
++				pipe->l2_cache[pipe->num_l2_cache++] = l2_cache;
+ 		}
+-
+-		pp->num_core++;
+ 	}
+ 
+-	if (pp->num_core != dev->num_pp)
+-		dev_warn(dev->dev, "bringup pp %d/%d\n", pp->num_core, dev->num_pp);
+-
+-	if (pp->num_core == 0)
+-		return -ENODEV;
+-
+-	if ((err = lima_sched_pipe_init(&pp->pipe, "pp")))
++	if ((err = lima_pp_pipe_init(dev))) {
++		lima_sched_pipe_fini(pipe);
+ 		return err;
++	}
+ 
+-	dev->pipe[LIMA_PIPE_PP] = &pp->pipe;
+-	for (i = 0; i < pp->num_core; i++)
+-		pp->core[i].mmu.pipe = &pp->pipe;
++	return 0;
++}
+ 
+-	err = lima_pp_init(pp);
+-	if (err)
+-		return err;
++static void lima_fini_pp_pipe(struct lima_device *dev)
++{
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+ 
+-	return 0;
++	lima_pp_pipe_fini(dev);
++	lima_sched_pipe_fini(pipe);
+ }
+ 
+ int lima_device_init(struct lima_device *ldev)
+ {
+ 	int err, i;
+-	struct device_node *np;
+ 	struct resource *res;
+ 
+ 	dma_set_coherent_mask(ldev->dev, DMA_BIT_MASK(32));
+ 
+-	np = ldev->dev->of_node;
+-
+ 	err = lima_clk_init(ldev);
+ 	if (err) {
+ 		dev_err(ldev->dev, "clk init fail %d\n", err);
+@@ -263,13 +301,14 @@ int lima_device_init(struct lima_device *ldev)
+ 	}
+ 
+ 	if ((err = lima_regulator_init(ldev))) {
+-		return err;
++		dev_err(ldev->dev, "regulator init fail %d\n", err);
++		goto err_out0;
+ 	}
+ 
+ 	ldev->empty_vm = lima_vm_create(ldev);
+ 	if (!ldev->empty_vm) {
+ 		err = -ENOMEM;
+-		goto err_out;
++		goto err_out1;
+ 	}
+ 	ldev->va_start = 0;
+ 	ldev->va_end = 0x100000000;
+@@ -279,95 +318,36 @@ int lima_device_init(struct lima_device *ldev)
+ 	if (IS_ERR(ldev->iomem)) {
+ 		dev_err(ldev->dev, "fail to ioremap iomem\n");
+ 	        err = PTR_ERR(ldev->iomem);
+-		goto err_out;
+-	}
+-
+-	/* Get the number of PPs */
+-	for (i = 0; i < LIMA_MAX_PP; i++) {
+-		char pp_name[] = "pp0";
+-		pp_name[2] = '0' + i;
+-		if (platform_get_irq_byname(ldev->pdev, pp_name) < 0)
+-			break;
+-	}
+-	dev_info(ldev->dev, "found %d PPs\n", i);
+-	ldev->num_pp = i;
+-
+-	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
+-	if (!ldev->pmu) {
+-		err = -ENOMEM;
+-		goto err_out;
++		goto err_out2;
+ 	}
+ 
+-	/* pmu is optional and not always present */
+-	if (lima_init_ip(ldev, "pmu", &ldev->pmu->ip, LIMA_PMU_BASE)) {
+-		dev_info(ldev->dev, "no PMU present\n");
+-		kfree(ldev->pmu);
+-		ldev->pmu = NULL;
+-	}
+-	else {
+-		/* If this value is too low, when in high GPU clk freq,
+-		 * GPU will be in unstable state. */
+-		if (of_property_read_u32(np, "switch-delay", &ldev->pmu->switch_delay))
+-			ldev->pmu->switch_delay = 0xff;
+-
+-		if ((err = lima_pmu_init(ldev->pmu))) {
+-			kfree(ldev->pmu);
+-			ldev->pmu = NULL;
+-			goto err_out;
+-		}
++	for (i = 0; i < lima_ip_num; i++) {
++		err = lima_init_ip(ldev, i);
++		if (err)
++			goto err_out3;
+ 	}
+ 
+-	if (ldev->gpu_type == GPU_MALI450) {
+-		ldev->dlbu = kzalloc(sizeof(*ldev->dlbu), GFP_KERNEL);
+-		if (!ldev->dlbu) {
+-			err = -ENOMEM;
+-			goto err_out;
+-		}
+-		ldev->dlbu->ip.irq = -1;
+-		if ((err = lima_init_ip(ldev, "dlbu", &ldev->dlbu->ip, LIMA_DLBU_BASE)) ||
+-		    (err = lima_dlbu_init(ldev->dlbu))) {
+-			kfree(ldev->dlbu);
+-			ldev->dlbu = NULL;
+-			goto err_out;
+-		}
+-
+-	        ldev->bcast = kzalloc(sizeof(*ldev->bcast), GFP_KERNEL);
+-		if (!ldev->bcast) {
+-			err = -ENOMEM;
+-			goto err_out;
+-		}
+-		if ((err = lima_init_ip(ldev, "pp", &ldev->bcast->ip, LIMA_BCAST_BASE)) ||
+-		    (err = lima_bcast_init(ldev->bcast))) {
+-			kfree(ldev->bcast);
+-			ldev->bcast = NULL;
+-			goto err_out;
+-		}
+-	}
+-	else {
+-		ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
+-		if (!ldev->l2_cache) {
+-			err = -ENOMEM;
+-			goto err_out;
+-		}
+-		ldev->l2_cache->ip.irq = -1;
+-		if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip, LIMA_L2_BASE)) ||
+-		    (err = lima_l2_cache_init(ldev->l2_cache))) {
+-			kfree(ldev->l2_cache);
+-			ldev->l2_cache = NULL;
+-			goto err_out;
+-		}
+-	}
+-
+-	if ((err = lima_gp_group_init(ldev)))
+-		goto err_out;
++	err = lima_init_gp_pipe(ldev);
++	if (err)
++		goto err_out3;
+ 
+-	if ((err = lima_pp_group_init(ldev)))
+-		goto err_out;
++	err = lima_init_pp_pipe(ldev);
++	if (err)
++		goto err_out4;
+ 
+ 	return 0;
+ 
+-err_out:
+-	lima_device_fini(ldev);
++err_out4:
++	lima_fini_gp_pipe(ldev);
++err_out3:
++	while (--i >= 0)
++		lima_fini_ip(ldev, i);
++err_out2:
++	lima_vm_put(ldev->empty_vm);
++err_out1:
++	lima_regulator_fini(ldev);
++err_out0:
++	lima_clk_fini(ldev);
+ 	return err;
+ }
+ 
+@@ -375,58 +355,11 @@ void lima_device_fini(struct lima_device *ldev)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < ARRAY_SIZE(ldev->pipe); i++) {
+-		if (ldev->pipe[i])
+-			lima_sched_pipe_fini(ldev->pipe[i]);
+-	}
+-
+-	if (ldev->pp) {
+-		lima_pp_fini(ldev->pp);
+-
+-		for (i = 0; i < ldev->pp->num_core; i++) {
+-			lima_pp_core_fini(ldev->pp->core + i);
+-			lima_mmu_fini(&ldev->pp->core[i].mmu);
+-		}
+-
+-		if (ldev->pp->l2_cache) {
+-			lima_l2_cache_fini(ldev->pp->l2_cache);
+-			kfree(ldev->pp->l2_cache);
+-		}
+-
+-		kfree(ldev->pp);
+-	}
++	lima_fini_pp_pipe(ldev);
++	lima_fini_gp_pipe(ldev);
+ 
+-	if (ldev->gp) {
+-		lima_gp_fini(ldev->gp);
+-		lima_mmu_fini(&ldev->gp->mmu);
+-
+-		if (ldev->gp->l2_cache) {
+-			lima_l2_cache_fini(ldev->gp->l2_cache);
+-			kfree(ldev->gp->l2_cache);
+-		}
+-
+-		kfree(ldev->gp);
+-	}
+-
+-	if (ldev->bcast) {
+-		lima_bcast_fini(ldev->bcast);
+-		kfree(ldev->bcast);
+-	}
+-
+-	if (ldev->dlbu) {
+-		lima_dlbu_fini(ldev->dlbu);
+-		kfree(ldev->dlbu);
+-	}
+-
+-	if (ldev->l2_cache) {
+-		lima_l2_cache_fini(ldev->l2_cache);
+-		kfree(ldev->l2_cache);
+-	}
+-
+-	if (ldev->pmu) {
+-		lima_pmu_fini(ldev->pmu);
+-		kfree(ldev->pmu);
+-	}
++	for (i = lima_ip_num - 1; i >= 0; i--)
++		lima_fini_ip(ldev, i);
+ 
+ 	lima_vm_put(ldev->empty_vm);
+ 
+diff --git a/drivers/gpu/drm/lima/lima_device.h b/drivers/gpu/drm/lima/lima_device.h
+new file mode 100644
+index 0000000..85dc186
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_device.h
+@@ -0,0 +1,114 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_DEVICE_H__
++#define __LIMA_DEVICE_H__
++
++#include "lima_sched.h"
++
++enum lima_gpu_id {
++        lima_gpu_mali400 = 0,
++	lima_gpu_mali450,
++	lima_gpu_num,
++};
++
++enum lima_ip_id {
++	lima_ip_pmu,
++	lima_ip_gpmmu,
++	lima_ip_ppmmu0,
++	lima_ip_ppmmu1,
++	lima_ip_ppmmu2,
++	lima_ip_ppmmu3,
++	lima_ip_ppmmu4,
++	lima_ip_ppmmu5,
++	lima_ip_ppmmu6,
++	lima_ip_ppmmu7,
++	lima_ip_gp,
++	lima_ip_pp0,
++	lima_ip_pp1,
++	lima_ip_pp2,
++	lima_ip_pp3,
++	lima_ip_pp4,
++	lima_ip_pp5,
++	lima_ip_pp6,
++	lima_ip_pp7,
++	lima_ip_l2_cache0,
++	lima_ip_l2_cache1,
++	lima_ip_l2_cache2,
++	lima_ip_dlbu,
++	lima_ip_bcast,
++	lima_ip_pp_bcast,
++	lima_ip_ppmmu_bcast,
++	lima_ip_num,
++};
++
++struct lima_device;
++
++struct lima_ip {
++	struct lima_device *dev;
++	enum lima_ip_id id;
++	bool present;
++
++	void __iomem *iomem;
++	int irq;
++
++	union {
++		/* pmu */
++		unsigned switch_delay;
++		/* gp/pp */
++		bool async_reset;
++	} data;
++};
++
++enum lima_pipe_id {
++	lima_pipe_gp,
++	lima_pipe_pp,
++	lima_pipe_num,
++};
++
++struct lima_device {
++	struct device *dev;
++	struct drm_device *ddev;
++	struct platform_device *pdev;
++
++	enum lima_gpu_id id;
++	int num_pp;
++
++	void __iomem *iomem;
++	struct clk *clk_bus;
++	struct clk *clk_gpu;
++	struct reset_control *reset;
++	struct regulator *regulator;
++
++	struct lima_ip ip[lima_ip_num];
++	struct lima_sched_pipe pipe[lima_pipe_num];
++
++	struct lima_vm *empty_vm;
++	uint64_t va_start;
++	uint64_t va_end;
++};
++
++int lima_device_init(struct lima_device *ldev);
++void lima_device_fini(struct lima_device *ldev);
++
++const char *lima_ip_name(struct lima_ip *ip);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_dlbu.c b/drivers/gpu/drm/lima/lima_dlbu.c
+index ffd6813..cf5c011 100644
+--- a/drivers/gpu/drm/lima/lima_dlbu.c
++++ b/drivers/gpu/drm/lima/lima_dlbu.c
+@@ -20,7 +20,10 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
+-#include "lima.h"
++#include <linux/io.h>
++#include <linux/device.h>
++
++#include "lima_device.h"
+ #include "lima_dlbu.h"
+ 
+ #define LIMA_DLBU_MASTER_TLLIST_PHYS_ADDR  0x0000
+@@ -31,12 +34,12 @@
+ #define	LIMA_DLBU_START_TILE_POS           0x0014
+ #define	LIMA_DLBU_PP_ENABLE_MASK           0x0018
+ 
+-#define dlbu_write(reg, data) writel(data, dlbu->ip.iomem + LIMA_DLBU_##reg)
+-#define dlbu_read(reg) readl(dlbu->ip.iomem + LIMA_DLBU_##reg)
++#define dlbu_write(reg, data) writel(data, ip->iomem + LIMA_DLBU_##reg)
++#define dlbu_read(reg) readl(ip->iomem + LIMA_DLBU_##reg)
+ 
+-int lima_dlbu_init(struct lima_dlbu *dlbu)
++int lima_dlbu_init(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = dlbu->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 
+ 	dev_info(dev->dev, "dlbu %x %x\n",
+ 		 dlbu_read(MASTER_TLLIST_PHYS_ADDR),
+@@ -45,7 +48,7 @@ int lima_dlbu_init(struct lima_dlbu *dlbu)
+ 	return 0;
+ }
+ 
+-void lima_dlbu_fini(struct lima_dlbu *dlbu)
++void lima_dlbu_fini(struct lima_ip *ip)
+ {
+ 	
+ }
+diff --git a/drivers/gpu/drm/lima/lima_dlbu.h b/drivers/gpu/drm/lima/lima_dlbu.h
+index 182cc785..f696542 100644
+--- a/drivers/gpu/drm/lima/lima_dlbu.h
++++ b/drivers/gpu/drm/lima/lima_dlbu.h
+@@ -23,7 +23,9 @@
+ #ifndef __LIMA_DLBU_H__
+ #define __LIMA_DLBU_H__
+ 
+-int lima_dlbu_init(struct lima_dlbu *dlbu);
+-void lima_dlbu_fini(struct lima_dlbu *dlbu);
++struct lima_ip;
++
++int lima_dlbu_init(struct lima_ip *ip);
++void lima_dlbu_fini(struct lima_ip *ip);
+ 
+ #endif
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index e4653f4..61b5557 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -1,11 +1,35 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
+ #include <linux/module.h>
+ #include <linux/of_platform.h>
+ #include <linux/log2.h>
+ #include <drm/drm_prime.h>
++#include <drm/lima_drm.h>
+ 
+-#include "lima.h"
++#include "lima_drv.h"
+ #include "lima_gem.h"
+ #include "lima_gem_prime.h"
++#include "lima_vm.h"
+ 
+ int lima_sched_timeout_ms = 0;
+ int lima_sched_max_tasks = 32;
+@@ -27,17 +51,17 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
+ 	struct drm_lima_info *info = data;
+ 	struct lima_device *ldev = to_lima_dev(dev);
+ 
+-	switch (ldev->gpu_type) {
+-	case GPU_MALI400:
++	switch (ldev->id) {
++	case lima_gpu_mali400:
+ 		info->gpu_id = LIMA_INFO_GPU_MALI400;
+ 		break;
+-	case GPU_MALI450:
++	case lima_gpu_mali450:
+ 		info->gpu_id = LIMA_INFO_GPU_MALI450;
+ 		break;
+ 	default:
+ 		return -ENODEV;
+ 	}
+-	info->num_pp = ldev->pp->num_core;
++	info->num_pp = ldev->pipe[lima_pipe_pp].num_processor;
+ 	info->va_start = ldev->va_start;
+ 	info->va_end = ldev->va_end;
+ 	return 0;
+@@ -89,10 +113,10 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 	struct lima_submit submit = {0};
+ 	int err = 0, size;
+ 
+-	if (args->pipe >= LIMA_MAX_PIPE || args->nr_bos == 0)
++	if (args->pipe >= lima_pipe_num || args->nr_bos == 0)
+ 		return -EINVAL;
+ 
+-	pipe = ldev->pipe[args->pipe];
++	pipe = ldev->pipe + args->pipe;
+ 	if (args->frame_size != pipe->frame_size)
+ 		return -EINVAL;
+ 
+@@ -119,7 +143,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 		goto out1;
+ 	}
+ 
+-	err = pipe->task_validate(pipe->data, task);
++	err = pipe->task_validate(pipe, task);
+ 	if (err)
+ 		goto out1;
+ 
+@@ -159,7 +183,7 @@ static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_
+ 	struct lima_ctx *ctx;
+ 	int err;
+ 
+-	if (args->pipe >= LIMA_MAX_PIPE)
++	if (args->pipe >= lima_pipe_num)
+ 		return -EINVAL;
+ 
+ 	ctx = lima_ctx_get(&priv->ctx_mgr, args->ctx);
+@@ -295,7 +319,7 @@ static int lima_pdev_probe(struct platform_device *pdev)
+ 
+ 	ldev->pdev = pdev;
+ 	ldev->dev = &pdev->dev;
+-	ldev->gpu_type = (enum lima_gpu_type)of_device_get_match_data(&pdev->dev);
++	ldev->id = (enum lima_gpu_id)of_device_get_match_data(&pdev->dev);
+ 
+ 	platform_set_drvdata(pdev, ldev);
+ 
+@@ -342,8 +366,8 @@ static int lima_pdev_remove(struct platform_device *pdev)
+ }
+ 
+ static const struct of_device_id dt_match[] = {
+-	{ .compatible = "arm,mali-400", .data = (void *)GPU_MALI400 },
+-	{ .compatible = "arm,mali-450", .data = (void *)GPU_MALI450 },
++	{ .compatible = "arm,mali-400", .data = (void *)lima_gpu_mali400 },
++	{ .compatible = "arm,mali-450", .data = (void *)lima_gpu_mali450 },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, dt_match);
+diff --git a/drivers/gpu/drm/lima/lima_drv.h b/drivers/gpu/drm/lima/lima_drv.h
+new file mode 100644
+index 0000000..29e3c43
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_drv.h
+@@ -0,0 +1,63 @@
++/*
++ * Copyright (C) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_DRV_H__
++#define __LIMA_DRV_H__
++
++#include <drm/drmP.h>
++
++#include "lima_ctx.h"
++
++extern int lima_sched_timeout_ms;
++extern int lima_sched_max_tasks;
++
++struct lima_vm;
++struct lima_bo;
++struct lima_sched_task;
++
++struct drm_lima_gem_submit_bo;
++
++struct lima_drm_priv {
++	struct lima_vm *vm;
++	struct lima_ctx_mgr ctx_mgr;
++};
++
++struct lima_submit {
++	struct lima_ctx *ctx;
++	int pipe;
++
++	struct drm_lima_gem_submit_bo *bos;
++	struct lima_bo **lbos;
++	u32 nr_bos;
++
++	struct lima_sched_task *task;
++
++	uint32_t fence;
++	uint32_t done;
++};
++
++static inline struct lima_drm_priv *
++to_lima_drm_priv(struct drm_file *file)
++{
++	return file->driver_priv;
++}
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 9f5a539..1bface5 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -1,9 +1,34 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
+ #include <drm/drmP.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/pagemap.h>
+ 
+-#include "lima.h"
++#include <drm/lima_drm.h>
++
++#include "lima_drv.h"
+ #include "lima_gem.h"
++#include "lima_vm.h"
+ 
+ static void lima_bo_shmem_release(struct lima_bo *bo)
+ {
+diff --git a/drivers/gpu/drm/lima/lima_gem.h b/drivers/gpu/drm/lima/lima_gem.h
+index 0bc74ef..1614066 100644
+--- a/drivers/gpu/drm/lima/lima_gem.h
++++ b/drivers/gpu/drm/lima/lima_gem.h
+@@ -27,6 +27,7 @@
+ 
+ struct lima_bo;
+ struct lima_submit;
++struct lima_vm;
+ 
+ struct lima_bo_va {
+ 	struct list_head list;
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+index b364d1f..540e23f 100644
+--- a/drivers/gpu/drm/lima/lima_gp.c
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -1,4 +1,34 @@
+-#include "lima.h"
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/device.h>
++#include <linux/slab.h>
++
++#include <drm/lima_drm.h>
++
++#include "lima_device.h"
++#include "lima_gp.h"
+ 
+ #define LIMA_GP_VSCL_START_ADDR                0x00
+ #define LIMA_GP_VSCL_END_ADDR                  0x04
+@@ -98,72 +128,65 @@
+ 	 LIMA_GP_IRQ_MASK_ERROR)
+ 
+ 
+-#define gp_write(reg, data) writel(data, gp->ip.iomem + LIMA_GP_##reg)
+-#define gp_read(reg) readl(gp->ip.iomem + LIMA_GP_##reg)
++#define gp_write(reg, data) writel(data, ip->iomem + LIMA_GP_##reg)
++#define gp_read(reg) readl(ip->iomem + LIMA_GP_##reg)
+ 
+ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
+ {
+-	struct lima_gp *gp = data;
+-	struct lima_device *dev = gp->ip.dev;
++	struct lima_ip *ip = data;
++	struct lima_device *dev = ip->dev;
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
+ 	u32 state = gp_read(INT_STAT);
+-	bool task_done = false, fail = false;
++	u32 status = gp_read(STATUS);
++	bool done = false;
+ 
+ 	/* for shared irq case */
+ 	if (!state)
+ 		return IRQ_NONE;
+ 
+ 	if (state & LIMA_GP_IRQ_MASK_ERROR) {
+-		u32 status = gp_read(STATUS);
+-
+ 		dev_err(dev->dev, "gp error irq state=%x status=%x\n",
+ 			state, status);
+ 
+-		fail = true;
+-		task_done = true;
+-
+ 		/* mask all interrupts before hard reset */
+ 		gp_write(INT_MASK, 0);
++
++		pipe->error = true;
++		done = true;
+ 	}
+ 	else {
+-		if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
+-			gp->task &= ~LIMA_GP_TASK_VS;
+-			task_done = true;
+-		}
+-
+-		if (state & LIMA_GP_IRQ_PLBU_END_CMD_LST) {
+-			gp->task &= ~LIMA_GP_TASK_PLBU;
+-			task_done = true;
+-		}
++		bool valid = state & (LIMA_GP_IRQ_VS_END_CMD_LST |
++				      LIMA_GP_IRQ_PLBU_END_CMD_LST);
++		bool active = status & (LIMA_GP_STATUS_VS_ACTIVE |
++					LIMA_GP_STATUS_PLBU_ACTIVE);
++		done = valid && !active;
+ 	}
+ 
+ 	gp_write(INT_CLEAR, state);
+ 
+-	if (task_done) {
+-		if (fail)
+-			lima_sched_pipe_task_done(&gp->pipe, true);
+-		else if (!gp->task)
+-			lima_sched_pipe_task_done(&gp->pipe, false);
+-	}
++	if (done)
++		lima_sched_pipe_task_done(pipe);
++
+ 	return IRQ_HANDLED;
+ }
+ 
+-static void lima_gp_soft_reset_async(struct lima_gp *gp)
++static void lima_gp_soft_reset_async(struct lima_ip *ip)
+ {
+-	if (gp->async_reset)
++	if (ip->data.async_reset)
+ 		return;
+ 
+ 	gp_write(INT_MASK, 0);
+ 	gp_write(INT_CLEAR, LIMA_GP_IRQ_RESET_COMPLETED);
+ 	gp_write(CMD, LIMA_GP_CMD_SOFT_RESET);
+-	gp->async_reset = true;
++	ip->data.async_reset = true;
+ }
+ 
+-static int lima_gp_soft_reset_async_wait(struct lima_gp *gp)
++static int lima_gp_soft_reset_async_wait(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = gp->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	int timeout;
+ 
+-	if (!gp->async_reset)
++	if (!ip->data.async_reset)
+ 		return 0;
+ 
+ 	for (timeout = 1000; timeout > 0; timeout--) {
+@@ -178,14 +201,15 @@ static int lima_gp_soft_reset_async_wait(struct lima_gp *gp)
+ 	gp_write(INT_CLEAR, LIMA_GP_IRQ_MASK_ALL);
+ 	gp_write(INT_MASK, LIMA_GP_IRQ_MASK_USED);
+ 
+-	gp->async_reset = false;
++	ip->data.async_reset = false;
+ 	return 0;
+ }
+ 
+-static int lima_gp_task_validate(void *data, struct lima_sched_task *task)
++static int lima_gp_task_validate(struct lima_sched_pipe *pipe,
++				 struct lima_sched_task *task)
+ {
+ 	struct drm_lima_m400_gp_frame *f = task->frame;
+-	(void)data;
++	(void)pipe;
+ 
+ 	if (f->vs_cmd_start > f->vs_cmd_end ||
+ 	    f->plbu_cmd_start > f->plbu_cmd_end ||
+@@ -199,24 +223,20 @@ static int lima_gp_task_validate(void *data, struct lima_sched_task *task)
+ 	return 0;
+ }
+ 
+-static void lima_gp_task_run(void *data, struct lima_sched_task *task)
++static void lima_gp_task_run(struct lima_sched_pipe *pipe,
++			     struct lima_sched_task *task)
+ {
+-	struct lima_gp *gp = data;
++	struct lima_ip *ip = pipe->processor[0];
+ 	struct drm_lima_m400_gp_frame *frame = task->frame;
+ 	u32 cmd = 0;
+ 
+-	gp->task = 0;
+-	if (frame->vs_cmd_start != frame->vs_cmd_end) {
++	if (frame->vs_cmd_start != frame->vs_cmd_end)
+ 		cmd |= LIMA_GP_CMD_START_VS;
+-		gp->task |= LIMA_GP_TASK_VS;
+-	}
+-	if (frame->plbu_cmd_start != frame->plbu_cmd_end) {
++	if (frame->plbu_cmd_start != frame->plbu_cmd_end)
+ 		cmd |= LIMA_GP_CMD_START_PLBU;
+-		gp->task |= LIMA_GP_TASK_PLBU;
+-	}
+ 
+ 	/* before any hw ops, wait last success task async soft reset */
+-	lima_gp_soft_reset_async_wait(gp);
++	lima_gp_soft_reset_async_wait(ip);
+ 
+ 	gp_write(VSCL_START_ADDR, frame->vs_cmd_start);
+ 	gp_write(VSCL_END_ADDR, frame->vs_cmd_end);
+@@ -229,9 +249,9 @@ static void lima_gp_task_run(void *data, struct lima_sched_task *task)
+ 	gp_write(CMD, cmd);
+ }
+ 
+-static int lima_gp_hard_reset(struct lima_gp *gp)
++static int lima_gp_hard_reset(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = gp->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	int timeout;
+ 
+ 	gp_write(PERF_CNT_0_LIMIT, 0xC0FFE000);
+@@ -253,24 +273,22 @@ static int lima_gp_hard_reset(struct lima_gp *gp)
+ 	return 0;
+ }
+ 
+-static void lima_gp_task_fini(void *data)
++static void lima_gp_task_fini(struct lima_sched_pipe *pipe)
+ {
+-	lima_gp_soft_reset_async(data);
++	lima_gp_soft_reset_async(pipe->processor[0]);
+ }
+ 
+-static void lima_gp_task_error(void *data)
++static void lima_gp_task_error(struct lima_sched_pipe *pipe)
+ {
+-	lima_gp_hard_reset(data);
++	lima_gp_hard_reset(pipe->processor[0]);
+ }
+ 
+-static void lima_gp_task_mmu_error(void *data)
++static void lima_gp_task_mmu_error(struct lima_sched_pipe *pipe)
+ {
+-	struct lima_gp *gp = data;
+-
+-	lima_sched_pipe_task_done(&gp->pipe, true);
++	lima_sched_pipe_task_done(pipe);
+ }
+ 
+-static void lima_gp_print_version(struct lima_gp *gp)
++static void lima_gp_print_version(struct lima_ip *ip)
+ {
+ 	u32 version, major, minor;
+ 	char *name;
+@@ -295,34 +313,47 @@ static void lima_gp_print_version(struct lima_gp *gp)
+ 		name = "unknow";
+ 		break;
+ 	}
+-	dev_info(gp->ip.dev->dev, "%s - %s version major %d minor %d\n",
+-		 gp->ip.name, name, major, minor);
++	dev_info(ip->dev->dev, "%s - %s version major %d minor %d\n",
++		 lima_ip_name(ip), name, major, minor);
+ }
+ 
+ static struct kmem_cache *lima_gp_task_slab = NULL;
+ static int lima_gp_task_slab_refcnt = 0;
+ 
+-int lima_gp_init(struct lima_gp *gp)
++int lima_gp_init(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = gp->ip.dev;
+-	int err, frame_size;
++	struct lima_device *dev = ip->dev;
++	int err;
+ 
+-	lima_gp_print_version(gp);
++	lima_gp_print_version(ip);
+ 
+-	gp->async_reset = false;
+-	lima_gp_soft_reset_async(gp);
+-	err = lima_gp_soft_reset_async_wait(gp);
++	ip->data.async_reset = false;
++	lima_gp_soft_reset_async(ip);
++	err = lima_gp_soft_reset_async_wait(ip);
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_request_irq(dev->dev, gp->ip.irq, lima_gp_irq_handler, 0,
+-			       gp->ip.name, gp);
++	err = devm_request_irq(dev->dev, ip->irq, lima_gp_irq_handler, 0,
++			       lima_ip_name(ip), ip);
+ 	if (err) {
+-		dev_err(dev->dev, "gp %s fail to request irq\n", gp->ip.name);
++		dev_err(dev->dev, "gp %s fail to request irq\n",
++			lima_ip_name(ip));
+ 		return err;
+ 	}
+ 
+-	frame_size = sizeof(struct drm_lima_m400_gp_frame);
++	return 0;
++}
++
++void lima_gp_fini(struct lima_ip *ip)
++{
++
++}
++
++int lima_gp_pipe_init(struct lima_device *dev)
++{
++	int frame_size = sizeof(struct drm_lima_m400_gp_frame);
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
++
+ 	if (!lima_gp_task_slab) {
+ 		lima_gp_task_slab = kmem_cache_create(
+ 			"lima_gp_task", sizeof(struct lima_sched_task) + frame_size,
+@@ -332,22 +363,19 @@ int lima_gp_init(struct lima_gp *gp)
+ 	}
+ 	lima_gp_task_slab_refcnt++;
+ 
+-	gp->pipe.frame_size = frame_size;
+-	gp->pipe.task_slab = lima_gp_task_slab;
++	pipe->frame_size = frame_size;
++	pipe->task_slab = lima_gp_task_slab;
+ 
+-	gp->pipe.task_validate = lima_gp_task_validate;
+-	gp->pipe.task_run = lima_gp_task_run;
+-	gp->pipe.task_fini = lima_gp_task_fini;
+-	gp->pipe.task_error = lima_gp_task_error;
+-	gp->pipe.task_mmu_error = lima_gp_task_mmu_error;
+-	gp->pipe.data = gp;
++	pipe->task_validate = lima_gp_task_validate;
++	pipe->task_run = lima_gp_task_run;
++	pipe->task_fini = lima_gp_task_fini;
++	pipe->task_error = lima_gp_task_error;
++	pipe->task_mmu_error = lima_gp_task_mmu_error;
+ 
+-	gp->pipe.mmu[0] = &gp->mmu;
+-	gp->pipe.num_mmu = 1;
+ 	return 0;
+ }
+ 
+-void lima_gp_fini(struct lima_gp *gp)
++void lima_gp_pipe_fini(struct lima_device *dev)
+ {
+ 	if (!--lima_gp_task_slab_refcnt) {
+ 		kmem_cache_destroy(lima_gp_task_slab);
+diff --git a/drivers/gpu/drm/lima/lima_gp.h b/drivers/gpu/drm/lima/lima_gp.h
+new file mode 100644
+index 0000000..8d52303
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_gp.h
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_GP_H__
++#define __LIMA_GP_H__
++
++struct lima_ip;
++struct lima_device;
++
++int lima_gp_init(struct lima_ip *ip);
++void lima_gp_fini(struct lima_ip *ip);
++
++int lima_gp_pipe_init(struct lima_device *dev);
++void lima_gp_pipe_fini(struct lima_device *dev);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_l2_cache.c b/drivers/gpu/drm/lima/lima_l2_cache.c
+index 397a66e..53a5e33 100644
+--- a/drivers/gpu/drm/lima/lima_l2_cache.c
++++ b/drivers/gpu/drm/lima/lima_l2_cache.c
+@@ -1,4 +1,30 @@
+-#include "lima.h"
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include <linux/io.h>
++#include <linux/device.h>
++
++#include "lima_device.h"
++#include "lima_l2_cache.h"
+ 
+ #define LIMA_L2_CACHE_SIZE		 0x0004
+ #define LIMA_L2_CACHE_STATUS		 0x0008
+@@ -16,13 +42,13 @@
+ #define LIMA_L2_CACHE_PERFCNT_SRC1	 0x0028
+ #define LIMA_L2_CACHE_ERFCNT_VAL1	 0x002C
+ 
+-#define l2_cache_write(reg, data) writel(data, l2_cache->ip.iomem + LIMA_L2_CACHE_##reg)
+-#define l2_cache_read(reg) readl(l2_cache->ip.iomem + LIMA_L2_CACHE_##reg)
++#define l2_cache_write(reg, data) writel(data, ip->iomem + LIMA_L2_CACHE_##reg)
++#define l2_cache_read(reg) readl(ip->iomem + LIMA_L2_CACHE_##reg)
+ 
+-static int lima_l2_cache_wait_idle(struct lima_l2_cache *l2_cache)
++static int lima_l2_cache_wait_idle(struct lima_ip *ip)
+ {
+ 	int timeout;
+-	struct lima_device *dev = l2_cache->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 
+ 	for (timeout = 100000; timeout > 0; timeout--) {
+ 	    if (!(l2_cache_read(STATUS) & LIMA_L2_CACHE_STATUS_COMMAND_BUSY))
+@@ -35,17 +61,27 @@ static int lima_l2_cache_wait_idle(struct lima_l2_cache *l2_cache)
+ 	return 0;
+ }
+ 
+-int lima_l2_cache_flush(struct lima_l2_cache *l2_cache)
++int lima_l2_cache_flush(struct lima_ip *ip)
+ {
+ 	l2_cache_write(COMMAND, LIMA_L2_CACHE_COMMAND_CLEAR_ALL);
+-	return lima_l2_cache_wait_idle(l2_cache);
++	return lima_l2_cache_wait_idle(ip);
+ }
+ 
+-int lima_l2_cache_init(struct lima_l2_cache *l2_cache)
++int lima_l2_cache_init(struct lima_ip *ip)
+ {
+-	int err;
++	int i, err;
+ 	u32 size;
+-	struct lima_device *dev = l2_cache->ip.dev;
++	struct lima_device *dev = ip->dev;
++
++	/* l2_cache2 only exists when one of PP4-7 present */
++	if (ip->id == lima_ip_l2_cache2) {
++		for (i = lima_ip_pp4; i <= lima_ip_pp7; i++) {
++			if (dev->ip[i].present)
++				break;
++		}
++		if (i > lima_ip_pp7)
++			return -ENODEV;
++	}
+ 
+ 	size = l2_cache_read(SIZE);
+ 	dev_info(dev->dev, "l2 cache %uK, %u-way, %ubyte cache line, %ubit external bus\n",
+@@ -54,7 +90,7 @@ int lima_l2_cache_init(struct lima_l2_cache *l2_cache)
+ 		 1 << (size & 0xff),
+ 		 1 << ((size >> 24) & 0xff));
+ 
+-	err = lima_l2_cache_flush(l2_cache);
++	err = lima_l2_cache_flush(ip);
+ 	if (err)
+ 		return err;
+ 
+@@ -64,7 +100,7 @@ int lima_l2_cache_init(struct lima_l2_cache *l2_cache)
+ 	return 0;
+ }
+ 
+-void lima_l2_cache_fini(struct lima_l2_cache *l2_cache)
++void lima_l2_cache_fini(struct lima_ip *ip)
+ {
+ 
+ }
+diff --git a/drivers/gpu/drm/lima/lima_l2_cache.h b/drivers/gpu/drm/lima/lima_l2_cache.h
+new file mode 100644
+index 0000000..0823ab4
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_l2_cache.h
+@@ -0,0 +1,32 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_L2_CACHE_H__
++#define __LIMA_L2_CACHE_H__
++
++struct lima_ip;
++
++int lima_l2_cache_init(struct lima_ip *ip);
++void lima_l2_cache_fini(struct lima_ip *ip);
++
++int lima_l2_cache_flush(struct lima_ip *ip);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_mmu.c b/drivers/gpu/drm/lima/lima_mmu.c
+index dcada87..9e83d95 100644
+--- a/drivers/gpu/drm/lima/lima_mmu.c
++++ b/drivers/gpu/drm/lima/lima_mmu.c
+@@ -1,6 +1,32 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
+ #include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/device.h>
+ 
+-#include "lima.h"
++#include "lima_device.h"
++#include "lima_mmu.h"
++#include "lima_vm.h"
+ 
+ #define LIMA_MMU_DTE_ADDR		  0x0000
+ #define LIMA_MMU_STATUS			  0x0004
+@@ -28,8 +54,8 @@
+ #define   LIMA_MMU_INT_READ_BUS_ERROR       0x02
+ #define LIMA_MMU_INT_STATUS		  0x0020
+ 
+-#define mmu_write(reg, data) writel(data, mmu->ip.iomem + LIMA_MMU_##reg)
+-#define mmu_read(reg) readl(mmu->ip.iomem + LIMA_MMU_##reg)
++#define mmu_write(reg, data) writel(data, ip->iomem + LIMA_MMU_##reg)
++#define mmu_read(reg) readl(ip->iomem + LIMA_MMU_##reg)
+ 
+ #define lima_mmu_send_command(command, condition)	     \
+ ({							     \
+@@ -49,9 +75,10 @@
+ 
+ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
+ {
+-	struct lima_mmu *mmu = data;
+-	struct lima_device *dev = mmu->ip.dev;
++	struct lima_ip *ip = data;
++	struct lima_device *dev = ip->dev;
+ 	u32 status = mmu_read(INT_STATUS);
++	struct lima_sched_pipe *pipe;
+ 
+ 	/* for shared irq case */
+ 	if (!status)
+@@ -62,31 +89,34 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
+ 		dev_err(dev->dev, "mmu page fault at 0x%x from bus id %d of type %s on %s\n",
+ 			fault, LIMA_MMU_STATUS_BUS_ID(status),
+ 			status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
+-			mmu->ip.name);
+-		//lima_vm_print(mmu->vm);
++			lima_ip_name(ip));
+ 	}
+ 
+ 	if (status & LIMA_MMU_INT_READ_BUS_ERROR) {
+-		dev_err(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
++		dev_err(dev->dev, "mmu %s irq bus error\n", lima_ip_name(ip));
+ 	}
+ 
+ 	/* mask all interrupts before resume */
+ 	mmu_write(INT_MASK, 0);
+ 	mmu_write(INT_CLEAR, status);
+ 
+-	lima_sched_pipe_mmu_error(mmu->pipe);
++	pipe = dev->pipe + (ip->id == lima_ip_gpmmu ? lima_pipe_gp : lima_pipe_pp);
++	lima_sched_pipe_mmu_error(pipe);
+ 
+ 	return IRQ_HANDLED;
+ }
+ 
+-int lima_mmu_init(struct lima_mmu *mmu)
++int lima_mmu_init(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = mmu->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	int err;
+ 
++	if (ip->id == lima_ip_ppmmu_bcast)
++		return 0;
++
+ 	mmu_write(DTE_ADDR, 0xCAFEBABE);
+ 	if (mmu_read(DTE_ADDR) != 0xCAFEB000) {
+-		dev_err(dev->dev, "mmu %s dte write test fail\n", mmu->ip.name);
++		dev_err(dev->dev, "mmu %s dte write test fail\n", lima_ip_name(ip));
+ 		return -EIO;
+ 	}
+ 
+@@ -94,56 +124,32 @@ int lima_mmu_init(struct lima_mmu *mmu)
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_request_irq(dev->dev, mmu->ip.irq, lima_mmu_irq_handler,
+-			       IRQF_SHARED, mmu->ip.name, mmu);
++	err = devm_request_irq(dev->dev, ip->irq, lima_mmu_irq_handler,
++			       IRQF_SHARED, lima_ip_name(ip), ip);
+ 	if (err) {
+-		dev_err(dev->dev, "mmu %s fail to request irq\n", mmu->ip.name);
++		dev_err(dev->dev, "mmu %s fail to request irq\n", lima_ip_name(ip));
+ 		return err;
+ 	}
+ 
+ 	mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
+ 	mmu_write(DTE_ADDR, dev->empty_vm->pd.dma);
+-	err = lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
+-				    mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
+-	if (err)
+-		return err;
+-
+-	mmu->vm = dev->empty_vm;
+-	spin_lock_init(&mmu->lock);
+-	mmu->zap_all = false;
+-
+-	return 0;
++	return lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
++				     mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
+ }
+ 
+-void lima_mmu_fini(struct lima_mmu *mmu)
++void lima_mmu_fini(struct lima_ip *ip)
+ {
+ 
+ }
+ 
+-void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset)
++void lima_mmu_switch_vm(struct lima_ip *ip, struct lima_vm *vm)
+ {
+-	struct lima_device *dev = mmu->ip.dev;
+-
+-	spin_lock(&mmu->lock);
+-
+-	if (mmu->vm == vm) {
+-		if (reset)
+-			vm = dev->empty_vm;
+-		else {
+-			/* TODO: mmu->zap_all was designed here when active VM is
+-			 * updated, zap the MMU TLB. But seems we need always do zap
+-			 * (without stall) before start task with the same VM. So
+-			 * the MMU TLB can't keep across tasks with the same VM?
+-			 */
+-			mmu_write(COMMAND, LIMA_MMU_COMMAND_ZAP_CACHE);
+-			goto out;
+-		}
+-	}
++	struct lima_device *dev = ip->dev;
+ 
+ 	lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_STALL,
+ 			      mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE);
+ 
+-	if (mmu->vm != vm)
++	if (vm)
+ 		mmu_write(DTE_ADDR, vm->pd.dma);
+ 
+ 	/* flush the TLB */
+@@ -151,41 +157,16 @@ void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset)
+ 
+ 	lima_mmu_send_command(LIMA_MMU_COMMAND_DISABLE_STALL,
+ 			      !(mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE));
+-
+-	mmu->vm = vm;
+-	mmu->zap_all = false;
+-
+-out:
+-	spin_unlock(&mmu->lock);
+-}
+-
+-void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size)
+-{
+-	/* TODO: use LIMA_MMU_ZAP_ONE_LINE to just zap a PDE
+-         * needs to investigate:
+-         * 1. if LIMA_MMU_ZAP_ONE_LINE need stall mmu, otherwise we can zap it here
+-         * 2. how many PDE when LIMA_MMU_ZAP_ONE_LINE is better than zap all,
+-         *    otherwise we can use zap all when exceeds that limit
+-         */
+-
+-	spin_lock(&mmu->lock);
+-	if (mmu->vm == vm)
+-	        mmu->zap_all = true;
+-	spin_unlock(&mmu->lock);
+ }
+ 
+-void lima_mmu_page_fault_resume(struct lima_mmu *mmu)
++void lima_mmu_page_fault_resume(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = mmu->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	u32 status = mmu_read(STATUS);
+ 
+ 	if (status & LIMA_MMU_STATUS_PAGE_FAULT_ACTIVE) {
+ 		dev_info(dev->dev, "mmu resume\n");
+ 
+-	        spin_lock(&mmu->lock);
+-		mmu->vm = dev->empty_vm;
+-		spin_unlock(&mmu->lock);
+-
+ 		mmu_write(INT_MASK, 0);
+ 		mmu_write(DTE_ADDR, 0xCAFEBABE);
+ 		lima_mmu_send_command(LIMA_MMU_COMMAND_HARD_RESET, mmu_read(DTE_ADDR) == 0);
+diff --git a/drivers/gpu/drm/lima/lima_mmu.h b/drivers/gpu/drm/lima/lima_mmu.h
+new file mode 100644
+index 0000000..347ec32
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_mmu.h
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_MMU_H__
++#define __LIMA_MMU_H__
++
++struct lima_ip;
++struct lima_vm;
++
++int lima_mmu_init(struct lima_ip *ip);
++void lima_mmu_fini(struct lima_ip *ip);
++
++void lima_mmu_switch_vm(struct lima_ip *ip, struct lima_vm *vm);
++void lima_mmu_page_fault_resume(struct lima_ip *ip);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_pmu.c b/drivers/gpu/drm/lima/lima_pmu.c
+index 1b518c0..f6c7605 100644
+--- a/drivers/gpu/drm/lima/lima_pmu.c
++++ b/drivers/gpu/drm/lima/lima_pmu.c
+@@ -1,4 +1,31 @@
+-#include "lima.h"
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include <linux/of.h>
++#include <linux/io.h>
++#include <linux/device.h>
++
++#include "lima_device.h"
++#include "lima_pmu.h"
+ 
+ #define LIMA_PMU_POWER_UP                  0x00
+ #define LIMA_PMU_POWER_DOWN                0x04
+@@ -22,12 +49,12 @@
+ #define   LIMA_PMU_INT_CMD_MASK            (1 << 0)
+ #define LIMA_PMU_SW_DELAY                  0x1C
+ 
+-#define pmu_write(reg, data) writel(data, pmu->ip.iomem + LIMA_PMU_##reg)
+-#define pmu_read(reg) readl(pmu->ip.iomem + LIMA_PMU_##reg)
++#define pmu_write(reg, data) writel(data, ip->iomem + LIMA_PMU_##reg)
++#define pmu_read(reg) readl(ip->iomem + LIMA_PMU_##reg)
+ 
+-static int lima_pmu_wait_cmd(struct lima_pmu *pmu)
++static int lima_pmu_wait_cmd(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = pmu->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	u32 stat, timeout;
+ 
+ 	for (timeout = 1000000; timeout > 0; timeout--) {
+@@ -45,46 +72,35 @@ static int lima_pmu_wait_cmd(struct lima_pmu *pmu)
+ 	return 0;
+ }
+ 
+-int lima_pmu_init(struct lima_pmu *pmu)
++int lima_pmu_init(struct lima_ip *ip)
+ {
+-	int i, err;
+-	u32 stat, mask;
+-	struct lima_device *dev = pmu->ip.dev;
++	int err;
++	u32 stat;
++	struct lima_device *dev = ip->dev;
++	struct device_node *np = dev->dev->of_node;
++
++	/* If this value is too low, when in high GPU clk freq,
++	 * GPU will be in unstable state. */
++	if (of_property_read_u32(np, "switch-delay", &ip->data.switch_delay))
++		ip->data.switch_delay = 0xff;
+ 
+ 	pmu_write(INT_MASK, 0);
+-	pmu_write(SW_DELAY, pmu->switch_delay);
++	pmu_write(SW_DELAY, ip->data.switch_delay);
+ 
+ 	/* status reg 1=off 0=on */
+ 	stat = pmu_read(STATUS);
+ 
+ 	/* power up all ip */
+-	switch (dev->gpu_type) {
+-	case GPU_MALI400:
+-		mask = LIMA_PMU_POWER_GP0_MASK | LIMA_PMU_POWER_L2_MASK;
+-		for (i = 0; i < dev->num_pp; i++)
+-			mask |= LIMA_PMU_POWER_PP_MASK(i);
+-		break;
+-	case GPU_MALI450:
+-		mask = LIMA_PMU_POWER_GP0_MASK | LIMA450_PMU_POWER_PP0_MASK;
+-		if (dev->num_pp > 1)
+-			mask |= LIMA450_PMU_POWER_PP13_MASK;
+-		if (dev->num_pp > 4)
+-			mask |= LIMA450_PMU_POWER_PP47_MASK;
+-		break;
+-	default:
+-		return -ENODEV;
+-	}
+-
+-	if (stat & mask) {
+-		pmu_write(POWER_UP, stat & mask);
+-		err = lima_pmu_wait_cmd(pmu);
++	if (stat) {
++		pmu_write(POWER_UP, stat);
++		err = lima_pmu_wait_cmd(ip);
+ 		if (err)
+ 			return err;
+ 	}
+ 	return 0;
+ }
+ 
+-void lima_pmu_fini(struct lima_pmu *pmu)
++void lima_pmu_fini(struct lima_ip *ip)
+ {
+ 
+ }
+diff --git a/drivers/gpu/drm/lima/lima_pmu.h b/drivers/gpu/drm/lima/lima_pmu.h
+new file mode 100644
+index 0000000..e0dd356
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_pmu.h
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_PMU_H__
++#define __LIMA_PMU_H__
++
++struct lima_ip;
++
++int lima_pmu_init(struct lima_ip *ip);
++void lima_pmu_fini(struct lima_ip *ip);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+index ecb7ef2..b2b73ec 100644
+--- a/drivers/gpu/drm/lima/lima_pp.c
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -1,4 +1,34 @@
+-#include "lima.h"
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/device.h>
++#include <linux/slab.h>
++
++#include <drm/lima_drm.h>
++
++#include "lima_device.h"
++#include "lima_pp.h"
+ 
+ #define LIMA_PP_FRAME                        0x0000
+ #define LIMA_PP_RSW			     0x0004
+@@ -80,14 +110,14 @@
+ 	 LIMA_PP_IRQ_END_OF_FRAME          | \
+ 	 LIMA_PP_IRQ_MASK_ERROR)
+ 
+-#define pp_write(reg, data) writel(data, core->ip.iomem + LIMA_PP_##reg)
+-#define pp_read(reg) readl(core->ip.iomem + LIMA_PP_##reg)
++#define pp_write(reg, data) writel(data, ip->iomem + LIMA_PP_##reg)
++#define pp_read(reg) readl(ip->iomem + LIMA_PP_##reg)
+ 
+-static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
++static irqreturn_t lima_pp_irq_handler(int irq, void *data)
+ {
+-	struct lima_pp_core *core = data;
+-	struct lima_device *dev = core->ip.dev;
+-	struct lima_pp *pp = dev->pp;
++	struct lima_ip *ip = data;
++	struct lima_device *dev = ip->dev;
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+ 	u32 state = pp_read(INT_STATUS);
+ 	bool task_done = false;
+ 
+@@ -102,7 +132,7 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
+ 			state, status);
+ 
+ 		task_done = true;
+-		pp->error = true;
++		pipe->error = true;
+ 
+ 		/* mask all interrupts before hard reset */
+ 		pp_write(INT_MASK, 0);
+@@ -114,29 +144,29 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
+ 
+ 	pp_write(INT_CLEAR, state);
+ 
+-	if (task_done && atomic_dec_and_test(&pp->task))
+-		lima_sched_pipe_task_done(&pp->pipe, pp->error);
++	if (task_done && atomic_dec_and_test(&pipe->task))
++		lima_sched_pipe_task_done(pipe);
+ 
+ 	return IRQ_HANDLED;
+ }
+ 
+-static void lima_pp_core_soft_reset_async(struct lima_pp_core *core)
++static void lima_pp_soft_reset_async(struct lima_ip *ip)
+ {
+-	if (core->async_reset)
++	if (ip->data.async_reset)
+ 		return;
+ 
+ 	pp_write(INT_MASK, 0);
+ 	pp_write(INT_RAWSTAT, LIMA_PP_IRQ_MASK_ALL);
+ 	pp_write(CTRL, LIMA_PP_CTRL_SOFT_RESET);
+-	core->async_reset = true;
++	ip->data.async_reset = true;
+ }
+ 
+-static int lima_pp_core_soft_reset_async_wait(struct lima_pp_core *core)
++static int lima_pp_soft_reset_async_wait(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = core->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	int timeout;
+ 
+-	if (!core->async_reset)
++	if (!ip->data.async_reset)
+ 		return 0;
+ 
+ 	for (timeout = 1000; timeout > 0; timeout--) {
+@@ -152,38 +182,38 @@ static int lima_pp_core_soft_reset_async_wait(struct lima_pp_core *core)
+ 	pp_write(INT_CLEAR, LIMA_PP_IRQ_MASK_ALL);
+ 	pp_write(INT_MASK, LIMA_PP_IRQ_MASK_USED);
+ 
+-	core->async_reset = false;
++	ip->data.async_reset = false;
+ 	return 0;
+ }
+ 
+-static void lima_pp_core_start_task(struct lima_pp_core *core, int index,
+-				    struct lima_sched_task *task)
++static void lima_pp_start_task(struct lima_ip *ip, int index,
++			       struct lima_sched_task *task)
+ {
+ 	struct drm_lima_m400_pp_frame *frame = task->frame;
+ 	u32 *frame_reg = (void *)&frame->frame;
+ 	const int num_frame_reg = 23, num_wb_reg = 12;
+ 	int i, j;
+ 
+-	lima_pp_core_soft_reset_async_wait(core);
++	lima_pp_soft_reset_async_wait(ip);
+ 
+ 	frame->frame.plbu_array_address = frame->plbu_array_address[index];
+ 	frame->frame.fragment_stack_address = frame->fragment_stack_address[index];
+ 
+ 	for (i = 0; i < num_frame_reg; i++)
+-		writel(frame_reg[i], core->ip.iomem + LIMA_PP_FRAME + i * 4);
++		writel(frame_reg[i], ip->iomem + LIMA_PP_FRAME + i * 4);
+ 
+ 	for (i = 0; i < 3; i++) {
+ 		u32 *wb_reg = (void *)&frame->wb[i];
+ 		for (j = 0; j < num_wb_reg; j++)
+-			writel(wb_reg[j], core->ip.iomem + LIMA_PP_WB(i) + j * 4);
++			writel(wb_reg[j], ip->iomem + LIMA_PP_WB(i) + j * 4);
+ 	}
+ 
+ 	pp_write(CTRL, LIMA_PP_CTRL_START_RENDERING);
+ }
+ 
+-static int lima_pp_core_hard_reset(struct lima_pp_core *core)
++static int lima_pp_hard_reset(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = core->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	int timeout;
+ 
+ 	pp_write(PERF_CNT_0_LIMIT, 0xC0FFE000);
+@@ -205,7 +235,7 @@ static int lima_pp_core_hard_reset(struct lima_pp_core *core)
+ 	return 0;
+ }
+ 
+-static void lima_pp_print_version(struct lima_pp_core *core)
++static void lima_pp_print_version(struct lima_ip *ip)
+ {
+ 	u32 version, major, minor;
+ 	char *name;
+@@ -230,95 +260,94 @@ static void lima_pp_print_version(struct lima_pp_core *core)
+ 		name = "unknow";
+ 		break;
+ 	}
+-	dev_info(core->ip.dev->dev, "%s - %s version major %d minor %d\n",
+-		 core->ip.name, name, major, minor);
++	dev_info(ip->dev->dev, "%s - %s version major %d minor %d\n",
++		 lima_ip_name(ip), name, major, minor);
+ }
+ 
+-int lima_pp_core_init(struct lima_pp_core *core)
++int lima_pp_init(struct lima_ip *ip)
+ {
+-	struct lima_device *dev = core->ip.dev;
++	struct lima_device *dev = ip->dev;
+ 	int err;
+ 
+-	lima_pp_print_version(core);
++	if (ip->id == lima_ip_pp_bcast)
++		return 0;
++
++	lima_pp_print_version(ip);
+ 
+-	core->async_reset = false;
+-	lima_pp_core_soft_reset_async(core);
+-	err = lima_pp_core_soft_reset_async_wait(core);
++	ip->data.async_reset = false;
++	lima_pp_soft_reset_async(ip);
++	err = lima_pp_soft_reset_async_wait(ip);
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler,
+-			       IRQF_SHARED, core->ip.name, core);
++	err = devm_request_irq(dev->dev, ip->irq, lima_pp_irq_handler,
++			       IRQF_SHARED, lima_ip_name(ip), ip);
+ 	if (err) {
+-		dev_err(dev->dev, "pp %s fail to request irq\n", core->ip.name);
++		dev_err(dev->dev, "pp %s fail to request irq\n",
++			lima_ip_name(ip));
+ 		return err;
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-void lima_pp_core_fini(struct lima_pp_core *core)
++void lima_pp_fini(struct lima_ip *ip)
+ {
+ 	
+ }
+ 
+-static int lima_pp_task_validate(void *data, struct lima_sched_task *task)
++static int lima_pp_task_validate(struct lima_sched_pipe *pipe,
++				 struct lima_sched_task *task)
+ {
+-	struct lima_pp *pp = data;
+ 	struct drm_lima_m400_pp_frame *f = task->frame;
+ 
+-	if (f->num_pp > pp->num_core)
++	if (f->num_pp > pipe->num_processor)
+ 		return -EINVAL;
+ 
+ 	return 0;
+ }
+ 
+-static void lima_pp_task_run(void *data, struct lima_sched_task *task)
++static void lima_pp_task_run(struct lima_sched_pipe *pipe,
++			     struct lima_sched_task *task)
+ {
+-	struct lima_pp *pp = data;
+ 	struct drm_lima_m400_pp_frame *frame = task->frame;
+ 	int i;
+ 
+-	pp->error = false;
+-	atomic_set(&pp->task, frame->num_pp);
++	atomic_set(&pipe->task, frame->num_pp);
+ 
+ 	for (i = 0; i < frame->num_pp; i++)
+-		lima_pp_core_start_task(pp->core + i, i, task);
++		lima_pp_start_task(pipe->processor[i], i, task);
+ }
+ 
+-static void lima_pp_task_fini(void *data)
++static void lima_pp_task_fini(struct lima_sched_pipe *pipe)
+ {
+-	struct lima_pp *pp = data;
+ 	int i;
+ 
+-	for (i = 0; i < pp->num_core; i++)
+-		lima_pp_core_soft_reset_async(pp->core + i);
++	for (i = 0; i < pipe->num_processor; i++)
++		lima_pp_soft_reset_async(pipe->processor[i]);
+ }
+ 
+-static void lima_pp_task_error(void *data)
++static void lima_pp_task_error(struct lima_sched_pipe *pipe)
+ {
+-	struct lima_pp *pp = data;
+ 	int i;
+ 
+-	for (i = 0; i < pp->num_core; i++)
+-		lima_pp_core_hard_reset(pp->core + i);
++	for (i = 0; i < pipe->num_processor; i++)
++		lima_pp_hard_reset(pipe->processor[i]);
+ }
+ 
+-static void lima_pp_task_mmu_error(void *data)
++static void lima_pp_task_mmu_error(struct lima_sched_pipe *pipe)
+ {
+-	struct lima_pp *pp = data;
+-
+-	pp->error = true;
+-	if (atomic_dec_and_test(&pp->task))
+-		lima_sched_pipe_task_done(&pp->pipe, pp->error);
++	if (atomic_dec_and_test(&pipe->task))
++		lima_sched_pipe_task_done(pipe);
+ }
+ 
+ static struct kmem_cache *lima_pp_task_slab = NULL;
+ static int lima_pp_task_slab_refcnt = 0;
+ 
+-int lima_pp_init(struct lima_pp *pp)
++int lima_pp_pipe_init(struct lima_device *dev)
+ {
+-	int i, frame_size;
++	int frame_size;
++	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+ 
+ 	frame_size = sizeof(struct drm_lima_m400_pp_frame);
+ 	if (!lima_pp_task_slab) {
+@@ -330,23 +359,19 @@ int lima_pp_init(struct lima_pp *pp)
+ 	}
+ 	lima_pp_task_slab_refcnt++;
+ 
+-	pp->pipe.frame_size = frame_size;
+-	pp->pipe.task_slab = lima_pp_task_slab;
++	pipe->frame_size = frame_size;
++	pipe->task_slab = lima_pp_task_slab;
+ 
+-	pp->pipe.task_validate = lima_pp_task_validate;
+-	pp->pipe.task_run = lima_pp_task_run;
+-	pp->pipe.task_fini = lima_pp_task_fini;
+-	pp->pipe.task_error = lima_pp_task_error;
+-	pp->pipe.task_mmu_error = lima_pp_task_mmu_error;
+-	pp->pipe.data = pp;
++	pipe->task_validate = lima_pp_task_validate;
++	pipe->task_run = lima_pp_task_run;
++	pipe->task_fini = lima_pp_task_fini;
++	pipe->task_error = lima_pp_task_error;
++	pipe->task_mmu_error = lima_pp_task_mmu_error;
+ 
+-	for (i = 0; i < pp->num_core; i++)
+-		pp->pipe.mmu[i] = &pp->core[i].mmu;
+-	pp->pipe.num_mmu = pp->num_core;
+ 	return 0;
+ }
+ 
+-void lima_pp_fini(struct lima_pp *pp)
++void lima_pp_pipe_fini(struct lima_device *dev)
+ {
+ 	if (!--lima_pp_task_slab_refcnt) {
+ 		kmem_cache_destroy(lima_pp_task_slab);
+diff --git a/drivers/gpu/drm/lima/lima_pp.h b/drivers/gpu/drm/lima/lima_pp.h
+new file mode 100644
+index 0000000..92ad1b6
+--- /dev/null
++++ b/drivers/gpu/drm/lima/lima_pp.h
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++#ifndef __LIMA_PP_H__
++#define __LIMA_PP_H__
++
++struct lima_ip;
++struct lima_device;
++
++int lima_pp_init(struct lima_ip *ip);
++void lima_pp_fini(struct lima_ip *ip);
++
++int lima_pp_pipe_init(struct lima_device *dev);
++void lima_pp_pipe_fini(struct lima_device *dev);
++
++#endif
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 5c3c80a..1cd6891 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -1,6 +1,33 @@
++/*
++ * Copyright (C) 2018 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ */
++
+ #include <linux/kthread.h>
++#include <linux/slab.h>
+ 
+-#include "lima.h"
++#include "lima_drv.h"
++#include "lima_sched.h"
++#include "lima_vm.h"
++#include "lima_mmu.h"
++#include "lima_l2_cache.h"
+ 
+ struct lima_fence {
+ 	struct dma_fence base;
+@@ -314,6 +341,7 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
+ 	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
+ 	struct lima_fence *fence;
+ 	struct dma_fence *ret;
++	struct lima_vm *vm = NULL, *last_vm = NULL;
+ 	int i;
+ 
+ 	/* after GPU reset */
+@@ -341,17 +369,23 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
+ 	 * 3. can we reduce the calling of this function because all
+ 	 *    GP/PP use the same L2 cache
+ 	 */
+-	if (pipe->mmu[0]->ip.dev->gpu_type == GPU_MALI450) {
+-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->gp->l2_cache);
+-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->pp->l2_cache);
+-	} else {
+-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
++	for (i = 0; i < pipe->num_l2_cache; i++)
++		lima_l2_cache_flush(pipe->l2_cache[i]);
++
++	if (task->vm != pipe->current_vm) {
++		vm = lima_vm_get(task->vm);
++		last_vm = pipe->current_vm;
++		pipe->current_vm = task->vm;
+ 	}
+ 
+ 	for (i = 0; i < pipe->num_mmu; i++)
+-		lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
++		lima_mmu_switch_vm(pipe->mmu[i], vm);
++
++	if (last_vm)
++		lima_vm_put(last_vm);
+ 
+-	pipe->task_run(pipe->data, task);
++	pipe->error = false;
++	pipe->task_run(pipe, task);
+ 
+ 	return task->fence;
+ }
+@@ -364,11 +398,17 @@ static void lima_sched_handle_error_task(struct lima_sched_pipe *pipe,
+ 	kthread_park(pipe->base.thread);
+ 	drm_sched_hw_job_reset(&pipe->base, &task->base);
+ 
+-	pipe->task_error(pipe->data);
++	pipe->task_error(pipe);
+ 
+ 	for (i = 0; i < pipe->num_mmu; i++)
+ 		lima_mmu_page_fault_resume(pipe->mmu[i]);
+ 
++	if (pipe->current_vm)
++		lima_vm_put(pipe->current_vm);
++
++	pipe->current_vm = NULL;
++	pipe->current_task = NULL;
++
+ 	drm_sched_job_recovery(&pipe->base);
+ 	kthread_unpark(pipe->base.thread);
+ }
+@@ -460,14 +500,14 @@ unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
+ 	return timeout_jiffies;
+ }
+ 
+-void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
++void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe)
+ {
+-	if (error)
++	if (pipe->error)
+ 	        schedule_work(&pipe->error_work);
+ 	else {
+ 		struct lima_sched_task *task = pipe->current_task;
+ 
+-		pipe->task_fini(pipe->data);
++		pipe->task_fini(pipe);
+ 		dma_fence_signal(task->fence);
+ 	}
+ }
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index 7648c25..001bc81 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -24,6 +24,8 @@
+ 
+ #include <drm/gpu_scheduler.h>
+ 
++struct lima_vm;
++
+ struct lima_sched_task {
+ 	struct drm_sched_job base;
+ 
+@@ -45,7 +47,12 @@ struct lima_sched_context {
+ 	uint32_t sequence;
+ };
+ 
+-#define LIMA_SCHED_PIPE_MAX_MMU 4
++#define LIMA_SCHED_PIPE_MAX_MMU       8
++#define LIMA_SCHED_PIPE_MAX_L2_CACHE  2
++#define LIMA_SCHED_PIPE_MAX_PROCESSOR 8
++
++struct lima_ip;
++
+ struct lima_sched_pipe {
+ 	struct drm_gpu_scheduler base;
+ 
+@@ -54,19 +61,28 @@ struct lima_sched_pipe {
+ 	spinlock_t fence_lock;
+ 
+ 	struct lima_sched_task *current_task;
++	struct lima_vm *current_vm;
+ 
+-	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
++	struct lima_ip *mmu[LIMA_SCHED_PIPE_MAX_MMU];
+ 	int num_mmu;
+ 
++	struct lima_ip *l2_cache[LIMA_SCHED_PIPE_MAX_L2_CACHE];
++	int num_l2_cache;
++
++	struct lima_ip *processor[LIMA_SCHED_PIPE_MAX_PROCESSOR];
++	int num_processor;
++
++	bool error;
++	atomic_t task;
++
+ 	int frame_size;
+ 	struct kmem_cache *task_slab;
+ 
+-	int (*task_validate)(void *data, struct lima_sched_task *task);
+-	void (*task_run)(void *data, struct lima_sched_task *task);
+-	void (*task_fini)(void *data);
+-	void (*task_error)(void *data);
+-	void (*task_mmu_error)(void *data);
+-	void *data;
++	int (*task_validate)(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
++	void (*task_run)(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
++	void (*task_fini)(struct lima_sched_pipe *pipe);
++	void (*task_error)(struct lima_sched_pipe *pipe);
++	void (*task_mmu_error)(struct lima_sched_pipe *pipe);
+ 
+ 	struct work_struct error_work;
+ };
+@@ -90,14 +106,17 @@ int lima_sched_context_wait_fence(struct lima_sched_context *context,
+ 
+ int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
+ void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
+-void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error);
++void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe);
+ 
+ static inline void lima_sched_pipe_mmu_error(struct lima_sched_pipe *pipe)
+ {
+-	pipe->task_mmu_error(pipe->data);
++	pipe->error = true;
++	pipe->task_mmu_error(pipe);
+ }
+ 
+ int lima_sched_slab_init(void);
+ void lima_sched_slab_fini(void);
+ 
++unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
++
+ #endif
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 7f36260..d5a19711 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -2,7 +2,8 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/interval_tree_generic.h>
+ 
+-#include "lima.h"
++#include "lima_device.h"
++#include "lima_vm.h"
+ 
+ #define LIMA_PDE(va) (va >> 22)
+ #define LIMA_PTE(va) ((va << 10) >> 22)
+@@ -119,9 +120,6 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+ 
+ int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
+ {
+-	int i, j;
+-	struct lima_device *dev = vm->dev;
+-
+ 	mutex_lock(&vm->lock);
+ 
+ 	lima_vm_it_remove(mapping, &vm->va);
+@@ -130,11 +128,9 @@ int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
+ 
+ 	mutex_unlock(&vm->lock);
+ 
+-	for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
+-		for (j = 0; j < dev->pipe[i]->num_mmu; j++)
+-			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, mapping->start,
+-					mapping->last + 1 - mapping->start);
+-	}
++	/* TODO: zap MMU using this vm in case buggy user app
++	 * free bo during GP/PP running which may corrupt kernel
++	 * reusing this memory. */
+ 
+ 	return 0;
+ }
+@@ -168,18 +164,10 @@ void lima_vm_release(struct kref *kref)
+ {
+ 	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
+ 	struct lima_device *dev = vm->dev;
+-	int i, j;
+-
+-	/* switch mmu vm to empty vm if this vm is used by it */
+-	if (vm != dev->empty_vm) {
+-		for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
+-			for (j = 0; j < dev->pipe[i]->num_mmu; j++)
+-				lima_mmu_switch_vm(dev->pipe[i]->mmu[j], vm, true);
+-		}
+-	}
++	int i;
+ 
+ 	if (!RB_EMPTY_ROOT(&vm->va.rb_root)) {
+-		dev_err(vm->dev->dev, "still active bo inside vm\n");
++		dev_err(dev->dev, "still active bo inside vm\n");
+ 	}
+ 
+ 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
+diff --git a/drivers/gpu/drm/lima/lima_vm.h b/drivers/gpu/drm/lima/lima_vm.h
+index 7d07085..e4b633a 100644
+--- a/drivers/gpu/drm/lima/lima_vm.h
++++ b/drivers/gpu/drm/lima/lima_vm.h
+@@ -37,6 +37,14 @@ struct lima_vm_page {
+ 	dma_addr_t dma;
+ };
+ 
++struct lima_bo_va_mapping {
++	struct list_head list;
++	struct rb_node rb;
++	uint32_t start;
++	uint32_t last;
++	uint32_t __subtree_last;
++};
++
+ struct lima_vm {
+ 	struct mutex lock;
+ 	struct kref refcount;
+@@ -64,8 +72,6 @@ static inline void lima_vm_put(struct lima_vm *vm)
+ 	kref_put(&vm->refcount, lima_vm_release);
+ }
+ 
+-struct lima_bo_va_mapping;
+-
+ int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+ 		struct lima_bo_va_mapping *mapping);
+ int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping);
+-- 
+2.0.1
+

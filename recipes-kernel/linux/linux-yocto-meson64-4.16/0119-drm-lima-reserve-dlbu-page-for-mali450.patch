@@ -1,0 +1,290 @@
+From 971a13bf2cd37136f60bec2076cad40c462f98bf Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 15 Apr 2018 21:00:01 +0800
+Subject: [PATCH 119/120] drm/lima: reserve dlbu page for mali450
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_device.c | 34 ++++++++++++----
+ drivers/gpu/drm/lima/lima_device.h |  3 ++
+ drivers/gpu/drm/lima/lima_dlbu.c   |  6 +--
+ drivers/gpu/drm/lima/lima_vm.c     | 79 ++++++++++++++++++++++++--------------
+ drivers/gpu/drm/lima/lima_vm.h     |  4 ++
+ 5 files changed, 87 insertions(+), 39 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index 9b22a36..cb21969 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -310,38 +310,54 @@ int lima_device_init(struct lima_device *ldev)
+ 		err = -ENOMEM;
+ 		goto err_out1;
+ 	}
++
+ 	ldev->va_start = 0;
+-	ldev->va_end = 0x100000000;
++	if (ldev->id == lima_gpu_mali450) {
++		ldev->va_end = LIMA_VA_RESERVE_START;
++		ldev->dlbu_cpu = dma_alloc_wc(
++			ldev->dev, LIMA_PAGE_SIZE,
++			&ldev->dlbu_dma, GFP_KERNEL);
++		if (!ldev->dlbu_cpu) {
++			err = -ENOMEM;
++			goto err_out2;
++		}
++	}
++	else
++		ldev->va_end = LIMA_VA_RESERVE_END;
+ 
+ 	res = platform_get_resource(ldev->pdev, IORESOURCE_MEM, 0);
+ 	ldev->iomem = devm_ioremap_resource(ldev->dev, res);
+ 	if (IS_ERR(ldev->iomem)) {
+ 		dev_err(ldev->dev, "fail to ioremap iomem\n");
+ 	        err = PTR_ERR(ldev->iomem);
+-		goto err_out2;
++		goto err_out3;
+ 	}
+ 
+ 	for (i = 0; i < lima_ip_num; i++) {
+ 		err = lima_init_ip(ldev, i);
+ 		if (err)
+-			goto err_out3;
++			goto err_out4;
+ 	}
+ 
+ 	err = lima_init_gp_pipe(ldev);
+ 	if (err)
+-		goto err_out3;
++		goto err_out4;
+ 
+ 	err = lima_init_pp_pipe(ldev);
+ 	if (err)
+-		goto err_out4;
++		goto err_out5;
+ 
+ 	return 0;
+ 
+-err_out4:
++err_out5:
+ 	lima_fini_gp_pipe(ldev);
+-err_out3:
++err_out4:
+ 	while (--i >= 0)
+ 		lima_fini_ip(ldev, i);
++err_out3:
++	if (ldev->dlbu_cpu)
++		dma_free_wc(ldev->dev, LIMA_PAGE_SIZE,
++			    ldev->dlbu_cpu, ldev->dlbu_dma);
+ err_out2:
+ 	lima_vm_put(ldev->empty_vm);
+ err_out1:
+@@ -361,6 +377,10 @@ void lima_device_fini(struct lima_device *ldev)
+ 	for (i = lima_ip_num - 1; i >= 0; i--)
+ 		lima_fini_ip(ldev, i);
+ 
++	if (ldev->dlbu_cpu)
++		dma_free_wc(ldev->dev, LIMA_PAGE_SIZE,
++			    ldev->dlbu_cpu, ldev->dlbu_dma);
++
+ 	lima_vm_put(ldev->empty_vm);
+ 
+ 	lima_regulator_fini(ldev);
+diff --git a/drivers/gpu/drm/lima/lima_device.h b/drivers/gpu/drm/lima/lima_device.h
+index 2e0b89a..ec0e0c6 100644
+--- a/drivers/gpu/drm/lima/lima_device.h
++++ b/drivers/gpu/drm/lima/lima_device.h
+@@ -106,6 +106,9 @@ struct lima_device {
+ 	struct lima_vm *empty_vm;
+ 	uint64_t va_start;
+ 	uint64_t va_end;
++
++	u32 *dlbu_cpu;
++	dma_addr_t dlbu_dma;
+ };
+ 
+ int lima_device_init(struct lima_device *ldev);
+diff --git a/drivers/gpu/drm/lima/lima_dlbu.c b/drivers/gpu/drm/lima/lima_dlbu.c
+index cf5c011..0e1b6ed 100644
+--- a/drivers/gpu/drm/lima/lima_dlbu.c
++++ b/drivers/gpu/drm/lima/lima_dlbu.c
+@@ -25,6 +25,7 @@
+ 
+ #include "lima_device.h"
+ #include "lima_dlbu.h"
++#include "lima_vm.h"
+ 
+ #define LIMA_DLBU_MASTER_TLLIST_PHYS_ADDR  0x0000
+ #define	LIMA_DLBU_MASTER_TLLIST_VADDR      0x0004
+@@ -41,9 +42,8 @@ int lima_dlbu_init(struct lima_ip *ip)
+ {
+ 	struct lima_device *dev = ip->dev;
+ 
+-	dev_info(dev->dev, "dlbu %x %x\n",
+-		 dlbu_read(MASTER_TLLIST_PHYS_ADDR),
+-		 dlbu_read(PP_ENABLE_MASK));
++	dlbu_write(MASTER_TLLIST_PHYS_ADDR, dev->dlbu_dma);
++	dlbu_write(MASTER_TLLIST_VADDR, LIMA_VA_RESERVE_DLBU);
+ 
+ 	return 0;
+ }
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index d5a19711..0eb2e72 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -6,7 +6,7 @@
+ #include "lima_vm.h"
+ 
+ #define LIMA_PDE(va) (va >> 22)
+-#define LIMA_PTE(va) ((va << 10) >> 22)
++#define LIMA_PTE(va) ((va & 0x3FFFFF) >> 12)
+ 
+ #define LIMA_VM_FLAG_PRESENT          (1 << 0)
+ #define LIMA_VM_FLAG_READ_PERMISSION  (1 << 1)
+@@ -47,7 +47,7 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
+ {
+ 	u32 addr;
+ 
+-	for (addr = start; addr < end; addr += LIMA_PAGE_SIZE) {
++	for (addr = start; addr <= end; addr += LIMA_PAGE_SIZE) {
+ 		u32 pde = LIMA_PDE(addr);
+ 		u32 pte = LIMA_PTE(addr);
+ 
+@@ -64,26 +64,13 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
+ 	}
+ }
+ 
+-int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+-		struct lima_bo_va_mapping *mapping)
++static int lima_vm_map_page_table(struct lima_vm *vm, dma_addr_t *dma,
++				  u32 start, u32 end)
+ {
+-	int err, i = 0;
+-	struct lima_bo_va_mapping *it;
+-	u32 addr;
+-
+-	mutex_lock(&vm->lock);
++	u64 addr;
++	int i = 0;
+ 
+-	it = lima_vm_it_iter_first(&vm->va, mapping->start, mapping->last);
+-	if (it) {
+-		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %x-%x\n",
+-			mapping->start, mapping->last, it->start, it->last);
+-		err = -EINVAL;
+-		goto err_out0;
+-	}
+-
+-	lima_vm_it_insert(mapping, &vm->va);
+-
+-	for (addr = mapping->start; addr <= mapping->last; addr += LIMA_PAGE_SIZE) {
++	for (addr = start; addr <= end; addr += LIMA_PAGE_SIZE) {
+ 		u32 pde = LIMA_PDE(addr);
+ 		u32 pte = LIMA_PTE(addr);
+ 
+@@ -92,8 +79,9 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+ 				dma_alloc_wc(vm->dev->dev, LIMA_PAGE_SIZE,
+ 					     &vm->pts[pde].dma, GFP_KERNEL);
+ 			if (!vm->pts[pde].cpu) {
+-				err = -ENOMEM;
+-				goto err_out1;
++				if (addr != start)
++					lima_vm_unmap_page_table(vm, start, addr - 1);
++				return -ENOMEM;
+ 			}
+ 			memset(vm->pts[pde].cpu, 0, LIMA_PAGE_SIZE);
+ 			vm->pd.cpu[pde] = vm->pts[pde].dma | LIMA_VM_FLAG_PRESENT;
+@@ -104,15 +92,38 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+ 		 * as a reference count, 12bit is enough for 1024 max count
+ 		 */
+ 		vm->pts[pde].dma++;
+-		vm->pts[pde].cpu[pte] = pages_dma[i++] | LIMA_VM_FLAGS_CACHE;
++		vm->pts[pde].cpu[pte] = dma[i++] | LIMA_VM_FLAGS_CACHE;
+ 	}
+ 
++	return 0;
++}
++
++int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
++		struct lima_bo_va_mapping *mapping)
++{
++	int err;
++	struct lima_bo_va_mapping *it;
++
++	mutex_lock(&vm->lock);
++
++	it = lima_vm_it_iter_first(&vm->va, mapping->start, mapping->last);
++	if (it) {
++		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %x-%x\n",
++			mapping->start, mapping->last, it->start, it->last);
++		err = -EINVAL;
++		goto err_out0;
++	}
++
++	err = lima_vm_map_page_table(
++		vm, pages_dma, mapping->start, mapping->last);
++	if (err)
++		goto err_out0;
++
++	lima_vm_it_insert(mapping, &vm->va);
++
+ 	mutex_unlock(&vm->lock);
+ 	return 0;
+ 
+-err_out1:
+-	lima_vm_unmap_page_table(vm, mapping->start, addr);
+-	lima_vm_it_remove(mapping, &vm->va);
+ err_out0:
+ 	mutex_unlock(&vm->lock);
+ 	return err;
+@@ -124,7 +135,7 @@ int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
+ 
+ 	lima_vm_it_remove(mapping, &vm->va);
+ 
+-	lima_vm_unmap_page_table(vm, mapping->start, mapping->last + 1);
++	lima_vm_unmap_page_table(vm, mapping->start, mapping->last);
+ 
+ 	mutex_unlock(&vm->lock);
+ 
+@@ -150,12 +161,22 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
+ 
+ 	vm->pd.cpu = dma_alloc_wc(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
+ 	if (!vm->pd.cpu)
+-		goto err_out;
++		goto err_out0;
+ 	memset(vm->pd.cpu, 0, LIMA_PAGE_SIZE);
+ 
++	if (dev->dlbu_cpu) {
++		int err = lima_vm_map_page_table(
++			vm, &dev->dlbu_dma, LIMA_VA_RESERVE_DLBU,
++			LIMA_VA_RESERVE_DLBU + LIMA_PAGE_SIZE - 1);
++		if (err)
++			goto err_out1;
++	}
++
+ 	return vm;
+ 
+-err_out:
++err_out1:
++	dma_free_wc(dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
++err_out0:
+ 	kvfree(vm);
+ 	return NULL;
+ }
+diff --git a/drivers/gpu/drm/lima/lima_vm.h b/drivers/gpu/drm/lima/lima_vm.h
+index e4b633a..52669173 100644
+--- a/drivers/gpu/drm/lima/lima_vm.h
++++ b/drivers/gpu/drm/lima/lima_vm.h
+@@ -30,6 +30,10 @@
+ #define LIMA_PAGE_MASK    (LIMA_PAGE_SIZE - 1)
+ #define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
+ 
++#define LIMA_VA_RESERVE_START  0xFFFFF000
++#define LIMA_VA_RESERVE_DLBU   LIMA_VA_RESERVE_START
++#define LIMA_VA_RESERVE_END    0x100000000
++
+ struct lima_device;
+ 
+ struct lima_vm_page {
+-- 
+2.0.1
+

@@ -170,6 +170,10 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
            file://0001-drm-bridge-synopsys-dw-hdmi-Enable-workaround-for-v1.patch \
            file://0115-arm64-dts-add-switch-delay-for-meson-mali.patch \
            file://0116-drm-lima-don-t-use-GFP_KERNEL-under-spin-lock.patch \
+           file://0117-drm-lima-refine-the-HW-init-and-structure.patch \
+           file://0118-drm-lima-exclude-access-for-l2-cache.patch \
+           file://0119-drm-lima-reserve-dlbu-page-for-mali450.patch \
+           file://0120-drm-lima-use-DLBU-and-BCAST-for-mali450.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
