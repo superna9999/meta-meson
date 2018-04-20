@@ -91,6 +91,9 @@ Available S912 machines are :
 Available S9xxx machines are :
  - amlogic-s9xxx (all S905 and S905X and S912 machines) : generic non-bootable .wic image to be customized
 
+Experimental A113d machine :
+ - amlogic-s400 : non-bootable .wic image, no sdcard on the board, u-boot should be added and flashed to eMMC
+
 ## Selecting Image type
 
 Images types available (in addition of standard Poky/OE images) :
