@@ -9,7 +9,8 @@ SRC_URI = "git://github.com/yuq/mesa-lima.git;branch=lima-18.0 \
            file://0006-endianness-check-is-OS-wide-and-not-specific-to-libc.patch \
            "
 
-SRCREV = "1e3fd4f0e247f6c6955e89bba92be13814debcf5"
+PV = "18.0.0+git${SRCPV}"
+SRCREV = "2cfcf46af2d46983193c205aff987104f35f1de1"
 
 S = "${WORKDIR}/git"
 
