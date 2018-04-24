@@ -10,7 +10,7 @@ SRC_URI = "git://github.com/yuq/mesa-lima.git;branch=lima-18.0 \
            "
 
 PV = "18.0.0+git${SRCPV}"
-SRCREV = "2cfcf46af2d46983193c205aff987104f35f1de1"
+SRCREV = "2dc0e2434377ed52c203562116c740ebb67b1c82"
 
 S = "${WORKDIR}/git"
 
