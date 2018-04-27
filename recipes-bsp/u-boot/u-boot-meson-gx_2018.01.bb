@@ -1,7 +1,7 @@
 require u-boot-common_${PV}.inc
 require recipes-bsp/u-boot/u-boot.inc
 
-DEPENDS += "bc-native dtc-native python-native amlogic-fip-native"
+DEPENDS += "bc-native dtc-native python-native amlogic-fip"
 
 PROVIDES = "u-boot"
 

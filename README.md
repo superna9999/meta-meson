@@ -55,7 +55,7 @@ Available S805 machines are :
 Available S905 machines are :
  - amlogic-p200 : .wic image to be booted using vendor u-boot
  - amlogic-p201 : .wic image to be booted using vendor u-boot
- - hardkernel-odroidc2 : complete sdcard image with mainline U-boot
+ - hardkernel-odroidc2 : complete .wic sdcard image with mainline U-boot
  - hardkernel-odroidc2-sdboot : .wic image to be booted using vendor u-boot
  - tronsmart-vega-s95-pro : .wic image to be booted using vendor u-boot
  - tronsmart-vega-s95-meta : .wic image to be booted using vendor u-boot
@@ -71,12 +71,12 @@ Available S905D machines are :
  - amlogic-s905d (all S905D machines) : generic non-bootable .wic image to be customized
 
 Available S905X machines are :
- - libretech-cc : complete bootable sdcard image with mainline U-boot
+ - libretech-cc : complete bootable .wic sdcard image with mainline U-boot
  - libretech-cc-sdboot : .wic image to be booted using vendor u-boot
- - amlogic-p212 : complete bootable sdcard image with mainline U-boot
+ - amlogic-p212 : complete bootable .wic sdcard image with mainline U-boot
  - amlogic-p212-sdboot : .wic image to be booted using vendor u-boot
  - nexbox-a95x-s905x : .wic image to be booted using vendor u-boot
- - khadas-vim : complete bootable sdcard image with mainline U-boot
+ - khadas-vim : complete bootable .wic sdcard image with mainline U-boot
  - khadas-vim-sdboot : .wic image to be booted using vendor u-boot
  - hwacom-amazetv : .wic image to be booted using vendor u-boot
  - amlogic-s905x (all S905X machines) : generic non-bootable .wic image to be customized
@@ -116,10 +116,10 @@ A .wic image will be generated in the tmp/deploy/images/$MACHINE/ directory.
 
 This Image contains a FAT32 BOOT partition will the kernel uImage and .dtb, compatible with Amlogic U-Boot already flashed on your device.
 
-For the amlogic-p212, khadas-vim and libretech-cc, Mainline U-Boot is automatically installed in a single ext4 partition .sdcard image in the tmp/deploy/images/$MACHINE/ directory.
+For the amlogic-p212, khadas-vim and libretech-cc, Mainline U-Boot is automatically installed in a single ext4 partition .wic image in the tmp/deploy/images/$MACHINE/ directory.
 
 You will be able to dd the image onto the raw SDcard like :
 
 ```
-sudo dd if=tmp/deploy/images/libretech-cc/core-image-sato-libretech-cc.sdcard of=/dev/mmcblk0
+sudo dd if=tmp/deploy/images/libretech-cc/core-image-sato-libretech-cc.wic of=/dev/mmcblk0
 ```

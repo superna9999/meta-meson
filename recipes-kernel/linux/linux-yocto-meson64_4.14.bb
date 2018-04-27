@@ -54,7 +54,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 
 KERNEL_VERSION_SANITY_SKIP="1"
 
-KERNEL_CLASSES = "kernel-uimage-meson64"
+KERNEL_CLASSES = "kernel-uimage-meson"
 
 LINUX_VERSION_EXTENSION_append = "-meson64"
 

@@ -1,5 +1,5 @@
 SUMMARY = "Amlogic FIP Binaries distributed in U-Boot"
-PROVIDES = "amlogic-fip-native"
+PROVIDES = "amlogic-fip"
 
 LICENSE = "Proprietary"
 LIC_FILES_CHKSUM = "file://fip/bl2_fix.sh;md5=c7864e97af857505ef162eac95c799d0"
@@ -10,7 +10,7 @@ SRC_URI[sha256sum] = "db9048119246031dc54bab448c4b270d3633016d2b4da101e420fd3131
 
 S = "${WORKDIR}/u-boot-odroidc2-v2015.01/"
 
-inherit deploy native
+inherit deploy
 
 COMPATIBLE_MACHINE_hardkernel-odroidc2 = "hardkernel-odroidc2"
 
