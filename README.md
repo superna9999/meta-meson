@@ -39,14 +39,14 @@ amlogic-bsp/build$ bitbake-layers add-layer $PWD/../meta-meson/
 
 ## Selecting Machine to build for
 
-This layer aimes to support all mainlime supported boards, but some
+This layer aims to support all mainline supported boards, but some
 of them have a vendor U-Boot loaded on the eMMC and can only be booted
 by pressing the "update" button.
 
 The libretech-cc, hardkernel-odroidc2, amlogic-p212 and khadas-vim are fully mainline sdcard
 images, with mainline U-Boot and mainline Linux with a single ext4
-partition. To boot this image the eMMC u-boot must be disables by erasing
-the first sectors of the eMMC or removing it for libretech-cc and hardkernel-odroidc2.
+partition. To boot this image the eMMC u-boot must be disabled by erasing
+the first sectors of the eMMC or removing it for libretech-cc and hardkernel-odroidc2 boards.
 
 Available S805 machines are :
  - hardkernel-odroidc1 : .wic image to be booted using vendor u-boot
