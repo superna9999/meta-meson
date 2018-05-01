@@ -5,15 +5,14 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
 # tag: v4.16.5
-SRCREV_meson="e5ce9f6879d3fe20435f34dfd86fb76c36072916"
-LINUX_VERSION ?= "4.16.5"
+SRCREV_meson="22bc2b8a6aa4f3c42ff243b1528afd498c8150b1"
+LINUX_VERSION ?= "4.16.6"
 	
 # Linux stable tree
 SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=https;branch=linux-4.16.y;name=meson \
            file://0001-drm-meson-Call-drm_crtc_vblank_on-drm_crtc_vblank_of.patch \
            file://0002-drm-meson-select-dw-hdmi-i2s-audio-for-meson-hdmi.patch \
            file://0003-drm-meson-Add-support-for-DMT-modes-on-HDMI.patch \
-           file://0004-drm-bridge-dw-hdmi-Fix-overflow-workaround-for-Amlog.patch \
            file://0005-media-rc-meson-ir-add-timeout-on-idle.patch \
            file://0006-ASoC-meson-add-meson-audio-core-driver.patch \
            file://0007-ASoC-meson-add-register-definitions.patch \

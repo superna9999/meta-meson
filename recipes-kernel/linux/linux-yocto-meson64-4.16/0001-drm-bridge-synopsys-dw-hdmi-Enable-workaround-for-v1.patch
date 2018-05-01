@@ -1,7 +1,8 @@
-From f1661d1342fbbf1c24f6fc9a9a596a92d74d043a Mon Sep 17 00:00:00 2001
+From cad9f3bcc4dd215dc9d78ce3fbdf75047cd79237 Mon Sep 17 00:00:00 2001
 From: Jernej Skrabec <jernej.skrabec@siol.net>
 Date: Sat, 2 Sep 2017 19:41:54 +0200
-Subject: [PATCH] drm/bridge/synopsys: dw-hdmi: Enable workaround for v1.32a
+Subject: [PATCH 157/163] drm/bridge/synopsys: dw-hdmi: Enable workaround for
+ v1.32a
 
 Allwinner SoCs have dw hdmi controller v1.32a which exhibits same
 magenta line issue as i.MX6Q and i.MX6DL. Enable workaround for it.
@@ -10,29 +11,33 @@ Tests show that one iteration is enough.
 
 Acked-by: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
 Signed-off-by: Jernej Skrabec <jernej.skrabec@siol.net>
+
+%% original patch: 0001-drm-bridge-synopsys-dw-hdmi-Enable-workaround-for-v1.patch
 ---
- drivers/gpu/drm/bridge/synopsys/dw-hdmi.c | 8 +++++---
- 1 file changed, 5 insertions(+), 3 deletions(-)
+ drivers/gpu/drm/bridge/synopsys/dw-hdmi.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
-index f5018f9..9b39653 100644
+index 5fe6d4d..f63ba3e 100644
 --- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
 +++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
-@@ -1634,9 +1634,10 @@ static void dw_hdmi_clear_overflow(struct dw_hdmi *hdmi)
+@@ -1650,10 +1650,11 @@ static void dw_hdmi_clear_overflow(struct dw_hdmi *hdmi)
  	 * then write one of the FC registers several times.
  	 *
  	 * The number of iterations matters and depends on the HDMI TX revision
 -	 * (and possibly on the platform). So far only i.MX6Q (v1.30a) and
 -	 * i.MX6DL (v1.31a) have been identified as needing the workaround, with
 -	 * 4 and 1 iterations respectively.
+-	 * The Amlogic Meson GX SoCs (v2.01a) have been identified as needing
 +	 * (and possibly on the platform). So far i.MX6Q (v1.30a), i.MX6DL
 +	 * (v1.31a) and multiple Allwinner SoCs (v1.32a) have been identified
 +	 * as needing the workaround, with 4 iterations for v1.30a and 1
 +	 * iteration for others.
- 	 * The Amlogic Meson GX SoCs (v2.01a) have been identifies as needing
++	 * The Amlogic Meson GX SoCs (v2.01a) have been identifies as needing
  	 * the workaround with a single iteration.
  	 */
-@@ -1646,6 +1647,7 @@ static void dw_hdmi_clear_overflow(struct dw_hdmi *hdmi)
+ 
+@@ -1662,6 +1663,7 @@ static void dw_hdmi_clear_overflow(struct dw_hdmi *hdmi)
  		count = 4;
  		break;
  	case 0x131a:
@@ -40,3 +45,6 @@ index f5018f9..9b39653 100644
  	case 0x201a:
  		count = 1;
  		break;
+-- 
+2.9.5
+
