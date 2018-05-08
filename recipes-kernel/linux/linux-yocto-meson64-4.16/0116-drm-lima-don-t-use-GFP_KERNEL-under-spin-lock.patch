@@ -1,7 +1,7 @@
-From cb97c3aa41fe3cce74e9d85f5d03a4368117711f Mon Sep 17 00:00:00 2001
+From 90db5bcd61ae07a652ce00ff2dd283724d4f6dcc Mon Sep 17 00:00:00 2001
 From: Alban Browaeys <alban.browaeys@gmail.com>
 Date: Thu, 12 Apr 2018 15:12:14 +0200
-Subject: [PATCH] drm/lima: don't use GFP_KERNEL under spin lock
+Subject: [PATCH 116/123] drm/lima: don't use GFP_KERNEL under spin lock
 
 Try to preallocate the memory with idr_prealloc(GFP_KERNEL)
 and change the allocation flags under spin lock.
@@ -41,3 +41,6 @@ index 2836cca..24ca647 100644
  err_out0:
  	for (i--; i >= 0; i--)
  		lima_sched_context_fini(dev->pipe[i], ctx->context + i);
+-- 
+2.0.1
+
