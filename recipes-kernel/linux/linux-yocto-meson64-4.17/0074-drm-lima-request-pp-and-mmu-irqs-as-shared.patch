@@ -1,0 +1,51 @@
+From 93eff1ba4c7f43bfb05da4127c10f5f96061c77e Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Sun, 3 Sep 2017 00:59:03 +0200
+Subject: [PATCH 074/134] drm/lima: request pp and mmu irqs as shared
+
+Some platform, like all Rockchip SoCs using Mali400 GPUs, may
+only have one interrupt line for all PPs as well as one interrupt
+line for all MMUs.
+
+Therefore request these interrupts as shared to allow that.
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+Reviewed-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_mmu.c | 4 ++--
+ drivers/gpu/drm/lima/lima_pp.c  | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_mmu.c b/drivers/gpu/drm/lima/lima_mmu.c
+index 8dd6996..06ccc6d5 100644
+--- a/drivers/gpu/drm/lima/lima_mmu.c
++++ b/drivers/gpu/drm/lima/lima_mmu.c
+@@ -87,8 +87,8 @@ int lima_mmu_init(struct lima_mmu *mmu)
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_request_irq(dev->dev, mmu->ip.irq, lima_mmu_irq_handler, 0,
+-			       mmu->ip.name, mmu);
++	err = devm_request_irq(dev->dev, mmu->ip.irq, lima_mmu_irq_handler,
++			       IRQF_SHARED, mmu->ip.name, mmu);
+ 	if (err) {
+ 		dev_err(dev->dev, "mmu %s fail to request irq\n", mmu->ip.name);
+ 		return err;
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+index 86d741a..751c55f 100644
+--- a/drivers/gpu/drm/lima/lima_pp.c
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -205,8 +205,8 @@ int lima_pp_core_init(struct lima_pp_core *core)
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler, 0,
+-			       core->ip.name, core);
++	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler,
++			       IRQF_SHARED, core->ip.name, core);
+ 	if (err) {
+ 		dev_err(dev->dev, "pp %s fail to request irq\n", core->ip.name);
+ 		return err;
+-- 
+2.0.1
+

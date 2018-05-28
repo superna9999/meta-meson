@@ -1,0 +1,41 @@
+From a2fe6421c1d66116e42553afde8c3eb0777b8b50 Mon Sep 17 00:00:00 2001
+From: Koen Kooi <koen@dominion.thruhere.net>
+Date: Fri, 11 May 2018 13:26:33 +0200
+Subject: [PATCH 4/4] meson-overlay: deal with
+ drm_atomic_helper_check_plane_state() API change
+
+Upstream commit 81af63a4af82e739aaa391d1fbb97e02c58ea6a1 changed the
+API, adjust the code to match.
+
+Signed-off-by: Koen Kooi <koen@dominion.thruhere.net>
+---
+ drivers/gpu/drm/meson/meson_overlay.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/meson/meson_overlay.c b/drivers/gpu/drm/meson/meson_overlay.c
+index 076d688..4da61f0 100644
+--- a/drivers/gpu/drm/meson/meson_overlay.c
++++ b/drivers/gpu/drm/meson/meson_overlay.c
+@@ -86,7 +86,6 @@ static int meson_overlay_atomic_check(struct drm_plane *plane,
+ 				    struct drm_plane_state *state)
+ {
+ 	struct drm_crtc_state *crtc_state;
+-	struct drm_rect clip = { 0, };
+ 
+ 	DRM_DEBUG_DRIVER("\n");
+ 
+@@ -101,10 +100,8 @@ static int meson_overlay_atomic_check(struct drm_plane *plane,
+ 
+ 	DRM_DEBUG_DRIVER("\n");
+ 
+-	clip.x2 = crtc_state->mode.hdisplay;
+-	clip.y2 = crtc_state->mode.vdisplay;
+ 
+-	return drm_atomic_helper_check_plane_state(state, crtc_state, &clip,
++	return drm_atomic_helper_check_plane_state(state, crtc_state,
+ 						   DRM_PLANE_HELPER_NO_SCALING,
+ 						   DRM_PLANE_HELPER_NO_SCALING,
+ 						   true, true);
+-- 
+2.0.1
+

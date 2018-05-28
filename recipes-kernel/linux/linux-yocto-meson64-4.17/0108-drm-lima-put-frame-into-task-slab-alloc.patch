@@ -1,0 +1,495 @@
+From 78be46b11aacdc7217138edcb9baef9cd54393d3 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Fri, 9 Feb 2018 14:30:17 +0800
+Subject: [PATCH 108/134] drm/lima: put frame into task slab alloc
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h        |  7 ++--
+ drivers/gpu/drm/lima/lima_device.c |  8 ++++-
+ drivers/gpu/drm/lima/lima_drv.c    | 21 +++++------
+ drivers/gpu/drm/lima/lima_gem.c    | 13 +++----
+ drivers/gpu/drm/lima/lima_gp.c     | 45 ++++++++++++++---------
+ drivers/gpu/drm/lima/lima_pp.c     | 41 +++++++++++++++------
+ drivers/gpu/drm/lima/lima_sched.c  | 73 ++++++++++----------------------------
+ drivers/gpu/drm/lima/lima_sched.h  | 12 ++++---
+ 8 files changed, 112 insertions(+), 108 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 621d69d..3ffda1f 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -158,7 +158,8 @@ void lima_gp_fini(struct lima_gp *gp);
+ 
+ int lima_pp_core_init(struct lima_pp_core *core);
+ void lima_pp_core_fini(struct lima_pp_core *core);
+-void lima_pp_init(struct lima_pp *pp);
++int lima_pp_init(struct lima_pp *pp);
++void lima_pp_fini(struct lima_pp *pp);
+ 
+ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+ 			   u32 size, u32 flags, u32 *handle);
+@@ -170,8 +171,8 @@ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
+ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
+ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
+ int lima_gem_submit(struct drm_file *file, int pipe,
+-		    struct drm_lima_gem_submit_bo *bos,
+-		    u32 nr_bos, void *frame, u32 *fence);
++		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
++		    struct lima_sched_task *task, u32 *fence);
+ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
+ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
+ 						      struct dma_buf_attachment *attach,
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index 5cf346f..61c9c8166 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -236,7 +236,11 @@ static int lima_pp_group_init(struct lima_device *dev)
+ 	dev->pipe[LIMA_PIPE_PP] = &pp->pipe;
+ 	for (i = 0; i < pp->num_core; i++)
+ 		pp->core[i].mmu.pipe = &pp->pipe;
+-	lima_pp_init(pp);
++
++	err = lima_pp_init(pp);
++	if (err)
++		return err;
++
+ 	return 0;
+ }
+ 
+@@ -336,6 +340,8 @@ void lima_device_fini(struct lima_device *ldev)
+ 	}
+ 
+ 	if (ldev->pp) {
++		lima_pp_fini(ldev->pp);
++
+ 		for (i = 0; i < ldev->pp->num_core; i++) {
+ 			lima_pp_core_fini(ldev->pp->core + i);
+ 			lima_mmu_fini(&ldev->pp->core[i].mmu);
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 800ebf6..0159266 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -75,17 +75,16 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 	struct drm_lima_gem_submit *args = data;
+ 	struct drm_lima_gem_submit_bo *bos;
+ 	int err = 0;
+-	void *frame;
+ 	struct lima_device *ldev = to_lima_dev(dev);
+ 	struct lima_sched_pipe *pipe;
++	struct lima_sched_task *task;
+ 
+ 	if (args->pipe >= ARRAY_SIZE(ldev->pipe) || args->nr_bos == 0)
+ 		return -EINVAL;
+ 
+ 	pipe = ldev->pipe[args->pipe];
+-	err = pipe->task_validate(pipe->data, NULL, args->frame_size);
+-	if (err)
+-		return err;
++	if (args->frame_size != pipe->frame_size)
++		return -EINVAL;
+ 
+ 	bos = kmalloc(args->nr_bos * sizeof(*bos), GFP_KERNEL);
+ 	if (!bos)
+@@ -95,25 +94,27 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 		goto out0;
+ 	}
+ 
+-	frame = kmalloc(args->frame_size, GFP_KERNEL);
+-	if (!frame) {
++	task = kmem_cache_zalloc(pipe->task_slab, GFP_KERNEL);
++	if (!task) {
+ 		err = -ENOMEM;
+ 		goto out0;
+ 	}
+-	if (copy_from_user(frame, u64_to_user_ptr(args->frame), args->frame_size)) {
++
++	task->frame = task + 1;
++	if (copy_from_user(task->frame, u64_to_user_ptr(args->frame), args->frame_size)) {
+ 		err = -EFAULT;
+ 		goto out1;
+ 	}
+ 
+-	err = pipe->task_validate(pipe->data, frame, 0);
++	err = pipe->task_validate(pipe->data, task);
+ 	if (err)
+ 		goto out1;
+ 
+-	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, frame, &args->fence);
++	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, task, &args->fence);
+ 
+ out1:
+ 	if (err)
+-		kfree(frame);
++		kmem_cache_free(pipe->task_slab, task);
+ out0:
+ 	kfree(bos);
+ 	return err;
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index ccb9b3c..b3e4a3e 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -414,13 +414,12 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
+ }
+ 
+ int lima_gem_submit(struct drm_file *file, int pipe,
+-		    struct drm_lima_gem_submit_bo *bos,
+-		    u32 nr_bos, void *frame, u32 *fence)
++		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
++		    struct lima_sched_task *task, u32 *fence)
+ {
+ 	struct lima_bo **lbos;
+ 	int i, err = 0;
+ 	struct ww_acquire_ctx ctx;
+-	struct lima_sched_task *task;
+ 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
+ 
+ 	lbos = kzalloc(sizeof(*lbos) * nr_bos, GFP_KERNEL);
+@@ -442,11 +441,9 @@ int lima_gem_submit(struct drm_file *file, int pipe,
+ 	if (err)
+ 		goto out0;
+ 
+-	task = lima_sched_task_create(priv->context + pipe, priv->vm, frame);
+-	if (IS_ERR(task)) {
+-		err = PTR_ERR(task);
++	err = lima_sched_task_init(task, priv->context + pipe, priv->vm);
++	if (err)
+ 		goto out1;
+-	}
+ 
+ 	for (i = 0; i < nr_bos; i++) {
+ 		err = lima_gem_sync_bo(task, lbos[i], bos[i].flags & LIMA_SUBMIT_BO_WRITE);
+@@ -467,7 +464,7 @@ int lima_gem_submit(struct drm_file *file, int pipe,
+ 
+ out2:
+ 	if (err)
+-		lima_sched_task_delete(task);
++		lima_sched_task_fini(task);
+ out1:
+ 	for (i = 0; i < nr_bos; i++)
+ 		ww_mutex_unlock(&lbos[i]->resv->lock);
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+index 871df5f..6ae555f 100644
+--- a/drivers/gpu/drm/lima/lima_gp.c
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -182,25 +182,19 @@ static int lima_gp_soft_reset_async_wait(struct lima_gp *gp)
+ 	return 0;
+ }
+ 
+-static int lima_gp_task_validate(void *data, void *frame, uint32_t frame_size)
++static int lima_gp_task_validate(void *data, struct lima_sched_task *task)
+ {
++	struct drm_lima_m400_gp_frame *f = task->frame;
+ 	(void)data;
+ 
+-	if (frame_size && frame_size != sizeof(struct drm_lima_m400_gp_frame))
++	if (f->vs_cmd_start > f->vs_cmd_end ||
++	    f->plbu_cmd_start > f->plbu_cmd_end ||
++	    f->tile_heap_start > f->tile_heap_end)
+ 		return -EINVAL;
+ 
+-	if (frame) {
+-		struct drm_lima_m400_gp_frame *f = frame;
+-
+-		if (f->vs_cmd_start > f->vs_cmd_end ||
+-		    f->plbu_cmd_start > f->plbu_cmd_end ||
+-		    f->tile_heap_start > f->tile_heap_end)
+-			return -EINVAL;
+-
+-		if (f->vs_cmd_start == f->vs_cmd_end &&
+-		    f->plbu_cmd_start == f->plbu_cmd_end)
+-			return -EINVAL;
+-	}
++	if (f->vs_cmd_start == f->vs_cmd_end &&
++	    f->plbu_cmd_start == f->plbu_cmd_end)
++		return -EINVAL;
+ 
+ 	return 0;
+ }
+@@ -305,10 +299,13 @@ static void lima_gp_print_version(struct lima_gp *gp)
+ 		 gp->ip.name, name, major, minor);
+ }
+ 
++static struct kmem_cache *lima_gp_task_slab = NULL;
++static int lima_gp_task_slab_refcnt = 0;
++
+ int lima_gp_init(struct lima_gp *gp)
+ {
+ 	struct lima_device *dev = gp->ip.dev;
+-	int err;
++	int err, frame_size;
+ 
+ 	lima_gp_print_version(gp);
+ 
+@@ -325,6 +322,19 @@ int lima_gp_init(struct lima_gp *gp)
+ 		return err;
+ 	}
+ 
++	frame_size = sizeof(struct drm_lima_m400_gp_frame);
++	if (!lima_gp_task_slab) {
++		lima_gp_task_slab = kmem_cache_create(
++			"lima_gp_task", sizeof(struct lima_sched_task) + frame_size,
++			0, SLAB_HWCACHE_ALIGN, NULL);
++		if (!lima_gp_task_slab)
++			return -ENOMEM;
++	}
++	lima_gp_task_slab_refcnt++;
++
++	gp->pipe.frame_size = frame_size;
++	gp->pipe.task_slab = lima_gp_task_slab;
++
+ 	gp->pipe.task_validate = lima_gp_task_validate;
+ 	gp->pipe.task_run = lima_gp_task_run;
+ 	gp->pipe.task_fini = lima_gp_task_fini;
+@@ -339,5 +349,8 @@ int lima_gp_init(struct lima_gp *gp)
+ 
+ void lima_gp_fini(struct lima_gp *gp)
+ {
+-
++	if (!--lima_gp_task_slab_refcnt) {
++		kmem_cache_destroy(lima_gp_task_slab);
++		lima_gp_task_slab = NULL;
++	}
+ }
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+index cda59f2..f9cead4 100644
+--- a/drivers/gpu/drm/lima/lima_pp.c
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -262,20 +262,14 @@ void lima_pp_core_fini(struct lima_pp_core *core)
+ 	
+ }
+ 
+-static int lima_pp_task_validate(void *data, void *frame, uint32_t frame_size)
++static int lima_pp_task_validate(void *data, struct lima_sched_task *task)
+ {
+ 	struct lima_pp *pp = data;
++	struct drm_lima_m400_pp_frame *f = task->frame;
+ 
+-	if (frame_size && frame_size != sizeof(struct drm_lima_m400_pp_frame))
++	if (f->num_pp > pp->num_core)
+ 		return -EINVAL;
+ 
+-	if (frame) {
+-		struct drm_lima_m400_pp_frame *f = frame;
+-
+-		if (f->num_pp > pp->num_core)
+-			return -EINVAL;
+-	}
+-
+ 	return 0;
+ }
+ 
+@@ -319,9 +313,25 @@ static void lima_pp_task_mmu_error(void *data)
+ 		lima_sched_pipe_task_done(&pp->pipe, pp->error);
+ }
+ 
+-void lima_pp_init(struct lima_pp *pp)
++static struct kmem_cache *lima_pp_task_slab = NULL;
++static int lima_pp_task_slab_refcnt = 0;
++
++int lima_pp_init(struct lima_pp *pp)
+ {
+-	int i;
++	int i, frame_size;
++
++	frame_size = sizeof(struct drm_lima_m400_pp_frame);
++	if (!lima_pp_task_slab) {
++		lima_pp_task_slab = kmem_cache_create(
++			"lima_pp_task", sizeof(struct lima_sched_task) + frame_size,
++			0, SLAB_HWCACHE_ALIGN, NULL);
++		if (!lima_pp_task_slab)
++			return -ENOMEM;
++	}
++	lima_pp_task_slab_refcnt++;
++
++	pp->pipe.frame_size = frame_size;
++	pp->pipe.task_slab = lima_pp_task_slab;
+ 
+ 	pp->pipe.task_validate = lima_pp_task_validate;
+ 	pp->pipe.task_run = lima_pp_task_run;
+@@ -333,4 +343,13 @@ void lima_pp_init(struct lima_pp *pp)
+ 	for (i = 0; i < pp->num_core; i++)
+ 		pp->pipe.mmu[i] = &pp->core[i].mmu;
+ 	pp->pipe.num_mmu = pp->num_core;
++	return 0;
++}
++
++void lima_pp_fini(struct lima_pp *pp)
++{
++	if (!--lima_pp_task_slab_refcnt) {
++		kmem_cache_destroy(lima_pp_task_slab);
++		lima_pp_task_slab = NULL;
++	}
+ }
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index f1354bf..69e7471 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -8,7 +8,6 @@ struct lima_fence {
+ };
+ 
+ static struct kmem_cache *lima_fence_slab = NULL;
+-static struct kmem_cache *lima_sched_task_slab = NULL;
+ 
+ int lima_sched_slab_init(void)
+ {
+@@ -18,21 +17,11 @@ int lima_sched_slab_init(void)
+ 	if (!lima_fence_slab)
+ 		return -ENOMEM;
+ 
+-	lima_sched_task_slab = kmem_cache_create(
+-		"lima_sched_task", sizeof(struct lima_sched_task), 0,
+-		SLAB_HWCACHE_ALIGN, NULL);
+-	if (!lima_sched_task_slab) {
+-		kmem_cache_destroy(lima_fence_slab);
+-		return -ENOMEM;
+-	}
+-
+ 	return 0;
+ }
+ 
+ void lima_sched_slab_fini(void)
+ {
+-	if (lima_sched_task_slab)
+-		kmem_cache_destroy(lima_sched_task_slab);
+ 	if (lima_fence_slab)
+ 		kmem_cache_destroy(lima_fence_slab);
+ }
+@@ -92,61 +81,39 @@ static inline struct lima_sched_pipe *to_lima_pipe(struct drm_gpu_scheduler *sch
+ 	return container_of(sched, struct lima_sched_pipe, base);
+ }
+ 
+-struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *context,
+-					       struct lima_vm *vm, void *frame)
++int lima_sched_task_init(struct lima_sched_task *task,
++			 struct lima_sched_context *context,
++			 struct lima_vm *vm)
+ {
+-	struct lima_sched_task *task;
+ 	struct lima_fence *fence;
+ 	int err;
+ 
+-	task = kmem_cache_zalloc(lima_sched_task_slab, GFP_KERNEL);
+-	if (!task)
+-		return ERR_PTR(-ENOMEM);
+-
+ 	fence = kmem_cache_zalloc(lima_fence_slab, GFP_KERNEL);
+-	if (!fence) {
+-	       err = -ENOMEM;
+-	       goto err_out0;
+-	}
++	if (!fence)
++	       return -ENOMEM;
+ 
+ 	err = drm_sched_job_init(&task->base, context->base.sched,
+ 				 &context->base, context);
+ 	if (err)
+-		goto err_out1;
++		goto err_out0;
+ 
+ 	task->vm = lima_vm_get(vm);
+-	task->frame = frame;
+ 	task->fence = &fence->base;
++	return 0;
+ 
+-	return task;
+-
+-err_out1:
+-	kmem_cache_free(lima_fence_slab, fence);
+ err_out0:
+-	kmem_cache_free(lima_sched_task_slab, task);
+-	return ERR_PTR(err);
++	kmem_cache_free(lima_fence_slab, fence);
++	return err;
+ }
+ 
+-void lima_sched_task_delete(struct lima_sched_task *task)
++void lima_sched_task_fini(struct lima_sched_task *task)
+ {
+-	if (task->base.s_fence)
+-		dma_fence_put(&task->base.s_fence->finished);
+-
+-	if (task->fence) {
+-		struct lima_fence *fence = to_lima_fence(task->fence);
+-		kmem_cache_free(lima_fence_slab, fence);
+-	}
+-
+-	if (task->dep)
+-		kfree(task->dep);
+-
+-	if (task->frame)
+-		kfree(task->frame);
++	struct lima_fence *fence = to_lima_fence(task->fence);
++	kmem_cache_free(lima_fence_slab, fence);
+ 
+-	if (task->vm)
+-		lima_vm_put(task->vm);
++	dma_fence_put(&task->base.s_fence->finished);
+ 
+-	kmem_cache_free(lima_sched_task_slab, task);
++	lima_vm_put(task->vm);
+ }
+ 
+ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence)
+@@ -401,10 +368,10 @@ static void lima_sched_timedout_job(struct drm_sched_job *job)
+ static void lima_sched_free_job(struct drm_sched_job *job)
+ {
+ 	struct lima_sched_task *task = to_lima_task(job);
++	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
+ 	int i;
+ 
+-	if (task->fence)
+-		dma_fence_put(task->fence);
++	dma_fence_put(task->fence);
+ 
+ 	for (i = 0; i < task->num_dep; i++) {
+ 		if (task->dep[i])
+@@ -414,13 +381,9 @@ static void lima_sched_free_job(struct drm_sched_job *job)
+ 	if (task->dep)
+ 		kfree(task->dep);
+ 
+-	if (task->frame)
+-		kfree(task->frame);
+-
+-	if (task->vm)
+-		lima_vm_put(task->vm);
++	lima_vm_put(task->vm);
+ 
+-	kmem_cache_free(lima_sched_task_slab, task);
++	kmem_cache_free(pipe->task_slab, task);
+ }
+ 
+ const struct drm_sched_backend_ops lima_sched_ops = {
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index 0241aa1..1e777b6 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -58,7 +58,10 @@ struct lima_sched_pipe {
+ 	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
+ 	int num_mmu;
+ 
+-	int (*task_validate)(void *data, void *frame, uint32_t frame_size);
++	int frame_size;
++	struct kmem_cache *task_slab;
++
++	int (*task_validate)(void *data, struct lima_sched_task *task);
+ 	void (*task_run)(void *data, struct lima_sched_task *task);
+ 	void (*task_fini)(void *data);
+ 	void (*task_error)(void *data);
+@@ -68,9 +71,10 @@ struct lima_sched_pipe {
+ 	struct work_struct error_work;
+ };
+ 
+-struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *context,
+-					       struct lima_vm *vm, void *frame);
+-void lima_sched_task_delete(struct lima_sched_task *task);
++int lima_sched_task_init(struct lima_sched_task *task,
++			 struct lima_sched_context *context,
++			 struct lima_vm *vm);
++void lima_sched_task_fini(struct lima_sched_task *task);
+ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
+ 
+ int lima_sched_context_init(struct lima_sched_pipe *pipe,
+-- 
+2.0.1
+

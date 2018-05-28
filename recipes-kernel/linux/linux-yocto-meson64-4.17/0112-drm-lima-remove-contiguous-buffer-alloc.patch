@@ -1,0 +1,322 @@
+From 169e077bb09c36cf2f7faa3ea5cce2a7a38d4954 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 11 Mar 2018 18:59:16 +0800
+Subject: [PATCH 112/134] drm/lima: remove contiguous buffer alloc
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_drv.c       |  2 +-
+ drivers/gpu/drm/lima/lima_gem.c       | 86 +++++++++--------------------------
+ drivers/gpu/drm/lima/lima_gem.h       |  3 --
+ drivers/gpu/drm/lima/lima_gem_prime.c | 59 ++++++++----------------
+ drivers/gpu/drm/lima/lima_vm.c        | 14 +-----
+ drivers/gpu/drm/lima/lima_vm.h        |  2 +-
+ include/uapi/drm/lima_drm.h           |  2 -
+ 7 files changed, 44 insertions(+), 124 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 1068f2b1..21feb89 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -45,7 +45,7 @@ static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_
+ {
+ 	struct drm_lima_gem_create *args = data;
+ 
+-	if (args->flags & ~(LIMA_GEM_CREATE_CONTIGUOUS))
++	if (args->flags)
+ 		return -EINVAL;
+ 
+ 	if (args->size == 0)
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index e304d52..ef65e08 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -41,34 +41,6 @@ static struct lima_bo_ops lima_bo_shmem_ops = {
+ 	.mmap = lima_bo_shmem_mmap,
+ };
+ 
+-static void lima_bo_cma_release(struct lima_bo *bo)
+-{
+-	if (bo->cpu_addr)
+-		dma_free_wc(bo->gem.dev->dev, bo->gem.size, bo->cpu_addr,
+-			    bo->dma_addr);
+-}
+-
+-static int lima_bo_cma_mmap(struct lima_bo *bo, struct vm_area_struct *vma)
+-{
+-	int err = 0;
+-	unsigned long vm_pgoff = vma->vm_pgoff;
+-
+-	vma->vm_flags &= ~VM_PFNMAP;
+-	vma->vm_pgoff = 0;
+-
+-	err = dma_mmap_wc(bo->gem.dev->dev, vma, bo->cpu_addr,
+-			  bo->dma_addr, bo->gem.size);
+-
+-	vma->vm_pgoff = vm_pgoff;
+-
+-	return 0;
+-}
+-
+-static struct lima_bo_ops lima_bo_cma_ops = {
+-	.release = lima_bo_cma_release,
+-	.mmap = lima_bo_cma_mmap,
+-};
+-
+ struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 flags)
+ {
+ 	int err;
+@@ -98,7 +70,7 @@ struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 flags)
+ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+ 			   u32 size, u32 flags, u32 *handle)
+ {
+-	int err;
++	int err, npages, i;
+ 	struct lima_bo *bo;
+ 	gfp_t mask;
+ 
+@@ -114,46 +86,32 @@ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+ 	mask = GFP_DMA;
+ #endif
+ 
+-	if (flags & LIMA_GEM_CREATE_CONTIGUOUS) {
+-		bo->type = lima_bo_type_cma;
+-		bo->ops = &lima_bo_cma_ops;
++	bo->type = lima_bo_type_shmem;
++	bo->ops = &lima_bo_shmem_ops;
+ 
+-		bo->cpu_addr = dma_alloc_wc(dev->dev, size, &bo->dma_addr, mask);
+-		if (!bo->cpu_addr) {
+-			err = -ENOMEM;
+-			goto err_out;
+-		}
++	mapping_set_gfp_mask(bo->gem.filp->f_mapping, mask);
++	bo->pages = drm_gem_get_pages(&bo->gem);
++	if (IS_ERR(bo->pages)) {
++		err = PTR_ERR(bo->pages);
++		bo->pages = NULL;
++		goto err_out;
+ 	}
+-	else {
+-		int npages, i;
+ 
+-		bo->type = lima_bo_type_shmem;
+-		bo->ops = &lima_bo_shmem_ops;
+-
+-		mapping_set_gfp_mask(bo->gem.filp->f_mapping, mask);
+-		bo->pages = drm_gem_get_pages(&bo->gem);
+-		if (IS_ERR(bo->pages)) {
+-			err = PTR_ERR(bo->pages);
+-			bo->pages = NULL;
+-			goto err_out;
+-		}
++	npages = bo->gem.size >> PAGE_SHIFT;
++	bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
++	if (!bo->pages_dma_addr) {
++		err = -ENOMEM;
++		goto err_out;
++	}
+ 
+-		npages = bo->gem.size >> PAGE_SHIFT;
+-		bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
+-		if (!bo->pages_dma_addr) {
+-			err = -ENOMEM;
++	for (i = 0; i < npages; i++) {
++		dma_addr_t addr = dma_map_page(dev->dev, bo->pages[i], 0,
++					       PAGE_SIZE, DMA_BIDIRECTIONAL);
++		if (dma_mapping_error(dev->dev, addr)) {
++			err = -EFAULT;
+ 			goto err_out;
+ 		}
+-
+-		for (i = 0; i < npages; i++) {
+-			dma_addr_t addr = dma_map_page(dev->dev, bo->pages[i], 0,
+-						       PAGE_SIZE, DMA_BIDIRECTIONAL);
+-			if (dma_mapping_error(dev->dev, addr)) {
+-				err = -EFAULT;
+-				goto err_out;
+-			}
+-			bo->pages_dma_addr[i] = addr;
+-		}
++		bo->pages_dma_addr[i] = addr;
+ 	}
+ 
+ 	bo->resv = &bo->_resv;
+@@ -371,7 +329,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 	bo_va = lima_gem_find_bo_va(bo, vm);
+ 	BUG_ON(!bo_va);
+ 
+-	err = lima_vm_map(vm, bo->pages_dma_addr, bo->dma_addr, mapping);
++	err = lima_vm_map(vm, bo->pages_dma_addr, mapping);
+ 	if (err)
+ 		goto err_out1;
+ 
+diff --git a/drivers/gpu/drm/lima/lima_gem.h b/drivers/gpu/drm/lima/lima_gem.h
+index f644160..0bc74ef 100644
+--- a/drivers/gpu/drm/lima/lima_gem.h
++++ b/drivers/gpu/drm/lima/lima_gem.h
+@@ -47,12 +47,9 @@ struct lima_bo {
+ 
+ 	enum lima_bo_type {
+ 		lima_bo_type_shmem,
+-		lima_bo_type_cma,
+ 		lima_bo_type_dma_buf,
+ 	} type;
+ 
+-	dma_addr_t dma_addr;
+-	void *cpu_addr;
+ 	struct page **pages;
+ 	dma_addr_t *pages_dma_addr;	
+ 	struct sg_table *sgt;
+diff --git a/drivers/gpu/drm/lima/lima_gem_prime.c b/drivers/gpu/drm/lima/lima_gem_prime.c
+index 2edf8e2..f2346d5 100644
+--- a/drivers/gpu/drm/lima/lima_gem_prime.c
++++ b/drivers/gpu/drm/lima/lima_gem_prime.c
+@@ -53,6 +53,7 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(
+ {
+ 	struct lima_bo *bo;
+ 	struct drm_gem_object *ret;
++	int err, npages = attach->dmabuf->size >> PAGE_SHIFT;
+ 
+ 	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
+ 	if (!bo)
+@@ -62,31 +63,23 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(
+ 	bo->ops = &lima_bo_dma_buf_ops;
+ 	bo->sgt = sgt;
+ 
+-	if (sgt->nents == 1) {
+-		bo->cpu_addr = sg_virt(sgt->sgl);
+-		bo->dma_addr = sg_dma_address(sgt->sgl);
++	bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
++	if (!bo->pages_dma_addr) {
++		ret = ERR_PTR(-ENOMEM);
++		goto err_out;
+ 	}
+-	else {
+-		int err, npages = attach->dmabuf->size >> PAGE_SHIFT;
+-
+-		bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
+-		if (!bo->pages_dma_addr) {
+-			ret = ERR_PTR(-ENOMEM);
+-			goto err_out;
+-		}
+-
+-		bo->pages = kzalloc(npages * sizeof(*bo->pages), GFP_KERNEL);
+-		if (!bo->pages) {
+-			ret = ERR_PTR(-ENOMEM);
+-			goto err_out;
+-		}
+-
+-		err = drm_prime_sg_to_page_addr_arrays(
+-			sgt, bo->pages, bo->pages_dma_addr, npages);
+-	        if (err) {
+-			ret = ERR_PTR(err);
+-			goto err_out;
+-		}
++
++	bo->pages = kzalloc(npages * sizeof(*bo->pages), GFP_KERNEL);
++	if (!bo->pages) {
++		ret = ERR_PTR(-ENOMEM);
++		goto err_out;
++	}
++
++	err = drm_prime_sg_to_page_addr_arrays(
++		sgt, bo->pages, bo->pages_dma_addr, npages);
++	if (err) {
++		ret = ERR_PTR(err);
++		goto err_out;
+ 	}
+ 
+ 	bo->resv = attach->dmabuf->resv;
+@@ -108,22 +101,6 @@ struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj)
+ struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
+ {
+ 	struct lima_bo *bo = to_lima_bo(obj);
+-	struct sg_table *sgt;
+-	int ret;
+-
+-	if (bo->pages)
+-		return drm_prime_pages_to_sg(bo->pages, obj->size >> PAGE_SHIFT);
+-
+-	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
+-	if (!sgt)
+-		return NULL;
+-
+-	ret = dma_get_sgtable(obj->dev->dev, sgt, bo->cpu_addr,
+-			      bo->dma_addr, obj->size);
+-	if (ret < 0) {
+-		kfree(sgt);
+-		return NULL;
+-	}
+ 
+-	return sgt;
++	return drm_prime_pages_to_sg(bo->pages, obj->size >> PAGE_SHIFT);
+ }
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 99852e0..1abbcaf 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -63,7 +63,7 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
+ 	}
+ }
+ 
+-int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma, dma_addr_t dma,
++int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+ 		struct lima_bo_va_mapping *mapping)
+ {
+ 	int err, i = 0;
+@@ -85,7 +85,6 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma, dma_addr_t dma,
+ 	for (addr = mapping->start; addr <= mapping->last; addr += LIMA_PAGE_SIZE) {
+ 		u32 pde = LIMA_PDE(addr);
+ 		u32 pte = LIMA_PTE(addr);
+-		dma_addr_t page_dma_addr;
+ 
+ 		if (!vm->pts[pde].cpu) {
+ 			vm->pts[pde].cpu =
+@@ -104,16 +103,7 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma, dma_addr_t dma,
+ 		 * as a reference count, 12bit is enough for 1024 max count
+ 		 */
+ 		vm->pts[pde].dma++;
+-
+-		if (pages_dma) {
+-			page_dma_addr = pages_dma[i];
+-			i++;
+-		}
+-		else {
+-			page_dma_addr = dma;
+-			dma += LIMA_PAGE_SIZE;
+-		}
+-		vm->pts[pde].cpu[pte] = page_dma_addr | LIMA_VM_FLAGS_CACHE;
++		vm->pts[pde].cpu[pte] = pages_dma[i++] | LIMA_VM_FLAGS_CACHE;
+ 	}
+ 
+ 	mutex_unlock(&vm->lock);
+diff --git a/drivers/gpu/drm/lima/lima_vm.h b/drivers/gpu/drm/lima/lima_vm.h
+index 20086e5..fb7846b 100644
+--- a/drivers/gpu/drm/lima/lima_vm.h
++++ b/drivers/gpu/drm/lima/lima_vm.h
+@@ -66,7 +66,7 @@ static inline void lima_vm_put(struct lima_vm *vm)
+ 
+ struct lima_bo_va_mapping;
+ 
+-int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma, dma_addr_t dma,
++int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
+ 		struct lima_bo_va_mapping *mapping);
+ int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping);
+ 
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index 67ae57d..9504b3a 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -37,8 +37,6 @@ struct drm_lima_info {
+ 	__u32 num_pp;  /* out */
+ };
+ 
+-#define LIMA_GEM_CREATE_CONTIGUOUS (1 << 0)
+-
+ struct drm_lima_gem_create {
+ 	__u32 size;    /* in */
+ 	__u32 flags;   /* in */
+-- 
+2.0.1
+

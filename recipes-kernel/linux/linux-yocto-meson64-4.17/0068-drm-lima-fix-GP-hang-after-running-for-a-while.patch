@@ -1,0 +1,36 @@
+From e858c29e14f19a6563403e8dc14a34f8abc1caf9 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Fri, 23 Jun 2017 17:44:36 +0800
+Subject: [PATCH 068/134] drm/lima: fix GP hang after running for a while
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_sched.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 72462d4..dc5b11f 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -233,6 +233,18 @@ static int lima_sched_pipe_worker(void *param)
+ 			}
+ 		}
+ 
++		/* this is needed for MMU to work correctly, otherwise GP/PP
++		 * will hang or page fault for unknown reason after running for
++		 * a while.
++		 *
++		 * Need to investigate:
++		 * 1. is it related to TLB
++		 * 2. how much performance will be affected by L2 cache flush
++		 * 3. can we reduce the calling of this function because all
++		 *    GP/PP use the same L2 cache
++		 */
++		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
++
+ 		for (i = 0; i < pipe->num_mmu; i++)
+ 			lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
+ 
+-- 
+2.0.1
+

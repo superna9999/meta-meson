@@ -1,0 +1,524 @@
+From f7ff45c1007dcfa4d2b651e25fb072a25cc2e50e Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 2 May 2017 14:26:22 +0800
+Subject: [PATCH 055/134] drm/lima: add wait fence ioctl
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_device.c | 113 +++++++++++++++++----------
+ drivers/gpu/drm/lima/lima_drv.c    |  12 +++
+ drivers/gpu/drm/lima/lima_gem.c    |   2 +
+ drivers/gpu/drm/lima/lima_gp.c     |  11 +++
+ drivers/gpu/drm/lima/lima_pp.c     |  11 +++
+ drivers/gpu/drm/lima/lima_sched.c  | 154 ++++++++++++++++++++++++++++++++++++-
+ drivers/gpu/drm/lima/lima_sched.h  |  17 +++-
+ include/uapi/drm/lima_drm.h        |   8 ++
+ 8 files changed, 279 insertions(+), 49 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index 64adb2d..a52980a 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -89,12 +89,80 @@ static int lima_init_ip(struct lima_device *dev, const char *name,
+ 	return 0;
+ }
+ 
++static int lima_gp_group_init(struct lima_device *dev)
++{
++	int err;
++	struct lima_gp *gp;
++
++	gp = kzalloc(sizeof(*gp), GFP_KERNEL);
++	if (!gp)
++		return -ENOMEM;
++
++	if ((err = lima_init_ip(dev, "gp-mmu", &gp->mmu.ip)) ||
++	    (err = lima_mmu_init(&gp->mmu)))
++		goto err_out0;
++
++	if ((err = lima_init_ip(dev, "gp", &gp->ip)) ||
++	    (err = lima_gp_init(gp)))
++		goto err_out1;
++
++	if ((err = lima_sched_pipe_init(&gp->pipe, gp->ip.name)))
++		goto err_out2;
++
++	dev->pipe[dev->num_pipe++] = &gp->pipe;
++	dev->gp = gp;
++	return 0;
++
++err_out2:
++	lima_gp_fini(gp);
++err_out1:
++	lima_mmu_fini(&gp->mmu);
++err_out0:
++	kfree(gp);
++	return err;
++}
++
++static int lima_pp_group_init(struct lima_device *dev, int index)
++{
++	int err;
++	struct lima_pp *pp;
++	char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
++
++	pp_name[2] += index; pp_mmu_name[2] += index;
++
++	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
++	if (!pp)
++		return -ENOMEM;
++
++	if ((err = lima_init_ip(dev, pp_mmu_name, &pp->mmu.ip)) ||
++	    (err = lima_mmu_init(&pp->mmu)))
++		goto err_out0;
++
++	if ((err = lima_init_ip(dev, pp_name, &pp->ip)) ||
++	    (err = lima_pp_init(pp)))
++		goto err_out1;
++
++	if ((err = lima_sched_pipe_init(&pp->pipe, pp->ip.name)))
++		goto err_out2;
++
++	dev->pipe[dev->num_pipe++] = &pp->pipe;
++	dev->pp[dev->num_pp++] = pp;
++	return 0;
++
++err_out2:
++	lima_pp_fini(pp);
++err_out1:
++	lima_mmu_fini(&pp->mmu);
++err_out0:
++	kfree(pp);
++	return err;
++}
++
+ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
+ {
+ 	int err, i;
+ 	struct device_node *np;
+ 	u32 num_pp;
+-	struct lima_gp *gp;
+ 
+ 	ldev->pdev = dev->platformdev;
+ 	ldev->dev = &dev->platformdev->dev;
+@@ -150,51 +218,12 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
+ 		goto err_out;
+ 	}
+ 
+-	gp = kzalloc(sizeof(*gp), GFP_KERNEL);
+-	if (!gp) {
+-		err = -ENOMEM;
+-		goto err_out;
+-	}
+-	if ((err = lima_init_ip(ldev, "gp-mmu", &gp->mmu.ip)) ||
+-	    (err = lima_mmu_init(&gp->mmu))) {
+-		kfree(gp);
++	if ((err = lima_gp_group_init(ldev)))
+ 		goto err_out;
+-	}
+-	if ((err = lima_init_ip(ldev, "gp", &gp->ip)) ||
+-	    (err = lima_gp_init(gp))) {
+-		lima_mmu_fini(&gp->mmu);
+-	        kfree(gp);
+-		goto err_out;
+-	}
+-	ldev->gp = gp;
+-	lima_sched_pipe_init(&gp->pipe, gp->ip.name);
+-	ldev->pipe[ldev->num_pipe++] = &gp->pipe;
+ 
+ 	for (i = 0; i < num_pp; i++) {
+-		struct lima_pp *pp;
+-		char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
+-
+-		pp_name[2] += i; pp_mmu_name[2] += i;
+-
+-		pp = kzalloc(sizeof(*pp), GFP_KERNEL);
+-		if (!pp) {
+-			err = -ENOMEM;
++		if ((err = lima_pp_group_init(ldev, i)))
+ 			goto err_out;
+-		}
+-		if ((err = lima_init_ip(ldev, pp_mmu_name, &pp->mmu.ip)) ||
+-		    (err = lima_mmu_init(&pp->mmu))) {
+-			kfree(pp);
+-			goto err_out;
+-		}
+-		if ((err = lima_init_ip(ldev, pp_name, &pp->ip)) ||
+-		    (err = lima_pp_init(pp))) {
+-			lima_mmu_fini(&pp->mmu);
+-			kfree(pp);
+-			goto err_out;
+-		}
+-		ldev->pp[ldev->num_pp++] = pp;
+-		lima_sched_pipe_init(&pp->pipe, pp->ip.name);
+-		ldev->pipe[ldev->num_pipe++] = &pp->pipe;
+ 	}
+ 
+ 	return 0;
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 3a16699..a056090 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -95,6 +95,17 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 	return err;
+ }
+ 
++static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_file *file)
++{
++	struct drm_lima_wait_fence *args = data;
++	struct lima_device *ldev = to_lima_dev(dev);
++
++	if (args->pipe >= ldev->num_pipe)
++		return -EINVAL;
++
++	return lima_sched_pipe_wait_fence(ldev->pipe[args->pipe], args->fence, args->timeout_ns);
++}
++
+ static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
+ {
+ 	struct lima_device *ldev;
+@@ -166,6 +177,7 @@ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
+ 	DRM_IOCTL_DEF_DRV(LIMA_GEM_INFO, lima_ioctl_gem_info, DRM_AUTH|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(LIMA_GEM_VA, lima_ioctl_gem_va, DRM_AUTH|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(LIMA_GEM_SUBMIT, lima_ioctl_gem_submit, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(LIMA_WAIT_FENCE, lima_ioctl_wait_fence, DRM_AUTH|DRM_RENDER_ALLOW),
+ };
+ 
+ extern const struct vm_operations_struct lima_gem_vm_ops;
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 4dd1e9b..abc5e76 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -382,6 +382,8 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
+ 		else
+ 			reservation_object_add_shared_fence(&lbos[i]->resv, task->fence);
+ 	}
++	dma_fence_put(task->fence);
++
+ 	*fence = task->fence->seqno;
+ 
+ out2:
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+index 2b741e7..36c5dce 100644
+--- a/drivers/gpu/drm/lima/lima_gp.c
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -1,7 +1,18 @@
+ #include "lima.h"
+ 
++static int lima_gp_start_task(void *data, struct lima_sched_task *task)
++{
++	struct lima_gp *gp = data;
++
++	DRM_INFO("lima start task gp %s\n", gp->ip.name);
++	dma_fence_signal(task->fence);
++	return 0;
++}
++
+ int lima_gp_init(struct lima_gp *gp)
+ {
++	gp->pipe.start_task = lima_gp_start_task;
++	gp->pipe.data = gp;
+ 	return 0;
+ }
+ 
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+index 408d23e..1a845fc 100644
+--- a/drivers/gpu/drm/lima/lima_pp.c
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -1,7 +1,18 @@
+ #include "lima.h"
+ 
++static int lima_pp_start_task(void *data, struct lima_sched_task *task)
++{
++	struct lima_pp *pp = data;
++
++	DRM_INFO("lima start task pp %s\n", pp->ip.name);
++	dma_fence_signal(task->fence);
++	return 0;
++}
++
+ int lima_pp_init(struct lima_pp *pp)
+ {
++	pp->pipe.start_task = lima_pp_start_task;
++	pp->pipe.data = pp;
+ 	return 0;
+ }
+ 
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 3d85500..b41b9c5 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -1,3 +1,5 @@
++#include <linux/kthread.h>
++
+ #include "lima.h"
+ 
+ struct lima_fence {
+@@ -100,6 +102,7 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
+ 
+ int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task)
+ {
++	unsigned long saved_flags;
+ 	struct lima_fence *fence;
+ 
+ 	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
+@@ -107,33 +110,176 @@ int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *
+ 		return -ENOMEM;
+ 	fence->pipe = pipe;
+ 
+-	mutex_lock(&pipe->lock);
++	spin_lock_irqsave(&pipe->lock, saved_flags);
+ 
+ 	dma_fence_init(&fence->base, &lima_fence_ops, &pipe->fence_lock,
+ 		       pipe->fence_context, ++pipe->fence_seqno);
+ 	task->fence = &fence->base;
+ 
++	/* for caller usage of the fence, otherwise pipe worker 
++	 * may consumed the fence */
++	dma_fence_get(task->fence);
++
+ 	list_add_tail(&task->list, &pipe->queue);
+ 
+-	mutex_unlock(&pipe->lock);
++	spin_unlock_irqrestore(&pipe->lock, saved_flags);
++
++	wake_up(&pipe->worker_wait);
+ 	return 0;
+ }
+ 
+-void lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
++static struct lima_sched_task *lima_sched_pipe_get_task(struct lima_sched_pipe *pipe)
+ {
++	unsigned long saved_flags;
++	struct lima_sched_task *task;
++
++	spin_lock_irqsave(&pipe->lock, saved_flags);
++	task = list_first_entry_or_null(&pipe->queue, struct lima_sched_task, list);
++	spin_unlock_irqrestore(&pipe->lock, saved_flags);
++	return task;
++}
++
++static int lima_sched_pipe_worker(void *param)
++{
++	struct lima_sched_pipe *pipe = param;
++	struct lima_sched_task *task;
++
++	while (!kthread_should_stop()) {
++		int i;
++		unsigned long saved_flags;
++
++		wait_event_interruptible(pipe->worker_wait,
++					 (task = lima_sched_pipe_get_task(pipe)) ||
++					 kthread_should_stop());
++
++		if (!task)
++			continue;
++
++		/* wait all dependent fence be signaled */
++		for (i = 0; i < task->num_dep; i++) {
++			/* interrupted by signal, may be kthread stop, ignore other error */
++			while (dma_fence_wait(task->dep[i], true) == -ERESTARTSYS) {
++				if (kthread_should_stop())
++					return 0;
++			}
++		}
++
++		if (!pipe->start_task(pipe->data, task)) {
++			while (dma_fence_wait(task->fence, true) == -ERESTARTSYS) {
++				if (kthread_should_stop())
++					return 0;
++			}
++		}
++
++		spin_lock_irqsave(&pipe->lock, saved_flags);
++		list_del(&task->list);
++		spin_unlock_irqrestore(&pipe->lock, saved_flags);
++		lima_sched_task_delete(task);
++		/* the only writer of this counter */
++		pipe->fence_done_seqno++;
++	}
++
++	return 0;
++}
++
++int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
++{
++	struct task_struct *worker;
++
+ 	pipe->name = name;
+-	mutex_init(&pipe->lock);
++	spin_lock_init(&pipe->lock);
+ 	INIT_LIST_HEAD(&pipe->queue);
+ 	pipe->fence_context = dma_fence_context_alloc(1);
+ 	spin_lock_init(&pipe->fence_lock);
++	init_waitqueue_head(&pipe->worker_wait);
++
++	worker = kthread_run(lima_sched_pipe_worker, pipe, name);
++	if (IS_ERR(worker)) {
++		DRM_ERROR("Fail to create pipe worker for %s\n", name);
++		return PTR_ERR(worker);
++	}
++	pipe->worker = worker;
++	return 0;
+ }
+ 
+ void lima_sched_pipe_fini(struct lima_sched_pipe *pipe)
+ {
+ 	struct lima_sched_task *task, *tmp;
+ 
++	kthread_stop(pipe->worker);
++
+ 	list_for_each_entry_safe(task, tmp, &pipe->queue, list) {
+ 		list_del(&task->list);
+ 		lima_sched_task_delete(task);
+ 	}
+ }
++
++static unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
++{
++	unsigned long timeout_jiffies;
++	ktime_t timeout;
++
++	/* clamp timeout if it's to large */
++	if (((s64)timeout_ns) < 0)
++		return MAX_SCHEDULE_TIMEOUT;
++
++	timeout = ktime_sub(ns_to_ktime(timeout_ns), ktime_get());
++	if (ktime_to_ns(timeout) < 0)
++		return 0;
++
++	timeout_jiffies = nsecs_to_jiffies(ktime_to_ns(timeout));
++	/*  clamp timeout to avoid unsigned-> signed overflow */
++	if (timeout_jiffies > MAX_SCHEDULE_TIMEOUT )
++		return MAX_SCHEDULE_TIMEOUT;
++
++	return timeout_jiffies;
++}
++
++static struct dma_fence *lima_sched_pipe_get_fence(struct lima_sched_pipe *pipe, u32 fence)
++{
++	unsigned long saved_flags;
++	struct lima_sched_task *task;
++	struct dma_fence *f = NULL;
++
++	spin_lock_irqsave(&pipe->lock, saved_flags);
++	list_for_each_entry(task, &pipe->queue, list) {
++		if (task->fence->seqno < fence)
++			continue;
++
++		if (task->fence->seqno == fence) {
++			f = task->fence;
++			dma_fence_get(f);
++		}
++
++		break;
++	}
++	spin_unlock_irqrestore(&pipe->lock, saved_flags);
++
++	return f;
++}
++
++int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 timeout_ns)
++{
++	int ret = 0;
++
++	if (fence > pipe->fence_seqno)
++		return -EINVAL;
++
++	if (!timeout_ns)
++		return fence <= pipe->fence_done_seqno ? 0 : -EBUSY;
++	else {
++		unsigned long timeout = lima_timeout_to_jiffies(timeout_ns);
++		struct dma_fence *f = lima_sched_pipe_get_fence(pipe, fence);
++
++		if (f) {
++			ret = dma_fence_wait_timeout(f, true, timeout);
++			if (ret == 0)
++				ret = -ETIMEDOUT;
++			else if (ret > 0)
++				ret = 0;
++			dma_fence_put(f);
++		}
++	}
++
++	return ret;
++}
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index 3f68ade..1946a60 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -23,6 +23,7 @@
+ #define __LIMA_SCHED_H__
+ 
+ #include <linux/list.h>
++#include <linux/wait.h>
+ 
+ struct lima_sched_task {
+ 	struct list_head list;
+@@ -36,12 +37,21 @@ struct lima_sched_task {
+ 
+ struct lima_sched_pipe {
+ 	const char *name;
+-	struct mutex lock;
+-	struct list_head queue;
+ 
+ 	u64 fence_context;
+ 	spinlock_t fence_lock;
++
++	struct task_struct *worker;
++	wait_queue_head_t worker_wait;
++
++	spinlock_t lock;
++	struct list_head queue;
+ 	u32 fence_seqno;
++
++	u32 fence_done_seqno;
++
++	int (*start_task)(void *data, struct lima_sched_task *task);
++	void *data;
+ };
+ 
+ struct lima_sched_task *lima_sched_task_create(void);
+@@ -49,7 +59,8 @@ void lima_sched_task_delete(struct lima_sched_task *task);
+ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
+ int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
+ 
+-void lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
++int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
+ void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
++int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 timeout_ns);
+ 
+ #endif
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index 8e6d73a..03a66ed 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -75,17 +75,25 @@ struct drm_lima_gem_submit {
+ 	__u64 frame_size;  /* in */
+ };
+ 
++struct drm_lima_wait_fence {
++	__u32 pipe;        /* in */
++	__u32 fence;       /* in */
++	__u64 timeout_ns;  /* in */
++};
++
+ #define DRM_LIMA_INFO        0x00
+ #define DRM_LIMA_GEM_CREATE  0x01
+ #define DRM_LIMA_GEM_INFO    0x02
+ #define DRM_LIMA_GEM_VA      0x03
+ #define DRM_LIMA_GEM_SUBMIT  0x04
++#define DRM_LIMA_WAIT_FENCE  0x05
+ 
+ #define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
+ #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
+ #define DRM_IOCTL_LIMA_GEM_INFO DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_INFO, struct drm_lima_gem_info)
+ #define DRM_IOCTL_LIMA_GEM_VA DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_VA, struct drm_lima_gem_va)
+ #define DRM_IOCTL_LIMA_GEM_SUBMIT DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_SUBMIT, struct drm_lima_gem_submit)
++#define DRM_IOCTL_LIMA_WAIT_FENCE DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_WAIT_FENCE, struct drm_lima_wait_fence)
+ 
+ #if defined(__cplusplus)
+ }
+-- 
+2.0.1
+

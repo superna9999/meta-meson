@@ -1,0 +1,83 @@
+From c18bf44cd0214c27098ac2b5bda05fe7117f79e5 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Fri, 27 Apr 2018 17:19:46 +0200
+Subject: [PATCH] [WiP] Calculate display params
+
+---
+ drivers/gpu/drm/meson/meson_venc.c | 46 +++++++++++++++++++++++++-------------
+ 1 file changed, 31 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/gpu/drm/meson/meson_venc.c b/drivers/gpu/drm/meson/meson_venc.c
+index 6e27013898013..e1db9769642fd 100644
+--- a/drivers/gpu/drm/meson/meson_venc.c
++++ b/drivers/gpu/drm/meson/meson_venc.c
+@@ -1072,18 +1072,29 @@ bool meson_venc_hdmi_supported_vic(int vic)
+ }
+ EXPORT_SYMBOL_GPL(meson_venc_hdmi_supported_vic);
+ 
+-static union meson_hdmi_venc_mode
+-*meson_venc_hdmi_get_dmt_vmode(const struct drm_display_mode *mode)
++void meson_venc_hdmi_get_dmt_vmode(const struct drm_display_mode *mode,
++				   union meson_hdmi_venc_mode *dmt_mode)
+ {
+ 	struct meson_hdmi_venc_dmt_mode *vmode = meson_hdmi_venc_dmt_modes;
+ 
+-	while (vmode->mode) {
+-		if (drm_mode_equal(&vmode->drm_mode, mode))
+-			return vmode->mode;
+-		vmode++;
+-	}
+-
+-	return NULL;
++	memset(dmt_mode, sizeof(*dmt_mode), 0);
++
++	dmt_mode->dvi_settings = 0x21;
++	dmt_mode->video_mode = 0x4040;
++	dmt_mode->video_mode_adv = 0x18;
++	dmt_mode->max_pxcnt = mode->htotal - 1;
++	dmt_mode->havon_begin = mode->htotal - mode->hsync_start;
++	dmt_mode->havon_end = dmt_mode->havon_begin + mode->hdisplay - 1;
++	dmt_mode->vavon_bline = mode->vtotal - mode->vsync_start;
++	dmt_mode->vavon_eline = dmt_mode->vavon_bline + mode->vdisplay - 1;
++	dmt_mode->hso_begin = 0;
++	dmt_mode->hso_end = mode->hsync_end - mode->hsync_start;
++	dmt_mode->vso_begin = 30;
++	dmt_mode->vso_end = 50;
++	dmt_mode->vso_bline = 0;
++	dmt_mode->vso_eline = mode->vsync_end - mode->vsync_start;
++	dmt_mode->vso_eline_present = true;
++	dmt_mode->max_lncnt = mode->vtotal - 1;
+ }
+ 
+ static union meson_hdmi_venc_mode *meson_venc_hdmi_get_vic_vmode(int vic)
+@@ -1120,6 +1131,7 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
+ 			      struct drm_display_mode *mode)
+ {
+ 	union meson_hdmi_venc_mode *vmode = NULL;
++	union meson_hdmi_venc_mode vmode_dmt;
+ 	bool use_enci = false;
+ 	bool venc_repeat = false;
+ 	bool hdmi_repeat = false;
+@@ -1149,12 +1161,16 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
+ 
+ 	if (meson_venc_hdmi_supported_vic(vic))
+ 		vmode = meson_venc_hdmi_get_vic_vmode(vic);
+-	else
+-		vmode = meson_venc_hdmi_get_dmt_vmode(mode);
+-	if (!vmode) {
+-		dev_err(priv->dev, "%s: Fatal Error, unsupported mode "
+-			DRM_MODE_FMT "\n", __func__, DRM_MODE_ARG(mode));
+-		return;
++		if (!vmode) {
++			dev_err(priv->dev, "%s: Fatal Error, unsupported mode "
++				DRM_MODE_FMT "\n", __func__,
++				DRM_MODE_ARG(mode));
++			return;
++		}
++	}
++	else {
++		meson_venc_hdmi_get_dmt_vmode(mode, &vmode_dmt);
++		vmode = &vmode_dmt;
+ 	}
+ 
+ 	/* Use VENCI for 480i and 576i and double HDMI pixels */

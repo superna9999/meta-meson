@@ -1,0 +1,36 @@
+From a11f50748a79448e39592cb8fa46549613f7315f Mon Sep 17 00:00:00 2001
+From: Erik Stromdahl <erik.stromdahl@gmail.com>
+Date: Sun, 25 Feb 2018 21:28:08 +0100
+Subject: [PATCH 028/134] ath10k: wmi: disable softirq's while calling
+ ieee80211_rx
+
+This is done in order not to trig the below warning in
+ieee80211_rx_napi:
+
+WARN_ON_ONCE(softirq_count() == 0);
+
+ieee80211_rx_napi requires that softirq's are disabled during
+execution.
+
+Signed-off-by: Erik Stromdahl <erik.stromdahl@gmail.com>
+---
+ drivers/net/wireless/ath/ath10k/wmi.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath10k/wmi.c b/drivers/net/wireless/ath/ath10k/wmi.c
+index c5e1ca5..3c063ac 100644
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -2414,7 +2414,8 @@ int ath10k_wmi_event_mgmt_rx(struct ath10k *ar, struct sk_buff *skb)
+ 		   status->freq, status->band, status->signal,
+ 		   status->rate_idx);
+ 
+-	ieee80211_rx(ar->hw, skb);
++	ieee80211_rx_ni(ar->hw, skb);
++
+ 	return 0;
+ }
+ 
+-- 
+2.0.1
+
