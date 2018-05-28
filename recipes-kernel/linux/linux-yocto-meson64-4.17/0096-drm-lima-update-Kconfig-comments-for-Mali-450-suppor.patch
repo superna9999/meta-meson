@@ -1,0 +1,29 @@
+From c69432251273487bbb3d93b3737afaabe7c4b643 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 15 Jan 2018 14:54:37 +0800
+Subject: [PATCH 096/134] drm/lima: update Kconfig comments for Mali 450
+ support
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/Kconfig | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/Kconfig b/drivers/gpu/drm/lima/Kconfig
+index e963e96..eb9681a 100644
+--- a/drivers/gpu/drm/lima/Kconfig
++++ b/drivers/gpu/drm/lima/Kconfig
+@@ -1,8 +1,8 @@
+ 
+ config DRM_LIMA
+-       tristate "LIMA (DRM support for ARM Mali 400 GPU)"
++       tristate "LIMA (DRM support for ARM Mali 400/450 GPU)"
+        depends on DRM
+        depends on ARCH_SUNXI || ARCH_ROCKCHIP || ARCH_EXYNOS || ARCH_MESON
+        select INTERVAL_TREE
+        help
+-         DRM driver for ARM Mali 400 GPUs.
++         DRM driver for ARM Mali 400/450 GPUs.
+-- 
+2.0.1
+

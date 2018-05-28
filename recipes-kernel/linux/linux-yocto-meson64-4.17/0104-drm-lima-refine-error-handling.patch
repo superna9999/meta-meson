@@ -1,0 +1,234 @@
+From 05077f52bce842e683d7e78f00f9daf32c4c2ad7 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 8 Feb 2018 16:05:41 +0800
+Subject: [PATCH 104/134] drm/lima: refine error handling
+
+PP do error handling when all processors done.
+Add missing MMU resume.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h       |  1 +
+ drivers/gpu/drm/lima/lima_gp.c    | 11 +++++++++++
+ drivers/gpu/drm/lima/lima_mmu.c   |  7 +++++--
+ drivers/gpu/drm/lima/lima_pp.c    | 25 +++++++++++++++++++------
+ drivers/gpu/drm/lima/lima_sched.c | 26 +++++++++++++++++++-------
+ drivers/gpu/drm/lima/lima_sched.h |  6 ++++++
+ 6 files changed, 61 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 17db8c0..ee11b45 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -92,6 +92,7 @@ struct lima_pp {
+ 	struct lima_sched_pipe pipe;
+ 	struct lima_l2_cache *l2_cache;
+ 	atomic_t task;
++	bool error;
+ };
+ 
+ #define LIMA_MAX_PIPE 2
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+index 47e6514..871df5f 100644
+--- a/drivers/gpu/drm/lima/lima_gp.c
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -120,6 +120,9 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
+ 
+ 		fail = true;
+ 		task_done = true;
++
++		/* mask all interrupts before hard reset */
++		gp_write(INT_MASK, 0);
+ 	}
+ 	else {
+ 		if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
+@@ -266,6 +269,13 @@ static void lima_gp_task_error(void *data)
+ 	lima_gp_hard_reset(data);
+ }
+ 
++static void lima_gp_task_mmu_error(void *data)
++{
++	struct lima_gp *gp = data;
++
++	lima_sched_pipe_task_done(&gp->pipe, true);
++}
++
+ static void lima_gp_print_version(struct lima_gp *gp)
+ {
+ 	u32 version, major, minor;
+@@ -319,6 +329,7 @@ int lima_gp_init(struct lima_gp *gp)
+ 	gp->pipe.task_run = lima_gp_task_run;
+ 	gp->pipe.task_fini = lima_gp_task_fini;
+ 	gp->pipe.task_error = lima_gp_task_error;
++	gp->pipe.task_mmu_error = lima_gp_task_mmu_error;
+ 	gp->pipe.data = gp;
+ 
+ 	gp->pipe.mmu[0] = &gp->mmu;
+diff --git a/drivers/gpu/drm/lima/lima_mmu.c b/drivers/gpu/drm/lima/lima_mmu.c
+index 56dc71a..225198c 100644
+--- a/drivers/gpu/drm/lima/lima_mmu.c
++++ b/drivers/gpu/drm/lima/lima_mmu.c
+@@ -70,9 +70,12 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
+ 		dev_info(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
+ 	}
+ 
+-	lima_sched_pipe_task_done(mmu->pipe, true);
+-
++	/* mask all interrupts before resume */
++	mmu_write(INT_MASK, 0);
+ 	mmu_write(INT_CLEAR, status);
++
++	lima_sched_pipe_mmu_error(mmu->pipe);
++
+ 	return IRQ_HANDLED;
+ }
+ 
+diff --git a/drivers/gpu/drm/lima/lima_pp.c b/drivers/gpu/drm/lima/lima_pp.c
+index 97a995a..cda59f2 100644
+--- a/drivers/gpu/drm/lima/lima_pp.c
++++ b/drivers/gpu/drm/lima/lima_pp.c
+@@ -89,7 +89,7 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
+ 	struct lima_device *dev = core->ip.dev;
+ 	struct lima_pp *pp = dev->pp;
+ 	u32 state = pp_read(INT_STATUS);
+-	bool task_done = false, fail = false;
++	bool task_done = false;
+ 
+ 	/* for shared irq case */
+ 	if (!state)
+@@ -102,18 +102,20 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
+ 			 state, status);
+ 
+ 		task_done = true;
+-		fail = true;
++		pp->error = true;
++
++		/* mask all interrupts before hard reset */
++		pp_write(INT_MASK, 0);
+ 	}
+ 	else {
+-		if ((state & LIMA_PP_IRQ_END_OF_FRAME) &&
+-		    atomic_dec_and_test(&pp->task))
++		if (state & LIMA_PP_IRQ_END_OF_FRAME)
+ 			task_done = true;
+ 	}
+ 
+ 	pp_write(INT_CLEAR, state);
+ 
+-	if (task_done)
+-		lima_sched_pipe_task_done(&pp->pipe, fail);
++	if (task_done && atomic_dec_and_test(&pp->task))
++		lima_sched_pipe_task_done(&pp->pipe, pp->error);
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -283,6 +285,7 @@ static void lima_pp_task_run(void *data, struct lima_sched_task *task)
+ 	struct drm_lima_m400_pp_frame *frame = task->frame;
+ 	int i;
+ 
++	pp->error = false;
+ 	atomic_set(&pp->task, frame->num_pp);
+ 
+ 	for (i = 0; i < frame->num_pp; i++)
+@@ -307,6 +310,15 @@ static void lima_pp_task_error(void *data)
+ 		lima_pp_core_hard_reset(pp->core + i);
+ }
+ 
++static void lima_pp_task_mmu_error(void *data)
++{
++	struct lima_pp *pp = data;
++
++	pp->error = true;
++	if (atomic_dec_and_test(&pp->task))
++		lima_sched_pipe_task_done(&pp->pipe, pp->error);
++}
++
+ void lima_pp_init(struct lima_pp *pp)
+ {
+ 	int i;
+@@ -315,6 +327,7 @@ void lima_pp_init(struct lima_pp *pp)
+ 	pp->pipe.task_run = lima_pp_task_run;
+ 	pp->pipe.task_fini = lima_pp_task_fini;
+ 	pp->pipe.task_error = lima_pp_task_error;
++	pp->pipe.task_mmu_error = lima_pp_task_mmu_error;
+ 	pp->pipe.data = pp;
+ 
+ 	for (i = 0; i < pp->num_core; i++)
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 56fc683..f485554 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -337,19 +337,31 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
+ 	return task->fence;
+ }
+ 
+-static void lima_sched_timedout_job(struct drm_sched_job *job)
++static void lima_sched_handle_error_task(struct lima_sched_pipe *pipe,
++					 struct lima_sched_task *task)
+ {
+-	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
++	int i;
+ 
+ 	kthread_park(pipe->base.thread);
+-	drm_sched_hw_job_reset(&pipe->base, job);
++	drm_sched_hw_job_reset(&pipe->base, &task->base);
+ 
+ 	pipe->task_error(pipe->data);
+ 
++	for (i = 0; i < pipe->num_mmu; i++)
++		lima_mmu_page_fault_resume(pipe->mmu[i]);
++
+ 	drm_sched_job_recovery(&pipe->base);
+ 	kthread_unpark(pipe->base.thread);
+ }
+ 
++static void lima_sched_timedout_job(struct drm_sched_job *job)
++{
++	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
++	struct lima_sched_task *task = to_lima_task(job);
++
++	lima_sched_handle_error_task(pipe, task);
++}
++
+ static void lima_sched_free_job(struct drm_sched_job *job)
+ {
+ 	struct lima_sched_task *task = to_lima_task(job);
+@@ -413,9 +425,9 @@ void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
+ 		return;
+ 
+ 	if (error)
+-		pipe->task_error(pipe->data);
+-	else
++	        lima_sched_handle_error_task(pipe, task);
++	else {
+ 		pipe->task_fini(pipe->data);
+-
+-	dma_fence_signal(task->fence);
++		dma_fence_signal(task->fence);
++	}
+ }
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index 3551175..97fed62 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -63,6 +63,7 @@ struct lima_sched_pipe {
+ 	void (*task_run)(void *data, struct lima_sched_task *task);
+ 	void (*task_fini)(void *data);
+ 	void (*task_error)(void *data);
++	void (*task_mmu_error)(void *data);
+ 	void *data;
+ };
+ 
+@@ -84,4 +85,9 @@ int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
+ void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
+ void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error);
+ 
++static inline void lima_sched_pipe_mmu_error(struct lima_sched_pipe *pipe)
++{
++	pipe->task_mmu_error(pipe->data);
++}
++
+ #endif
+-- 
+2.0.1
+

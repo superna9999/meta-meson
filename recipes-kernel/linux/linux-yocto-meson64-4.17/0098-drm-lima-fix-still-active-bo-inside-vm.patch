@@ -1,0 +1,478 @@
+From f6777b834f561a025a8dffc41a92909fddd24a10 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 28 Jan 2018 18:39:21 +0800
+Subject: [PATCH 098/134] drm/lima: fix "still active bo inside vm"
+
+This happens for exported bo when on screen rendering.
+When the lima drm device fd is closing, the
+lima_gem_free_object is not really called for the
+exported bo because the display drm hold a reference
+for it, but the lima vm is freed so need to remove
+the va for this vm registered for this bo.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h     |  12 ++++
+ drivers/gpu/drm/lima/lima_drv.c |   2 +
+ drivers/gpu/drm/lima/lima_gem.c | 146 ++++++++++++++++++++++++++++++----------
+ drivers/gpu/drm/lima/lima_vm.c  |  78 ++++++++-------------
+ drivers/gpu/drm/lima/lima_vm.h  |   6 +-
+ 5 files changed, 156 insertions(+), 88 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index 8caa146..9ed01e7 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -21,6 +21,8 @@
+  */
+ #ifndef __LIMA_H__
+ 
++#include <linux/rbtree.h>
++
+ #include <drm/drmP.h>
+ #include <drm/lima_drm.h>
+ 
+@@ -119,6 +121,14 @@ struct lima_drm_priv {
+ 	struct lima_vm *vm;
+ };
+ 
++struct lima_bo_va_mapping {
++	struct list_head list;
++	struct rb_node rb;
++	uint32_t start;
++	uint32_t last;
++	uint32_t __subtree_last;
++};
++
+ int lima_device_init(struct lima_device *ldev);
+ void lima_device_fini(struct lima_device *ldev);
+ 
+@@ -145,6 +155,8 @@ void lima_pp_init(struct lima_pp *pp);
+ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+ 			   u32 size, u32 flags, u32 *handle);
+ void lima_gem_free_object(struct drm_gem_object *obj);
++int lima_gem_object_open(struct drm_gem_object *obj, struct drm_file *file);
++void lima_gem_object_close(struct drm_gem_object *obj, struct drm_file *file);
+ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
+ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
+ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index f61ba53..fecb631 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -213,6 +213,8 @@ static struct drm_driver lima_drm_driver = {
+ 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
+ 	.fops               = &lima_drm_driver_fops,
+ 	.gem_free_object_unlocked = lima_gem_free_object,
++	.gem_open_object    = lima_gem_object_open,
++	.gem_close_object   = lima_gem_object_close,
+ 	.gem_vm_ops         = &lima_gem_vm_ops,
+ 	.name               = "lima",
+ 	.desc               = "lima DRM",
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 1deb4a1..6321cf8 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -8,8 +8,11 @@
+ 
+ struct lima_bo_va {
+ 	struct list_head list;
++	unsigned ref_count;
++
++	struct list_head mapping;
++
+ 	struct lima_vm *vm;
+-	u32 va;
+ };
+ 
+ struct lima_bo {
+@@ -96,13 +99,9 @@ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+ void lima_gem_free_object(struct drm_gem_object *obj)
+ {
+ 	struct lima_bo *bo = to_lima_bo(obj);
+-	struct lima_bo_va *bo_va, *tmp;
+ 
+-	list_for_each_entry_safe(bo_va, tmp, &bo->va, list) {
+-		lima_vm_unmap(bo_va->vm, bo_va->va, obj->size);
+-		list_del(&bo_va->list);
+-		kfree(bo_va);
+-	}
++	if (!list_empty(&bo->va))
++		dev_err(obj->dev->dev, "lima gem free bo still has va\n");
+ 
+ 	if (!obj->import_attach)
+ 		dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
+@@ -112,6 +111,77 @@ void lima_gem_free_object(struct drm_gem_object *obj)
+ 	kfree(bo);
+ }
+ 
++static struct lima_bo_va *lima_gem_find_bo_va(struct lima_bo *bo, struct lima_vm *vm)
++{
++	struct lima_bo_va *bo_va, *ret = NULL;
++
++	list_for_each_entry(bo_va, &bo->va, list) {
++		if (bo_va->vm == vm) {
++			ret = bo_va;
++			break;
++		}
++	}
++
++	return ret;
++}
++
++int lima_gem_object_open(struct drm_gem_object *obj, struct drm_file *file)
++{
++	struct lima_bo *bo = to_lima_bo(obj);
++	struct lima_drm_priv *priv = to_lima_drm_priv(file);
++	struct lima_vm *vm = priv->vm;
++	struct lima_bo_va *bo_va;
++	int err = 0;
++
++	mutex_lock(&bo->lock);
++
++	bo_va = lima_gem_find_bo_va(bo, vm);
++	if (bo_va)
++		bo_va->ref_count++;
++	else {
++		bo_va = kmalloc(sizeof(*bo_va), GFP_KERNEL);
++		if (!bo_va) {
++			err = -ENOMEM;
++			goto out;
++		}
++
++		bo_va->vm = vm;
++		bo_va->ref_count = 1;
++		INIT_LIST_HEAD(&bo_va->mapping);
++		list_add_tail(&bo_va->list, &bo->va);
++	}
++
++out:
++	mutex_unlock(&bo->lock);
++	return err;
++}
++
++void lima_gem_object_close(struct drm_gem_object *obj, struct drm_file *file)
++{
++	struct lima_bo *bo = to_lima_bo(obj);
++	struct lima_drm_priv *priv = to_lima_drm_priv(file);
++	struct lima_vm *vm = priv->vm;
++	struct lima_bo_va *bo_va;
++
++	mutex_lock(&bo->lock);
++
++	bo_va = lima_gem_find_bo_va(bo, vm);
++	BUG_ON(!bo_va);
++
++	if (--bo_va->ref_count == 0) {
++		struct lima_bo_va_mapping *mapping, *tmp;
++		list_for_each_entry_safe(mapping, tmp, &bo_va->mapping, list) {
++			lima_vm_unmap(vm, mapping);
++			list_del(&mapping->list);
++			kfree(mapping);
++		}
++		list_del(&bo_va->list);
++		kfree(bo_va);
++	}
++
++	mutex_unlock(&bo->lock);
++}
++
+ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset)
+ {
+ 	int err;
+@@ -169,10 +239,12 @@ const struct vm_operations_struct lima_gem_vm_ops = {
+ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ {
+ 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
++	struct lima_vm *vm = priv->vm;
+ 	struct drm_gem_object *obj;
+ 	struct lima_bo *bo;
+-	int err;
+ 	struct lima_bo_va *bo_va;
++	struct lima_bo_va_mapping *mapping;
++	int err;
+ 
+ 	if (!PAGE_ALIGNED(va))
+ 		return -EINVAL;
+@@ -189,22 +261,27 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 		goto err_out0;
+ 	}
+ 
+-	err = lima_vm_map(priv->vm, bo->dma_addr, va, obj->size);
+-	if (err)
+-		goto err_out0;
+-
+-	bo_va = kmalloc(sizeof(*bo_va), GFP_KERNEL);
+-	if (!bo_va) {
++	mapping = kmalloc(sizeof(*mapping), GFP_KERNEL);
++	if (!mapping) {
+ 		err = -ENOMEM;
+-		goto err_out1;
++		goto err_out0;
+ 	}
+-	INIT_LIST_HEAD(&bo_va->list);
+-	bo_va->vm = priv->vm;
+-	bo_va->va = va;
++
++	mapping->start = va;
++	mapping->last = va + obj->size - 1;
+ 
+ 	mutex_lock(&bo->lock);
+ 
+-	list_add(&bo_va->list, &bo->va);
++	bo_va = lima_gem_find_bo_va(bo, vm);
++	BUG_ON(!bo_va);
++
++	err = lima_vm_map(vm, bo->dma_addr, mapping);
++	if (err) {
++		mutex_unlock(&bo->lock);
++		goto err_out1;
++	}
++
++	list_add_tail(&mapping->list, &bo_va->mapping);
+ 
+ 	mutex_unlock(&bo->lock);
+ 
+@@ -212,7 +289,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ 	return 0;
+ 
+ err_out1:
+-	lima_vm_unmap(priv->vm, va, obj->size);
++	kfree(mapping);
+ err_out0:
+ 	drm_gem_object_unreference_unlocked(obj);
+ 	return err;
+@@ -221,11 +298,11 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
+ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
+ {
+ 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
++	struct lima_vm *vm = priv->vm;
+ 	struct drm_gem_object *obj;
+ 	struct lima_bo *bo;
+-	int err = 0;
+-	struct lima_bo_va *bo_va, *tmp;
+-	bool found = false;
++	struct lima_bo_va *bo_va;
++	struct lima_bo_va_mapping *mapping;
+ 
+ 	obj = drm_gem_object_lookup(file, handle);
+ 	if (!obj)
+@@ -235,27 +312,22 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
+ 
+ 	mutex_lock(&bo->lock);
+ 
+-	list_for_each_entry_safe(bo_va, tmp, &bo->va, list) {
+-		if (bo_va->vm == priv->vm && bo_va->va == va) {
+-			list_del(&bo_va->list);
+-			kfree(bo_va);
+-			found = true;
++	bo_va = lima_gem_find_bo_va(bo, vm);
++	BUG_ON(!bo_va);
++
++	list_for_each_entry(mapping, &bo_va->mapping, list) {
++		if (mapping->start == va) {
++			lima_vm_unmap(vm, mapping);
++			list_del(&mapping->list);
++			kfree(mapping);
+ 			break;
+ 		}
+ 	}
+ 
+ 	mutex_unlock(&bo->lock);
+ 
+-	if (!found) {
+-		err = -ENOENT;
+-		goto out;
+-	}
+-
+-	err = lima_vm_unmap(priv->vm, va, obj->size);
+-
+-out:
+ 	drm_gem_object_unreference_unlocked(obj);
+-	return err;
++	return 0;
+ }
+ 
+ static int lima_gem_lock_bos(struct lima_bo **bos, u32 nr_bos,
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index 29ca33b..de4c00e 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -1,6 +1,6 @@
+ #include <linux/slab.h>
+-#include <linux/interval_tree.h>
+ #include <linux/dma-mapping.h>
++#include <linux/interval_tree_generic.h>
+ 
+ #include "lima.h"
+ 
+@@ -33,6 +33,14 @@
+ 		LIMA_VM_FLAG_READ_PERMISSION |	\
+ 		LIMA_VM_FLAG_WRITE_PERMISSION )
+ 
++#define START(node) ((node)->start)
++#define LAST(node) ((node)->last)
++
++INTERVAL_TREE_DEFINE(struct lima_bo_va_mapping, rb, uint32_t, __subtree_last,
++		     START, LAST, static, lima_vm_it)
++
++#undef START
++#undef LAST
+ 
+ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
+ {
+@@ -55,33 +63,26 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
+ 	}
+ }
+ 
+-int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
++int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, struct lima_bo_va_mapping *mapping)
+ {
+ 	int err;
+-	struct interval_tree_node *it;
++	struct lima_bo_va_mapping *it;
+ 	u32 addr;
+ 
+ 	mutex_lock(&vm->lock);
+ 
+-	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
++	it = lima_vm_it_iter_first(&vm->va, mapping->start, mapping->last);
+ 	if (it) {
+-		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %lx-%lx\n",
+-			va, va + size -1, it->start, it->last);
++		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %x-%x\n",
++			mapping->start, mapping->last, it->start, it->last);
+ 		err = -EINVAL;
+ 		goto err_out0;
+ 	}
+ 
+-	it = kmalloc(sizeof(*it), GFP_KERNEL);
+-	if (!it) {
+-		err = -ENOMEM;
+-		goto err_out0;
+-	}
+-
+-	it->start = va;
+-	it->last = va + size - 1;
+-	interval_tree_insert(it, &vm->va);
++	lima_vm_it_insert(mapping, &vm->va);
+ 
+-	for (addr = va; addr < va + size; addr += LIMA_PAGE_SIZE, dma += LIMA_PAGE_SIZE) {
++	for (addr = mapping->start; addr <= mapping->last;
++	     addr += LIMA_PAGE_SIZE, dma += LIMA_PAGE_SIZE) {
+ 		u32 pde = LIMA_PDE(addr);
+ 		u32 pte = LIMA_PTE(addr);
+ 
+@@ -109,50 +110,33 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+ 	return 0;
+ 
+ err_out1:
+-	lima_vm_unmap_page_table(vm, va, addr);
+-	interval_tree_remove(it, &vm->va);
+-	kfree(it);
++	lima_vm_unmap_page_table(vm, mapping->start, addr);
++	lima_vm_it_remove(mapping, &vm->va);
+ err_out0:
+ 	mutex_unlock(&vm->lock);
+ 	return err;
+ }
+ 
+-int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
++int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
+ {
+-	int err, i, j;
+-	struct interval_tree_node *it;
++	int i, j;
+ 	struct lima_device *dev = vm->dev;
+ 
+ 	mutex_lock(&vm->lock);
+ 
+-	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
+-	if (it) {
+-		if (it->start != va || it->last != va + size - 1) {
+-			dev_err(dev->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
+-				va, va + size -1, it->start, it->last);
+-			err = -EINVAL;
+-			goto err_out;
+-		}
+-		interval_tree_remove(it, &vm->va);
+-		kfree(it);
+-	}
+-	else
+-		goto err_out;
++	lima_vm_it_remove(mapping, &vm->va);
+ 
+-	lima_vm_unmap_page_table(vm, va, va + size);
++	lima_vm_unmap_page_table(vm, mapping->start, mapping->last + 1);
+ 
+ 	mutex_unlock(&vm->lock);
+ 
+ 	for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
+ 		for (j = 0; j < dev->pipe[i]->num_mmu; j++)
+-			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, va, size);
++			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, mapping->start,
++					mapping->last + 1 - mapping->start);
+ 	}
+ 
+ 	return 0;
+-
+-err_out:
+-	mutex_unlock(&vm->lock);
+-	return err;
+ }
+ 
+ struct lima_vm *lima_vm_create(struct lima_device *dev)
+@@ -183,7 +167,6 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
+ void lima_vm_release(struct kref *kref)
+ {
+ 	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
+-	struct interval_tree_node *it, *tmp;
+ 	struct lima_device *dev = vm->dev;
+ 	int i, j;
+ 
+@@ -195,14 +178,8 @@ void lima_vm_release(struct kref *kref)
+ 		}
+ 	}
+ 
+-	if (!RB_EMPTY_ROOT(&vm->va)) {
++	if (!RB_EMPTY_ROOT(&vm->va))
+ 		dev_err(vm->dev->dev, "still active bo inside vm\n");
+-	}
+-
+-	rbtree_postorder_for_each_entry_safe(it, tmp, &vm->va, rb) {
+-		interval_tree_remove(it, &vm->va);
+-		kfree(it);
+-	}
+ 
+ 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
+ 		if (vm->pts[i].cpu) {
+@@ -223,6 +200,9 @@ void lima_vm_print(struct lima_vm *vm)
+ {
+ 	int i, j;
+ 
++	/* to avoid the defined by not used warning */
++	(void)&lima_vm_it_iter_next;
++
+ 	if (!vm->pd.cpu)
+ 		return;
+ 
+diff --git a/drivers/gpu/drm/lima/lima_vm.h b/drivers/gpu/drm/lima/lima_vm.h
+index f423ec9..b12f298 100644
+--- a/drivers/gpu/drm/lima/lima_vm.h
++++ b/drivers/gpu/drm/lima/lima_vm.h
+@@ -64,8 +64,10 @@ static inline void lima_vm_put(struct lima_vm *vm)
+ 	kref_put(&vm->refcount, lima_vm_release);
+ }
+ 
+-int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size);
+-int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size);
++struct lima_bo_va_mapping;
++
++int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, struct lima_bo_va_mapping *mapping);
++int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping);
+ 
+ void lima_vm_print(struct lima_vm *vm);
+ 
+-- 
+2.0.1
+

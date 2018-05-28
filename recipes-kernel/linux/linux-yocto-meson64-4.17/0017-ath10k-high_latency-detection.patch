@@ -1,0 +1,103 @@
+From 3a8401b250199e7120c88b83528e9e28ea665a36 Mon Sep 17 00:00:00 2001
+From: Erik Stromdahl <erik.stromdahl@gmail.com>
+Date: Sun, 25 Feb 2018 21:28:01 +0100
+Subject: [PATCH 017/134] ath10k: high_latency detection
+
+Add is_high_latency parameter to struct ath10k_bus_params.
+
+The setup of high latency chips is sometimes different than
+for chips using low latency interfaces.
+
+Signed-off-by: Erik Stromdahl <erik.stromdahl@gmail.com>
+---
+ drivers/net/wireless/ath/ath10k/ahb.c  | 1 +
+ drivers/net/wireless/ath/ath10k/core.c | 1 +
+ drivers/net/wireless/ath/ath10k/core.h | 2 ++
+ drivers/net/wireless/ath/ath10k/pci.c  | 1 +
+ drivers/net/wireless/ath/ath10k/sdio.c | 1 +
+ drivers/net/wireless/ath/ath10k/usb.c  | 1 +
+ 6 files changed, 7 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath10k/ahb.c b/drivers/net/wireless/ath/ath10k/ahb.c
+index 6f902f3..b342f33 100644
+--- a/drivers/net/wireless/ath/ath10k/ahb.c
++++ b/drivers/net/wireless/ath/ath10k/ahb.c
+@@ -814,6 +814,7 @@ static int ath10k_ahb_probe(struct platform_device *pdev)
+ 
+ 	ath10k_pci_ce_deinit(ar);
+ 
++	bus_params.is_high_latency = false;
+ 	bus_params.chip_id = ath10k_ahb_soc_read32(ar, SOC_CHIP_ID_ADDRESS);
+ 	if (bus_params.chip_id == 0xffffffff) {
+ 		ath10k_err(ar, "failed to get chip id\n");
+diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
+index 98c3487..f53f70b 100644
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -2647,6 +2647,7 @@ int ath10k_core_register(struct ath10k *ar,
+ 			 const struct ath10k_bus_params *bus_params)
+ {
+ 	ar->chip_id = bus_params->chip_id;
++	ar->is_high_latency = bus_params->is_high_latency;
+ 	queue_work(ar->workqueue, &ar->register_work);
+ 
+ 	return 0;
+diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
+index d399c1e..dcd7205 100644
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -857,6 +857,7 @@ struct ath10k_per_peer_tx_stats {
+ 
+ struct ath10k_bus_params {
+ 	u32 chip_id;
++	bool is_high_latency;
+ };
+ 
+ struct ath10k {
+@@ -869,6 +870,7 @@ struct ath10k {
+ 	enum ath10k_hw_rev hw_rev;
+ 	u16 dev_id;
+ 	u32 chip_id;
++	bool is_high_latency;
+ 	u32 target_version;
+ 	u8 fw_version_major;
+ 	u32 fw_version_minor;
+diff --git a/drivers/net/wireless/ath/ath10k/pci.c b/drivers/net/wireless/ath/ath10k/pci.c
+index 54f88f7..4ce7e7f 100644
+--- a/drivers/net/wireless/ath/ath10k/pci.c
++++ b/drivers/net/wireless/ath/ath10k/pci.c
+@@ -3618,6 +3618,7 @@ static int ath10k_pci_probe(struct pci_dev *pdev,
+ 		goto err_free_irq;
+ 	}
+ 
++	bus_params.is_high_latency = false;
+ 	bus_params.chip_id = ath10k_pci_soc_read32(ar, SOC_CHIP_ID_ADDRESS);
+ 	if (bus_params.chip_id == 0xffffffff) {
+ 		ath10k_err(ar, "failed to get chip id\n");
+diff --git a/drivers/net/wireless/ath/ath10k/sdio.c b/drivers/net/wireless/ath/ath10k/sdio.c
+index 03dc748..f0f1b2b 100644
+--- a/drivers/net/wireless/ath/ath10k/sdio.c
++++ b/drivers/net/wireless/ath/ath10k/sdio.c
+@@ -2026,6 +2026,7 @@ static int ath10k_sdio_probe(struct sdio_func *func,
+ 		goto err_free_wq;
+ 	}
+ 
++	bus_params.is_high_latency = true;
+ 	/* TODO: don't know yet how to get chip_id with SDIO */
+ 	bus_params.chip_id = 0;
+ 	ret = ath10k_core_register(ar, &bus_params);
+diff --git a/drivers/net/wireless/ath/ath10k/usb.c b/drivers/net/wireless/ath/ath10k/usb.c
+index 275e00b..3b330e9 100644
+--- a/drivers/net/wireless/ath/ath10k/usb.c
++++ b/drivers/net/wireless/ath/ath10k/usb.c
+@@ -1016,6 +1016,7 @@ static int ath10k_usb_probe(struct usb_interface *interface,
+ 	ar->id.vendor = vendor_id;
+ 	ar->id.device = product_id;
+ 
++	bus_params.is_high_latency = true;
+ 	/* TODO: don't know yet how to get chip_id with USB */
+ 	bus_params.chip_id = 0;
+ 	ret = ath10k_core_register(ar, &bus_params);
+-- 
+2.0.1
+

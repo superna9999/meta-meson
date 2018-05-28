@@ -1,0 +1,235 @@
+From 4a4d624712930e1214e0c5a887945c77031f86fb Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 17 Apr 2017 20:49:04 +0800
+Subject: [PATCH 052/134] drm/lima: add gem mmap
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h     |  2 ++
+ drivers/gpu/drm/lima/lima_drv.c | 23 +++++++++++--
+ drivers/gpu/drm/lima/lima_gem.c | 73 +++++++++++++++++++++++++++++++++++++++--
+ include/uapi/drm/lima_drm.h     |  8 +++++
+ 4 files changed, 100 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index cadc409..285c6a9 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -110,5 +110,7 @@ void lima_pp_fini(struct lima_pp *pp);
+ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+ 			   u32 size, u32 flags, u32 *handle);
+ void lima_gem_free_object(struct drm_gem_object *obj);
++int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
++int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
+ 
+ #endif
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 8b7feee..5b2a76c 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -4,10 +4,15 @@
+ 
+ #include "lima.h"
+ 
++static inline struct lima_device *to_lima_dev(struct drm_device *dev)
++{
++	return dev->dev_private;
++}
++
+ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *file)
+ {
+ 	struct drm_lima_info *info = data;
+-	struct lima_device *ldev = dev->dev_private;
++	struct lima_device *ldev = to_lima_dev(dev);
+ 
+ 	switch (ldev->gpu_type) {
+ 	case GPU_MALI400:
+@@ -24,12 +29,19 @@ static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_
+ {
+ 	struct drm_lima_gem_create *args = data;
+ 
+-	if (args->flags)
++	if (args->flags || args->size == 0)
+ 		return -EINVAL;
+ 
+ 	return lima_gem_create_handle(dev, file, args->size, args->flags, &args->handle);
+ }
+ 
++static int lima_ioctl_gem_info(struct drm_device *dev, void *data, struct drm_file *file)
++{
++	struct drm_lima_gem_info *args = data;
++
++	return lima_gem_mmap_offset(file, args->handle, &args->offset);
++}
++
+ static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
+ {
+ 	struct lima_device *ldev;
+@@ -58,7 +70,7 @@ static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
+ 
+ static int lima_drm_driver_unload(struct drm_device *dev)
+ {
+-	struct lima_device *ldev = dev->dev_private;
++	struct lima_device *ldev = to_lima_dev(dev);
+ 
+ 	lima_device_fini(ldev);
+ 	kfree(ldev);
+@@ -69,8 +81,11 @@ static int lima_drm_driver_unload(struct drm_device *dev)
+ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
+ 	DRM_IOCTL_DEF_DRV(LIMA_INFO, lima_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(LIMA_GEM_CREATE, lima_ioctl_gem_create, DRM_AUTH|DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(LIMA_GEM_INFO, lima_ioctl_gem_info, DRM_AUTH|DRM_RENDER_ALLOW),
+ };
+ 
++extern const struct vm_operations_struct lima_gem_vm_ops;
++
+ static const struct file_operations lima_drm_driver_fops = {
+ 	.owner              = THIS_MODULE,
+ 	.open               = drm_open,
+@@ -79,6 +94,7 @@ static const struct file_operations lima_drm_driver_fops = {
+ #ifdef CONFIG_COMPAT
+ 	.compat_ioctl       = drm_compat_ioctl,
+ #endif
++	.mmap               = lima_gem_mmap,
+ };
+ 
+ static struct drm_driver lima_drm_driver = {
+@@ -89,6 +105,7 @@ static struct drm_driver lima_drm_driver = {
+ 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
+ 	.fops               = &lima_drm_driver_fops,
+ 	.gem_free_object_unlocked = lima_gem_free_object,
++	.gem_vm_ops         = &lima_gem_vm_ops,
+ 	.name               = "lima",
+ 	.desc               = "lima DRM",
+ 	.date               = "20170325",
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 4cc1176..b4dac67 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -1,9 +1,12 @@
+ #include <drm/drmP.h>
+ #include <drm/drm_gem.h>
++#include <linux/dma-mapping.h>
+ 
+ 
+ struct lima_bo {
+ 	struct drm_gem_object gem;
++	dma_addr_t dma_addr;
++	void *cpu_addr;
+ };
+ 
+ static inline
+@@ -24,12 +27,22 @@ static struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	err = drm_gem_object_init(dev, &bo->gem, size);
+-	if (err) {
+-		kfree(bo);
+-		return ERR_PTR(err);
++	if (err)
++		goto err_out0;
++
++	bo->cpu_addr = dma_alloc_coherent(dev->dev, size, &bo->dma_addr, GFP_USER);
++	if (!bo->cpu_addr) {
++		err = -ENOMEM;
++		goto err_out1;
+ 	}
+ 
+ 	return bo;
++
++err_out1:
++	drm_gem_object_release(&bo->gem);
++err_out0:
++	kfree(bo);
++	return ERR_PTR(err);
+ }
+ 
+ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+@@ -54,6 +67,60 @@ void lima_gem_free_object(struct drm_gem_object *obj)
+ {
+ 	struct lima_bo *bo = to_lima_bo(obj);
+ 
++	dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
+ 	drm_gem_object_release(obj);
+ 	kfree(bo);
+ }
++
++int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset)
++{
++	int err;
++	struct drm_gem_object *obj;
++
++	obj = drm_gem_object_lookup(file, handle);
++	if (!obj)
++		return -ENOENT;
++
++	err = drm_gem_create_mmap_offset(obj);
++	if (!err)
++		*offset = drm_vma_node_offset_addr(&obj->vma_node);
++
++	drm_gem_object_unreference_unlocked(obj);
++	return err;
++}
++
++int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma)
++{
++	int err;
++	struct lima_bo *bo;
++
++	err = drm_gem_mmap(filp, vma);
++	if (err)
++		return err;
++
++	vma->vm_pgoff = 0;
++
++	bo = to_lima_bo(vma->vm_private_data);
++	err = dma_mmap_coherent(bo->gem.dev->dev, vma, bo->cpu_addr,
++				bo->dma_addr, bo->gem.size);
++	if (err) {
++		drm_gem_vm_close(vma);
++		return err;
++	}
++
++	return 0;
++}
++
++static int lima_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
++{
++	struct lima_bo *bo = to_lima_bo(vma->vm_private_data);
++
++	dev_err(bo->gem.dev->dev, "unexpected vm fault %lx\n", vmf->address);
++	return 0;
++}
++
++const struct vm_operations_struct lima_gem_vm_ops = {
++	.fault = lima_gem_fault,
++	.open = drm_gem_vm_open,
++	.close = drm_gem_vm_close,
++};
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index c81c381..484cedf 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -42,11 +42,19 @@ struct drm_lima_gem_create {
+ 	__u32 pad;
+ };
+ 
++struct drm_lima_gem_info {
++	__u32 handle;  /* in */
++	__u32 pad;
++	__u64 offset;  /* out */
++};
++
+ #define DRM_LIMA_INFO        0x00
+ #define DRM_LIMA_GEM_CREATE  0x01
++#define DRM_LIMA_GEM_INFO    0x02
+ 
+ #define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
+ #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
++#define DRM_IOCTL_LIMA_GEM_INFO DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_INFO, struct drm_lima_gem_info)
+ 
+ #if defined(__cplusplus)
+ }
+-- 
+2.0.1
+
