@@ -1,0 +1,186 @@
+From ba7d90162338e65ec8fe534ddff1908849367110 Mon Sep 17 00:00:00 2001
+From: Erik Stromdahl <erik.stromdahl@gmail.com>
+Date: Sun, 25 Feb 2018 21:28:01 +0100
+Subject: [PATCH 018/134] ath10k: add bus type check in ath10k_init_hw_params
+
+The bus type is used together with the other hw parameters
+to find a matching entry in ath10k_hw_params_list for the device.
+
+This is necessary since HL devices can have the same dev_id and
+target_version as a corresponding LL device (same chipset) and
+yet use a totally different configuration.
+
+Signed-off-by: Erik Stromdahl <erik.stromdahl@gmail.com>
+---
+ drivers/net/wireless/ath/ath10k/core.c | 16 +++++++++++++++-
+ drivers/net/wireless/ath/ath10k/core.h |  8 --------
+ drivers/net/wireless/ath/ath10k/hw.h   |  9 +++++++++
+ 3 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
+index f53f70b..96adec6 100644
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -65,6 +65,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA988X_HW_2_0_VERSION,
+ 		.dev_id = QCA988X_2_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca988x hw2.0",
+ 		.patch_load_addr = QCA988X_HW_2_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 7,
+@@ -123,6 +124,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA9887_HW_1_0_VERSION,
+ 		.dev_id = QCA9887_1_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca9887 hw1.0",
+ 		.patch_load_addr = QCA9887_HW_1_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 7,
+@@ -152,6 +154,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA6174_HW_2_1_VERSION,
+ 		.dev_id = QCA6164_2_1_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca6164 hw2.1",
+ 		.patch_load_addr = QCA6174_HW_2_1_PATCH_LOAD_ADDR,
+ 		.uart_pin = 6,
+@@ -180,6 +183,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA6174_HW_2_1_VERSION,
+ 		.dev_id = QCA6174_2_1_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca6174 hw2.1",
+ 		.patch_load_addr = QCA6174_HW_2_1_PATCH_LOAD_ADDR,
+ 		.uart_pin = 6,
+@@ -208,6 +212,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA6174_HW_3_0_VERSION,
+ 		.dev_id = QCA6174_2_1_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca6174 hw3.0",
+ 		.patch_load_addr = QCA6174_HW_3_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 6,
+@@ -236,6 +241,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA6174_HW_3_2_VERSION,
+ 		.dev_id = QCA6174_2_1_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca6174 hw3.2",
+ 		.patch_load_addr = QCA6174_HW_3_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 6,
+@@ -267,6 +273,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA99X0_HW_2_0_DEV_VERSION,
+ 		.dev_id = QCA99X0_2_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca99x0 hw2.0",
+ 		.patch_load_addr = QCA99X0_HW_2_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 7,
+@@ -301,6 +308,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA9984_HW_1_0_DEV_VERSION,
+ 		.dev_id = QCA9984_1_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca9984/qca9994 hw1.0",
+ 		.patch_load_addr = QCA9984_HW_1_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 7,
+@@ -340,6 +348,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA9888_HW_2_0_DEV_VERSION,
+ 		.dev_id = QCA9888_2_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca9888 hw2.0",
+ 		.patch_load_addr = QCA9888_HW_2_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 7,
+@@ -378,6 +387,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA9377_HW_1_0_DEV_VERSION,
+ 		.dev_id = QCA9377_1_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca9377 hw1.0",
+ 		.patch_load_addr = QCA9377_HW_1_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 6,
+@@ -406,6 +416,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA9377_HW_1_1_DEV_VERSION,
+ 		.dev_id = QCA9377_1_0_DEVICE_ID,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "qca9377 hw1.1",
+ 		.patch_load_addr = QCA9377_HW_1_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 6,
+@@ -436,6 +447,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA4019_HW_1_0_DEV_VERSION,
+ 		.dev_id = 0,
++		.bus = ATH10K_BUS_AHB,
+ 		.name = "qca4019 hw1.0",
+ 		.patch_load_addr = QCA4019_HW_1_0_PATCH_LOAD_ADDR,
+ 		.uart_pin = 7,
+@@ -471,6 +483,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = WCN3990_HW_1_0_DEV_VERSION,
+ 		.dev_id = 0,
++		.bus = ATH10K_BUS_PCI,
+ 		.name = "wcn3990 hw1.0",
+ 		.continuous_frag_desc = true,
+ 		.tx_chain_mask = 0x7,
+@@ -1820,7 +1833,8 @@ static int ath10k_init_hw_params(struct ath10k *ar)
+ 	for (i = 0; i < ARRAY_SIZE(ath10k_hw_params_list); i++) {
+ 		hw_params = &ath10k_hw_params_list[i];
+ 
+-		if (hw_params->id == ar->target_version &&
++		if (hw_params->bus == ar->hif.bus &&
++		    hw_params->id == ar->target_version &&
+ 		    hw_params->dev_id == ar->dev_id)
+ 			break;
+ 	}
+diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
+index dcd7205..3c25faf 100644
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -88,14 +88,6 @@
+ 
+ struct ath10k;
+ 
+-enum ath10k_bus {
+-	ATH10K_BUS_PCI,
+-	ATH10K_BUS_AHB,
+-	ATH10K_BUS_SDIO,
+-	ATH10K_BUS_USB,
+-	ATH10K_BUS_SNOC,
+-};
+-
+ static inline const char *ath10k_bus_str(enum ath10k_bus bus)
+ {
+ 	switch (bus) {
+diff --git a/drivers/net/wireless/ath/ath10k/hw.h b/drivers/net/wireless/ath/ath10k/hw.h
+index 413b1b4..f37e2d9 100644
+--- a/drivers/net/wireless/ath/ath10k/hw.h
++++ b/drivers/net/wireless/ath/ath10k/hw.h
+@@ -20,6 +20,14 @@
+ 
+ #include "targaddrs.h"
+ 
++enum ath10k_bus {
++	ATH10K_BUS_PCI,
++	ATH10K_BUS_AHB,
++	ATH10K_BUS_SDIO,
++	ATH10K_BUS_USB,
++	ATH10K_BUS_SNOC,
++};
++
+ #define ATH10K_FW_DIR			"ath10k"
+ 
+ #define QCA988X_2_0_DEVICE_ID_UBNT   (0x11ac)
+@@ -492,6 +500,7 @@ struct ath10k_hw_clk_params {
+ struct ath10k_hw_params {
+ 	u32 id;
+ 	u16 dev_id;
++	enum ath10k_bus bus;
+ 	const char *name;
+ 	u32 patch_load_addr;
+ 	int uart_pin;
+-- 
+2.0.1
+

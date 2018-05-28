@@ -1,0 +1,34 @@
+From 804e1d6374d1162d3f7354de5fab7ee5163daff6 Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Mon, 12 Mar 2018 16:12:24 +0100
+Subject: [PATCH 114/134] drm/lima: include pagemap.h for implicit declared
+ mapping_set_gfp_mask
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Without that, at least on arm64 te build fails with
+../drivers/gpu/drm/lima/lima_gem.c: In function ‘lima_gem_create_handle’:
+../drivers/gpu/drm/lima/lima_gem.c:92:2: error: implicit declaration of function ‘mapping_set_gfp_mask’; did you mean ‘pci_set_dma_mask’? [-Werror=implicit-function-declaration]
+  mapping_set_gfp_mask(bo->gem.filp->f_mapping, mask);
+  ^~~~~~~~~~~~~~~~~~~~
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+---
+ drivers/gpu/drm/lima/lima_gem.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index ef65e08..cbe9453 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -1,5 +1,6 @@
+ #include <drm/drmP.h>
+ #include <linux/dma-mapping.h>
++#include <linux/pagemap.h>
+ 
+ #include "lima.h"
+ #include "lima_gem.h"
+-- 
+2.0.1
+

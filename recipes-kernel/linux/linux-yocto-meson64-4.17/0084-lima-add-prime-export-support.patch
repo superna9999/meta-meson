@@ -1,0 +1,79 @@
+From 8ff81ba80a0013c65a4b91389633e60fb72b0c77 Mon Sep 17 00:00:00 2001
+From: Erico Nunes <nunes.erico@gmail.com>
+Date: Wed, 15 Nov 2017 23:08:15 +0100
+Subject: [PATCH 084/134] lima: add prime export support
+
+This enables lima to export a shared buffer from a dma_buf handle using
+the DRM prime infrastructure.
+With this, it is possible to export a gbm_bo allocated with lima to the
+display driver for rendering to a display.
+
+This was tested on the Allwinner A20 with the sun4i-drm driver, along
+with lima.
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h     |  1 +
+ drivers/gpu/drm/lima/lima_drv.c |  3 +++
+ drivers/gpu/drm/lima/lima_gem.c | 22 ++++++++++++++++++++++
+ 3 files changed, 26 insertions(+)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index c79877f..a7240c0 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -152,6 +152,7 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
+ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
+ 						      struct dma_buf_attachment *attach,
+ 						      struct sg_table *sgt);
++struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj);
+ 
+ unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
+ 
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 43092b0..9896b80 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -218,6 +218,9 @@ static struct drm_driver lima_drm_driver = {
+ 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
+ 	.gem_prime_import   = drm_gem_prime_import,
+ 	.gem_prime_import_sg_table = lima_gem_prime_import_sg_table,
++	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
++	.gem_prime_export   = drm_gem_prime_export,
++	.gem_prime_get_sg_table = lima_gem_prime_get_sg_table,
+ };
+ 
+ static int lima_pdev_probe(struct platform_device *pdev)
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 440d4b4..7102022 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -452,3 +452,25 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
+ 
+ 	return &bo->gem;
+ }
++
++struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
++{
++	struct lima_bo *bo = to_lima_bo(obj);
++	struct sg_table *sgt;
++	int ret;
++
++	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
++	if (!sgt)
++		return NULL;
++
++	ret = dma_get_sgtable(obj->dev->dev, sgt, bo->cpu_addr,
++			      bo->dma_addr, obj->size);
++	if (ret < 0)
++		goto out;
++
++	return sgt;
++
++out:
++	kfree(sgt);
++	return NULL;
++}
+-- 
+2.0.1
+

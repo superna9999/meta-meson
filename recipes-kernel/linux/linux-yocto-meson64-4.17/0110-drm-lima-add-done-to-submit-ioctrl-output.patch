@@ -1,0 +1,207 @@
+From 5e648da4822dbeaa3dd0f22d5754640d5449ce11 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 19 Feb 2018 21:34:23 +0800
+Subject: [PATCH 110/134] drm/lima: add 'done' to submit ioctrl output
+
+This field indicates how many tasks before current
+submitted task is done which is used for mesa to
+free finished task resources.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h       |  5 ++++-
+ drivers/gpu/drm/lima/lima_drv.c   |  9 +++++++--
+ drivers/gpu/drm/lima/lima_gem.c   |  6 +++---
+ drivers/gpu/drm/lima/lima_sched.c | 19 +++++++++++++++----
+ drivers/gpu/drm/lima/lima_sched.h |  3 ++-
+ include/uapi/drm/lima_drm.h       | 28 ++++++++++++++++++----------
+ 6 files changed, 49 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index bf0d6eb..ebef1e3 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -157,6 +157,9 @@ struct lima_submit {
+ 	u32 nr_bos;
+ 
+ 	struct lima_sched_task *task;
++
++	uint32_t fence;
++	uint32_t done;
+ };
+ 
+ int lima_device_init(struct lima_device *ldev);
+@@ -192,7 +195,7 @@ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
+ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
+ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
+ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
+-int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fence);
++int lima_gem_submit(struct drm_file *file, struct lima_submit *submit);
+ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
+ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
+ 						      struct dma_buf_attachment *attach,
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index 16d8d3b..9bfd8b0 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -72,7 +72,7 @@ static int lima_ioctl_gem_va(struct drm_device *dev, void *data, struct drm_file
+ 
+ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_file *file)
+ {
+-	struct drm_lima_gem_submit *args = data;
++	struct drm_lima_gem_submit_in *args = data;
+ 	struct lima_device *ldev = to_lima_dev(dev);
+ 	struct lima_drm_priv *priv = file->driver_priv;
+ 	struct drm_lima_gem_submit_bo *bos;
+@@ -129,7 +129,12 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
+ 	submit.task = task;
+ 	submit.ctx = ctx;
+ 
+-	err = lima_gem_submit(file, &submit, &args->fence);
++	err = lima_gem_submit(file, &submit);
++	if (!err) {
++		struct drm_lima_gem_submit_out *out = data;
++		out->fence = submit.fence;
++		out->done = submit.done;
++	}
+ 
+ 	lima_ctx_put(ctx);
+ out1:
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index 67099e4..fa4bc56 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -413,7 +413,7 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
+ 	return 0;
+ }
+ 
+-int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fence)
++int lima_gem_submit(struct drm_file *file, struct lima_submit *submit)
+ {
+ 	int i, err = 0;
+ 	struct ww_acquire_ctx ctx;
+@@ -455,8 +455,8 @@ int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fenc
+ 				submit->lbos[i]->resv, &submit->task->base.s_fence->finished);
+ 	}
+ 
+-	*fence = lima_sched_context_queue_task(
+-		submit->ctx->context + submit->pipe, submit->task);
++	submit->fence = lima_sched_context_queue_task(
++		submit->ctx->context + submit->pipe, submit->task, &submit->done);
+ 
+ out2:
+ 	if (err)
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index 69e7471..69868af 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -179,9 +179,10 @@ void lima_sched_context_fini(struct lima_sched_pipe *pipe,
+ }
+ 
+ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
+-					     struct dma_fence *fence)
++					     struct dma_fence *fence,
++					     uint32_t *done)
+ {
+-	uint32_t seq, idx;
++	uint32_t seq, idx, i, n;
+ 	struct dma_fence *other;
+ 
+ 	spin_lock(&context->lock);
+@@ -199,10 +200,19 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
+ 	context->fences[idx] = dma_fence_get(fence);
+ 	context->sequence++;
+ 
++	/* get finished fence offset from seq */
++	n = min(seq + 1, (uint32_t)lima_sched_max_tasks);
++	for (i = 1; i < n; i++) {
++		idx = (seq - i) & (lima_sched_max_tasks - 1);
++		if (dma_fence_is_signaled(context->fences[idx]))
++			break;
++	}
++
+ 	spin_unlock(&context->lock);
+ 
+ 	dma_fence_put(other);
+ 
++	*done = i;
+ 	return seq;
+ }
+ 
+@@ -235,10 +245,11 @@ static struct dma_fence *lima_sched_context_get_fence(struct lima_sched_context
+ }
+ 
+ uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
+-				       struct lima_sched_task *task)
++				       struct lima_sched_task *task,
++				       uint32_t *done)
+ {
+ 	uint32_t seq = lima_sched_context_add_fence(
+-		context, &task->base.s_fence->finished);
++		context, &task->base.s_fence->finished, done);
+ 	drm_sched_entity_push_job(&task->base, &context->base);
+ 	return seq;
+ }
+diff --git a/drivers/gpu/drm/lima/lima_sched.h b/drivers/gpu/drm/lima/lima_sched.h
+index 1e777b6..7648c25 100644
+--- a/drivers/gpu/drm/lima/lima_sched.h
++++ b/drivers/gpu/drm/lima/lima_sched.h
+@@ -83,7 +83,8 @@ int lima_sched_context_init(struct lima_sched_pipe *pipe,
+ void lima_sched_context_fini(struct lima_sched_pipe *pipe,
+ 			     struct lima_sched_context *context);
+ uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
+-				       struct lima_sched_task *task);
++				       struct lima_sched_task *task,
++				       uint32_t *done);
+ int lima_sched_context_wait_fence(struct lima_sched_context *context,
+ 				  u32 fence, u64 timeout_ns);
+ 
+diff --git a/include/uapi/drm/lima_drm.h b/include/uapi/drm/lima_drm.h
+index 40f0e81..9504b3a 100644
+--- a/include/uapi/drm/lima_drm.h
++++ b/include/uapi/drm/lima_drm.h
+@@ -131,15 +131,23 @@ struct drm_lima_m400_pp_frame {
+ #define LIMA_PIPE_GP  0x00
+ #define LIMA_PIPE_PP  0x01
+ 
+-struct drm_lima_gem_submit {
+-	__u32 fence;       /* out */
+-	__u32 pipe;        /* in */
+-	__u32 nr_bos;      /* in */
+-	__u32 frame_size;  /* in */
+-	__u64 bos;         /* in */
+-	__u64 frame;       /* in */
+-	__u32 ctx;         /* in */
+-	__u32 _pad;
++struct drm_lima_gem_submit_in {
++	__u32 ctx;
++	__u32 pipe;
++	__u32 nr_bos;
++	__u32 frame_size;
++	__u64 bos;
++	__u64 frame;
++};
++
++struct drm_lima_gem_submit_out {
++	__u32 fence;
++	__u32 done;
++};
++
++union drm_lima_gem_submit {
++	struct drm_lima_gem_submit_in in;
++	struct drm_lima_gem_submit_out out;
+ };
+ 
+ struct drm_lima_wait_fence {
+@@ -180,7 +188,7 @@ struct drm_lima_ctx {
+ #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
+ #define DRM_IOCTL_LIMA_GEM_INFO DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_INFO, struct drm_lima_gem_info)
+ #define DRM_IOCTL_LIMA_GEM_VA DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_VA, struct drm_lima_gem_va)
+-#define DRM_IOCTL_LIMA_GEM_SUBMIT DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_SUBMIT, struct drm_lima_gem_submit)
++#define DRM_IOCTL_LIMA_GEM_SUBMIT DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_SUBMIT, union drm_lima_gem_submit)
+ #define DRM_IOCTL_LIMA_WAIT_FENCE DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_WAIT_FENCE, struct drm_lima_wait_fence)
+ #define DRM_IOCTL_LIMA_GEM_WAIT DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_WAIT, struct drm_lima_gem_wait)
+ #define DRM_IOCTL_LIMA_CTX DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_CTX, struct drm_lima_ctx)
+-- 
+2.0.1
+

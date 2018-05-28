@@ -1,0 +1,29 @@
+From c5d31fbef5a71a35955039f0a78cc814fc7f0524 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 4 Sep 2017 17:38:23 +0800
+Subject: [PATCH 077/134] drm/lima: updated lima_gem_fault to new format
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+Reviewed-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_gem.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_gem.c b/drivers/gpu/drm/lima/lima_gem.c
+index f56a8bf..8cd238f 100644
+--- a/drivers/gpu/drm/lima/lima_gem.c
++++ b/drivers/gpu/drm/lima/lima_gem.c
+@@ -142,8 +142,9 @@ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma)
+ 	return 0;
+ }
+ 
+-static int lima_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
++static int lima_gem_fault(struct vm_fault *vmf)
+ {
++	struct vm_area_struct *vma = vmf->vma;
+ 	struct lima_bo *bo = to_lima_bo(vma->vm_private_data);
+ 
+ 	dev_err(bo->gem.dev->dev, "unexpected vm fault %lx\n", vmf->address);
+-- 
+2.0.1
+

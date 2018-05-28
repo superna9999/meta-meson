@@ -1,0 +1,37 @@
+From a24f4a562096b6e8170339515b58ef314f4b26af Mon Sep 17 00:00:00 2001
+From: Erik Stromdahl <erik.stromdahl@gmail.com>
+Date: Sun, 25 Feb 2018 21:28:06 +0100
+Subject: [PATCH 024/134] ath10k: add HTT RX HL ops
+
+Initial (empty) HTT RX ops for high latency devices.
+
+Signed-off-by: Erik Stromdahl <erik.stromdahl@gmail.com>
+---
+ drivers/net/wireless/ath/ath10k/htt_rx.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index d896993..06722b8 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2974,11 +2974,16 @@ static const struct ath10k_htt_rx_ops htt_rx_ops_64 = {
+ 	.htt_reset_paddrs_ring = ath10k_htt_reset_paddrs_ring_64,
+ };
+ 
++static const struct ath10k_htt_rx_ops htt_rx_ops_hl = {
++};
++
+ void ath10k_htt_set_rx_ops(struct ath10k_htt *htt)
+ {
+ 	struct ath10k *ar = htt->ar;
+ 
+-	if (ar->hw_params.target_64bit)
++	if (ar->is_high_latency)
++		htt->rx_ops = &htt_rx_ops_hl;
++	else if (ar->hw_params.target_64bit)
+ 		htt->rx_ops = &htt_rx_ops_64;
+ 	else
+ 		htt->rx_ops = &htt_rx_ops_32;
+-- 
+2.0.1
+

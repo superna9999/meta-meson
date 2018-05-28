@@ -1,0 +1,94 @@
+From 34b47b5a8405f7a5882aaf98db510e36750f6901 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 10 May 2018 15:43:00 +0800
+Subject: [PATCH 94/98] drm/lima: move ctx mgr fini to preclose
+
+No need to wait for each buffer object idle
+if we fini ctx mgr before free them.
+
+va unmap case also don't need to wait because
+UMD is responsible for it.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima_drv.c |  9 ++++++++-
+ drivers/gpu/drm/lima/lima_vm.c  | 16 ----------------
+ 2 files changed, 8 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_drv.c b/drivers/gpu/drm/lima/lima_drv.c
+index e83385f..1fbff17 100644
+--- a/drivers/gpu/drm/lima/lima_drv.c
++++ b/drivers/gpu/drm/lima/lima_drv.c
+@@ -245,11 +245,17 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
+ 	return err;
+ }
+ 
+-static void lima_drm_driver_postclose(struct drm_device *dev, struct drm_file *file)
++static void lima_drm_driver_preclose(struct drm_device *dev, struct drm_file *file)
+ {
+ 	struct lima_drm_priv *priv = file->driver_priv;
+ 
+         lima_ctx_mgr_fini(&priv->ctx_mgr);
++}
++
++static void lima_drm_driver_postclose(struct drm_device *dev, struct drm_file *file)
++{
++	struct lima_drm_priv *priv = file->driver_priv;
++
+ 	lima_vm_put(priv->vm);
+ 	kfree(priv);
+ }
+@@ -279,6 +285,7 @@ static const struct file_operations lima_drm_driver_fops = {
+ static struct drm_driver lima_drm_driver = {
+ 	.driver_features    = DRIVER_RENDER | DRIVER_GEM | DRIVER_PRIME,
+ 	.open               = lima_drm_driver_open,
++	.preclose           = lima_drm_driver_preclose,
+ 	.postclose          = lima_drm_driver_postclose,
+ 	.ioctls             = lima_drm_driver_ioctls,
+ 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
+diff --git a/drivers/gpu/drm/lima/lima_vm.c b/drivers/gpu/drm/lima/lima_vm.c
+index a2f9d25..693db8d 100644
+--- a/drivers/gpu/drm/lima/lima_vm.c
++++ b/drivers/gpu/drm/lima/lima_vm.c
+@@ -158,18 +158,10 @@ int lima_vm_bo_unmap(struct lima_vm *vm, struct lima_bo *bo, u32 start)
+ {
+ 	struct lima_bo_va *bo_va;
+ 	struct lima_bo_va_mapping *mapping;
+-	int err;
+ 
+ 	bo_va = lima_vm_bo_find(vm, bo);
+ 	list_for_each_entry(mapping, &bo_va->mapping, list) {
+ 		if (mapping->start == start) {
+-			/* wait bo idle before unmap it from vm */
+-			err = ttm_bo_wait(&bo->tbo, false, false);
+-			if (err) {
+-				dev_err(vm->dev->dev, "bo unmap fail to "
+-					"wait bo (%d)\n", err);
+-				return err;
+-			}
+ 		        lima_vm_unmap(vm, mapping);
+ 			break;
+ 		}
+@@ -203,19 +195,11 @@ int lima_vm_bo_del(struct lima_vm *vm, struct lima_bo *bo)
+ {
+ 	struct lima_bo_va *bo_va;
+ 	struct lima_bo_va_mapping *mapping, *tmp;
+-	int err;
+ 
+ 	bo_va = lima_vm_bo_find(vm, bo);
+ 	if (--bo_va->ref_count > 0)
+ 		return 0;
+ 
+-	/* wait bo idle before unmap it from vm */
+-	err = ttm_bo_wait(&bo->tbo, false, false);
+-	if (err) {
+-		dev_err(vm->dev->dev, "bo del fail to wait bo (%d)\n", err);
+-		return err;
+-	}
+-
+ 	list_for_each_entry_safe(mapping, tmp, &bo_va->mapping, list) {
+ 	        lima_vm_unmap(vm, mapping);
+ 	}
+-- 
+2.0.1
+

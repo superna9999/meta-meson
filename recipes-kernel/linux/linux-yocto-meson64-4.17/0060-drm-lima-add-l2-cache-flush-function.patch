@@ -1,0 +1,127 @@
+From 26ff1c9689828f2e5f273d904bf50a4c5a3e0a97 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sat, 13 May 2017 22:39:52 +0800
+Subject: [PATCH 060/134] drm/lima: add l2 cache flush function
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ drivers/gpu/drm/lima/lima.h          |  1 +
+ drivers/gpu/drm/lima/lima_gp.c       |  8 +++++++-
+ drivers/gpu/drm/lima/lima_l2_cache.c | 36 ++++++++++++++++++++++++++----------
+ drivers/gpu/drm/lima/lima_mmu.c      |  1 +
+ 4 files changed, 35 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima.h b/drivers/gpu/drm/lima/lima.h
+index e36a814..69aff26 100644
+--- a/drivers/gpu/drm/lima/lima.h
++++ b/drivers/gpu/drm/lima/lima.h
+@@ -115,6 +115,7 @@ void lima_pmu_fini(struct lima_pmu *pmu);
+ 
+ int lima_l2_cache_init(struct lima_l2_cache *l2_cache);
+ void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
++int lima_l2_cache_flush(struct lima_l2_cache *l2_cache);
+ 
+ int lima_mmu_init(struct lima_mmu *mmu);
+ void lima_mmu_fini(struct lima_mmu *mmu);
+diff --git a/drivers/gpu/drm/lima/lima_gp.c b/drivers/gpu/drm/lima/lima_gp.c
+index 5ae79b9..4af7ef5 100644
+--- a/drivers/gpu/drm/lima/lima_gp.c
++++ b/drivers/gpu/drm/lima/lima_gp.c
+@@ -126,10 +126,11 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
+ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
+ {
+ 	struct lima_gp *gp = data;
++	struct lima_device *dev = gp->ip.dev;
+ 	struct drm_lima_m400_gp_frame *frame = task->frame;
+ 	u32 cmd = 0;
+ 
+-	DRM_INFO("lima start task gp status %08x\n", gp_read(STATUS));
++	dev_info(dev->dev, "lima start task gp status %08x\n", gp_read(STATUS));
+ 
+ 	if (frame->vs_cmd_start > frame->vs_cmd_end ||
+ 	    frame->plbu_cmd_start > frame->plbu_cmd_end ||
+@@ -146,6 +147,11 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
+ 		gp->task |= LIMA_GP_TASK_PLBU;
+ 	}
+ 
++	if (!cmd) {
++		dev_err(dev->dev, "start gp task is empty\n");
++		return -EINVAL;
++	}
++
+ 	gp_write(VSCL_START_ADDR, frame->vs_cmd_start);
+ 	gp_write(VSCL_END_ADDR, frame->vs_cmd_end);
+ 	gp_write(PLBUCL_START_ADDR, frame->plbu_cmd_start);
+diff --git a/drivers/gpu/drm/lima/lima_l2_cache.c b/drivers/gpu/drm/lima/lima_l2_cache.c
+index df2845b..397a66e 100644
+--- a/drivers/gpu/drm/lima/lima_l2_cache.c
++++ b/drivers/gpu/drm/lima/lima_l2_cache.c
+@@ -19,11 +19,33 @@
+ #define l2_cache_write(reg, data) writel(data, l2_cache->ip.iomem + LIMA_L2_CACHE_##reg)
+ #define l2_cache_read(reg) readl(l2_cache->ip.iomem + LIMA_L2_CACHE_##reg)
+ 
++static int lima_l2_cache_wait_idle(struct lima_l2_cache *l2_cache)
++{
++	int timeout;
++	struct lima_device *dev = l2_cache->ip.dev;
++
++	for (timeout = 100000; timeout > 0; timeout--) {
++	    if (!(l2_cache_read(STATUS) & LIMA_L2_CACHE_STATUS_COMMAND_BUSY))
++		break;
++	}
++	if (!timeout) {
++	    dev_err(dev->dev, "l2 cache wait command timeout\n");
++	    return -ETIMEDOUT;
++	}
++	return 0;
++}
++
++int lima_l2_cache_flush(struct lima_l2_cache *l2_cache)
++{
++	l2_cache_write(COMMAND, LIMA_L2_CACHE_COMMAND_CLEAR_ALL);
++	return lima_l2_cache_wait_idle(l2_cache);
++}
++
+ int lima_l2_cache_init(struct lima_l2_cache *l2_cache)
+ {
++	int err;
+ 	u32 size;
+ 	struct lima_device *dev = l2_cache->ip.dev;
+-	int timeout;
+ 
+ 	size = l2_cache_read(SIZE);
+ 	dev_info(dev->dev, "l2 cache %uK, %u-way, %ubyte cache line, %ubit external bus\n",
+@@ -32,15 +54,9 @@ int lima_l2_cache_init(struct lima_l2_cache *l2_cache)
+ 		 1 << (size & 0xff),
+ 		 1 << ((size >> 24) & 0xff));
+ 
+-	l2_cache_write(COMMAND, LIMA_L2_CACHE_COMMAND_CLEAR_ALL);
+-	for (timeout = 100000; timeout > 0; timeout--) {
+-	    if (!(l2_cache_read(STATUS) & LIMA_L2_CACHE_STATUS_COMMAND_BUSY))
+-		break;
+-	}
+-	if (!timeout) {
+-	    dev_err(dev->dev, "l2 cache wait command timeout\n");
+-	    return -ETIMEDOUT;
+-	}
++	err = lima_l2_cache_flush(l2_cache);
++	if (err)
++		return err;
+ 
+ 	l2_cache_write(ENABLE, LIMA_L2_CACHE_ENABLE_ACCESS | LIMA_L2_CACHE_ENABLE_READ_ALLOCATE);
+ 	l2_cache_write(MAX_READS, 0x1c);
+diff --git a/drivers/gpu/drm/lima/lima_mmu.c b/drivers/gpu/drm/lima/lima_mmu.c
+index 77da644..c528493 100644
+--- a/drivers/gpu/drm/lima/lima_mmu.c
++++ b/drivers/gpu/drm/lima/lima_mmu.c
+@@ -59,6 +59,7 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
+ 			 fault, LIMA_MMU_STATUS_BUS_ID(status),
+ 			 status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
+ 			 mmu->ip.name);
++		lima_vm_print(mmu->vm);
+ 	}
+ 
+ 	if (status & LIMA_MMU_INT_READ_BUS_ERROR) {
+-- 
+2.0.1
+

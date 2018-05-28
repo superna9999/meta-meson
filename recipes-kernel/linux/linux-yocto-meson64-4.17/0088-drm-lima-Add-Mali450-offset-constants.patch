@@ -1,0 +1,45 @@
+From 32e93871256f8cd2d51d0f2121822023a58679ef Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Fri, 8 Dec 2017 14:16:34 +0100
+Subject: [PATCH 088/134] drm/lima: Add Mali450 offset constants
+
+Mali450 GPUs can have up to 8 PPs, some additional controllers like
+broadcast, load balancer and dma and also has separate L2 caches
+for GP, PP0-3 and PP4-7, so add the necessary contants for the offsets.
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+---
+ drivers/gpu/drm/lima/lima_device.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_device.c b/drivers/gpu/drm/lima/lima_device.c
+index 05f25f7..b153afd 100644
+--- a/drivers/gpu/drm/lima/lima_device.c
++++ b/drivers/gpu/drm/lima/lima_device.c
+@@ -8,8 +8,21 @@
+ #define LIMA_L2_BASE           0x1000
+ #define LIMA_PMU_BASE          0x2000
+ #define LIMA_GPMMU_BASE        0x3000
+-#define LIMA_PPMMU_BASE(i)     (0x4000 + 0x1000 * (i))
+-#define LIMA_PP_BASE(i)        (0x8000 + 0x2000 * (i))
++#define LIMA_PPMMU_BASE(i)     ((i < 4) ? 0x4000 + 0x1000 * (i) : \
++					  0x1C000 + 0x1000 * (i - 4))
++#define LIMA_PP_BASE(i)        ((i < 4) ? 0x8000 + 0x2000 * (i) : \
++					  0x28000 + 0x2000 * (i - 4))
++
++/* Separate L2-caches per group on Mali450 */
++#define LIMA450_GPL2_BASE      0x10000
++#define LIMA450_PP03L2_BASE    0x01000
++#define LIMA450_PP47L2_BASE    0x11000
++
++#define LIMA_BCAST_BASE        0x13000
++#define LIMA_PPBCAST_BASE      0x16000
++#define LIMA_PPBCASTMMU_BASE   0x15000
++#define LIMA_DLBU_BASE         0x14000
++#define LIMA_DMA_BASE          0x12000
+ 
+ static int lima_clk_init(struct lima_device *dev)
+ {
+-- 
+2.0.1
+
