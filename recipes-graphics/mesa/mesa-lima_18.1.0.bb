@@ -1,16 +1,17 @@
 require ${PN}.inc
 
-SRC_URI = "git://github.com/yuq/mesa-lima.git;branch=lima-18.0 \
+PATCHTOOL = "git"
+PATCH_COMMIT_FUNCTIONS = "1"
+
+SRC_URI = "git://github.com/yuq/mesa-lima.git;branch=lima-18.1 \
            file://0001-Makefile.vulkan.am-explictly-add-lib-expat-to-intel-.patch \
-           file://0002-Simplify-wayland-scanner-lookup.patch \
            file://0003-winsys-svga-drm-Include-sys-types.h.patch \
            file://0004-hardware-gloat.patch \
            file://0005-Properly-get-LLVM-version-when-using-LLVM-Git-releas.patch \
-           file://0006-endianness-check-is-OS-wide-and-not-specific-to-libc.patch \
            "
 
-PV = "18.0.0+git${SRCPV}"
-SRCREV = "ee7c7ee61b55be91f350111ee989f9e80b80c026"
+PV = "18.1.0+git${SRCPV}"
+SRCREV = "2adeaa87e813644dcf70f903c0ac909d65ef2972"
 
 S = "${WORKDIR}/git"
 
