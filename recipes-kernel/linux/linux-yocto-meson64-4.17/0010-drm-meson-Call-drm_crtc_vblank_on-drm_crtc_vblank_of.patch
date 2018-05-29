@@ -1,0 +1,38 @@
+From 0fe2d0303855706295ffe38807235deddbabce3c Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 28 Feb 2018 16:07:18 +0100
+Subject: [PATCH 10/83] drm/meson: Call drm_crtc_vblank_on /
+ drm_crtc_vblank_off
+
+Make sure that the CRTC code will call the enable/disable_vblank hooks.
+
+Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
+---
+ drivers/gpu/drm/meson/meson_crtc.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/gpu/drm/meson/meson_crtc.c b/drivers/gpu/drm/meson/meson_crtc.c
+index 9e2b0dc..0fb47f2 100644
+--- a/drivers/gpu/drm/meson/meson_crtc.c
++++ b/drivers/gpu/drm/meson/meson_crtc.c
+@@ -112,6 +112,8 @@ static void meson_crtc_atomic_enable(struct drm_crtc *crtc,
+ 			    priv->io_base + _REG(VPP_MISC));
+ 
+ 	priv->viu.osd1_enabled = true;
++
++	drm_crtc_vblank_on(crtc);
+ }
+ 
+ static void meson_crtc_atomic_disable(struct drm_crtc *crtc,
+@@ -122,6 +124,8 @@ static void meson_crtc_atomic_disable(struct drm_crtc *crtc,
+ 
+ 	DRM_DEBUG_DRIVER("\n");
+ 
++	drm_crtc_vblank_off(crtc);
++
+ 	priv->viu.osd1_enabled = false;
+ 	priv->viu.osd1_commit = false;
+ 
+-- 
+2.0.1
+

@@ -1,0 +1,300 @@
+From 80eacab33a97560df242497780c909e0393feffe Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 18 Apr 2018 09:51:09 +0200
+Subject: [PATCH 03/83] More fixes
+
+---
+ drivers/gpu/drm/meson/meson_crtc.c      | 87 +++++++++++++++++++++++++++------
+ drivers/gpu/drm/meson/meson_drv.h       |  2 +
+ drivers/gpu/drm/meson/meson_overlay.c   |  9 ++++
+ drivers/gpu/drm/meson/meson_registers.h |  2 +
+ drivers/gpu/drm/meson/meson_vpp.c       |  9 +++-
+ drivers/soc/amlogic/meson-gx-pwrc-vpu.c |  8 +--
+ 6 files changed, 96 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/gpu/drm/meson/meson_crtc.c b/drivers/gpu/drm/meson/meson_crtc.c
+index e6abdf6..9e2b0dc 100644
+--- a/drivers/gpu/drm/meson/meson_crtc.c
++++ b/drivers/gpu/drm/meson/meson_crtc.c
+@@ -108,19 +108,10 @@ static void meson_crtc_atomic_enable(struct drm_crtc *crtc,
+ 		writel(FIELD_PREP(GENMASK(11, 0), 1080 - 1),
+ 		       priv->io_base + _REG(VPP_PREBLEND_VD1_V_START_END));
+ 
+-	/* VD1 Preblend horizontal start/end */
+-	writel(FIELD_PREP(GENMASK(11, 0), 4096 - 1),
+-	       priv->io_base + _REG(VPP_PREBLEND_VD1_H_START_END));
+-
+ 	writel_bits_relaxed(VPP_POSTBLEND_ENABLE, VPP_POSTBLEND_ENABLE,
+ 			    priv->io_base + _REG(VPP_MISC));
+ 
+-	/*
+-	writel_bits_relaxed(VPP_PREBLEND_ENABLE, VPP_PREBLEND_ENABLE,
+-			    priv->io_base + _REG(VPP_MISC)); */
+-
+ 	priv->viu.osd1_enabled = true;
+-	priv->viu.vd1_enabled = true;
+ }
+ 
+ static void meson_crtc_atomic_disable(struct drm_crtc *crtc,
+@@ -138,13 +129,10 @@ static void meson_crtc_atomic_disable(struct drm_crtc *crtc,
+ 	priv->viu.vd1_commit = false;
+ 
+ 	/* Disable VPP Postblend */
+-	writel_bits_relaxed(VPP_POSTBLEND_ENABLE, 0,
++	writel_bits_relaxed(VPP_OSD1_POSTBLEND | VPP_VD1_POSTBLEND |
++			    VPP_VD1_PREBLEND | VPP_POSTBLEND_ENABLE, 0,
+ 			    priv->io_base + _REG(VPP_MISC));
+ 
+-	/* Disable VPP Preblend * /
+-	writel_bits_relaxed(VPP_PREBLEND_ENABLE, 0,
+-			    priv->io_base + _REG(VPP_MISC)); */
+-
+ 	if (crtc->state->event && !crtc->state->active) {
+ 		spin_lock_irq(&crtc->dev->event_lock);
+ 		drm_crtc_send_vblank_event(crtc, crtc->state->event);
+@@ -239,42 +227,109 @@ void meson_crtc_irq(struct meson_drm *priv)
+ 
+ 		DRM_INFO("VD1 update\n");
+ 
++		/* di_mif0_en=0 mif0_to_vpp_en=0 di_mad_en=0 */
++		writel_bits_relaxed(0x7 << 16, 0,
++				    priv->io_base + _REG(VIU_MISC_CTRL0));
++		/* afbc vd1 set=0 */
++		writel_bits_relaxed(BIT(20), 0,
++				    priv->io_base + _REG(VIU_MISC_CTRL0));
++		writel_relaxed(0, priv->io_base + _REG(AFBC_ENABLE));
+ 		writel_relaxed(priv->viu.vd1_if0_gen_reg,
+ 				priv->io_base + _REG(VD1_IF0_GEN_REG));
++		writel_relaxed(priv->viu.vd1_if0_gen_reg,
++				priv->io_base + _REG(VD2_IF0_GEN_REG));
+ 		writel_relaxed(priv->viu.vd1_if0_gen_reg2,
+ 				priv->io_base + _REG(VD1_IF0_GEN_REG2));
++		writel_bits_relaxed(0x3 << 8, 0,
++				    priv->io_base + _REG(VD1_IF0_GEN_REG3));
+ 		writel_relaxed(priv->viu.viu_vd1_fmt_ctrl,
+ 				priv->io_base + _REG(VIU_VD1_FMT_CTRL));
++		writel_relaxed(priv->viu.viu_vd1_fmt_ctrl,
++				priv->io_base + _REG(VIU_VD2_FMT_CTRL));
+ 		writel_relaxed(priv->viu.viu_vd1_fmt_w,
+ 				priv->io_base + _REG(VIU_VD1_FMT_W));
++		writel_relaxed(priv->viu.viu_vd1_fmt_w,
++				priv->io_base + _REG(VIU_VD2_FMT_W));
+ 		writel_relaxed(priv->viu.vd1_if0_canvas0,
+ 				priv->io_base + _REG(VD1_IF0_CANVAS0));
++		writel_relaxed(priv->viu.vd1_if0_canvas0,
++				priv->io_base + _REG(VD1_IF0_CANVAS1));
++		writel_relaxed(priv->viu.vd1_if0_canvas0,
++				priv->io_base + _REG(VD2_IF0_CANVAS0));
++		writel_relaxed(priv->viu.vd1_if0_canvas0,
++				priv->io_base + _REG(VD2_IF0_CANVAS1));
+ 		writel_relaxed(priv->viu.vd1_if0_luma_x0,
+ 				priv->io_base + _REG(VD1_IF0_LUMA_X0));
++		writel_relaxed(priv->viu.vd1_if0_luma_x0,
++				priv->io_base + _REG(VD1_IF0_LUMA_X1));
++		writel_relaxed(priv->viu.vd1_if0_luma_x0,
++				priv->io_base + _REG(VD2_IF0_LUMA_X0));
++		writel_relaxed(priv->viu.vd1_if0_luma_x0,
++				priv->io_base + _REG(VD2_IF0_LUMA_X1));
+ 		writel_relaxed(priv->viu.vd1_if0_luma_y0,
+ 				priv->io_base + _REG(VD1_IF0_LUMA_Y0));
++		writel_relaxed(priv->viu.vd1_if0_luma_y0,
++				priv->io_base + _REG(VD1_IF0_LUMA_Y1));
++		writel_relaxed(priv->viu.vd1_if0_luma_y0,
++				priv->io_base + _REG(VD2_IF0_LUMA_Y0));
++		writel_relaxed(priv->viu.vd1_if0_luma_y0,
++				priv->io_base + _REG(VD2_IF0_LUMA_Y1));
+ 		writel_relaxed(priv->viu.vd1_if0_chroma_x0,
+ 				priv->io_base + _REG(VD1_IF0_CHROMA_X0));
++		writel_relaxed(priv->viu.vd1_if0_chroma_x0,
++				priv->io_base + _REG(VD1_IF0_CHROMA_X1));
++		writel_relaxed(priv->viu.vd1_if0_chroma_x0,
++				priv->io_base + _REG(VD2_IF0_CHROMA_X0));
++		writel_relaxed(priv->viu.vd1_if0_chroma_x0,
++				priv->io_base + _REG(VD2_IF0_CHROMA_X1));
+ 		writel_relaxed(priv->viu.vd1_if0_chroma_y0,
+ 				priv->io_base + _REG(VD1_IF0_CHROMA_Y0));
++		writel_relaxed(priv->viu.vd1_if0_chroma_y0,
++				priv->io_base + _REG(VD1_IF0_CHROMA_Y1));
++		writel_relaxed(priv->viu.vd1_if0_chroma_y0,
++				priv->io_base + _REG(VD2_IF0_CHROMA_Y0));
++		writel_relaxed(priv->viu.vd1_if0_chroma_y0,
++				priv->io_base + _REG(VD2_IF0_CHROMA_Y1));
+ 		writel_relaxed(priv->viu.vd1_if0_repeat_loop,
+ 				priv->io_base + _REG(VD1_IF0_RPT_LOOP));
++		writel_relaxed(priv->viu.vd1_if0_repeat_loop,
++				priv->io_base + _REG(VD2_IF0_RPT_LOOP));
+ 		writel_relaxed(priv->viu.vd1_if0_luma0_rpt_pat,
+ 				priv->io_base + _REG(VD1_IF0_LUMA0_RPT_PAT));
++		writel_relaxed(priv->viu.vd1_if0_luma0_rpt_pat,
++				priv->io_base + _REG(VD2_IF0_LUMA0_RPT_PAT));
++		writel_relaxed(priv->viu.vd1_if0_luma0_rpt_pat,
++				priv->io_base + _REG(VD1_IF0_LUMA1_RPT_PAT));
++		writel_relaxed(priv->viu.vd1_if0_luma0_rpt_pat,
++				priv->io_base + _REG(VD2_IF0_LUMA1_RPT_PAT));
+ 		writel_relaxed(priv->viu.vd1_if0_chroma0_rpt_pat,
+ 				priv->io_base + _REG(VD1_IF0_CHROMA0_RPT_PAT));
+-		writel_relaxed(priv->viu.vd1_range_map_y,
++		writel_relaxed(priv->viu.vd1_if0_chroma0_rpt_pat,
++				priv->io_base + _REG(VD2_IF0_CHROMA0_RPT_PAT));
++		writel_relaxed(priv->viu.vd1_if0_chroma0_rpt_pat,
++				priv->io_base + _REG(VD1_IF0_CHROMA1_RPT_PAT));
++		writel_relaxed(priv->viu.vd1_if0_chroma0_rpt_pat,
++				priv->io_base + _REG(VD2_IF0_CHROMA1_RPT_PAT));
++		writel_relaxed(0, priv->io_base + _REG(VD1_IF0_LUMA_PSEL));
++		writel_relaxed(0, priv->io_base + _REG(VD1_IF0_CHROMA_PSEL));
++		writel_relaxed(0, priv->io_base + _REG(VD2_IF0_LUMA_PSEL));
++		writel_relaxed(0, priv->io_base + _REG(VD2_IF0_CHROMA_PSEL));
++		/*writel_relaxed(priv->viu.vd1_range_map_y,
+ 				priv->io_base + _REG(VD1_IF0_RANGE_MAP_Y));
+ 		writel_relaxed(priv->viu.vd1_range_map_cb,
+ 				priv->io_base + _REG(VD1_IF0_RANGE_MAP_CB));
+ 		writel_relaxed(priv->viu.vd1_range_map_cr,
+-				priv->io_base + _REG(VD1_IF0_RANGE_MAP_CR));
++				priv->io_base + _REG(VD1_IF0_RANGE_MAP_CR));*/
+ 		writel_relaxed(priv->viu.vpp_pic_in_height,
+ 				priv->io_base + _REG(VPP_PIC_IN_HEIGHT));
+ 		writel_relaxed(priv->viu.vpp_postblend_vd1_h_start_end,
+ 				priv->io_base + _REG(VPP_POSTBLEND_VD1_H_START_END));
++		writel_relaxed(priv->viu.vpp_blend_vd2_h_start_end,
++				priv->io_base + _REG(VPP_BLEND_VD2_H_START_END));
+ 		writel_relaxed(priv->viu.vpp_postblend_vd1_v_start_end,
+ 				priv->io_base + _REG(VPP_POSTBLEND_VD1_V_START_END));
++		writel_relaxed(priv->viu.vpp_blend_vd2_v_start_end,
++				priv->io_base + _REG(VPP_BLEND_VD2_V_START_END));
+ 		writel_relaxed(priv->viu.vpp_hsc_region12_startp,
+ 				priv->io_base + _REG(VPP_HSC_REGION12_STARTP));
+ 		writel_relaxed(priv->viu.vpp_hsc_region34_startp,
+diff --git a/drivers/gpu/drm/meson/meson_drv.h b/drivers/gpu/drm/meson/meson_drv.h
+index 06fe7cb..bc47aa5 100644
+--- a/drivers/gpu/drm/meson/meson_drv.h
++++ b/drivers/gpu/drm/meson/meson_drv.h
+@@ -93,6 +93,8 @@ struct meson_drm {
+ 		uint32_t vpp_vsc_ini_phase;
+ 		uint32_t vpp_vsc_phase_ctrl;
+ 		uint32_t vpp_hsc_phase_ctrl;
++		uint32_t vpp_blend_vd2_h_start_end;
++		uint32_t vpp_blend_vd2_v_start_end;
+ 	} viu;
+ 
+ 	struct {
+diff --git a/drivers/gpu/drm/meson/meson_overlay.c b/drivers/gpu/drm/meson/meson_overlay.c
+index d71e68c..076d688 100644
+--- a/drivers/gpu/drm/meson/meson_overlay.c
++++ b/drivers/gpu/drm/meson/meson_overlay.c
+@@ -276,6 +276,8 @@ static void meson_overlay_setup_scaler_params(struct meson_drm *priv,
+ 
+ 	priv->viu.vpp_postblend_vd1_h_start_end = VD_H_START(hsc_startp) |
+ 						  VD_H_END(hsc_endp);
++	priv->viu.vpp_blend_vd2_h_start_end = VD_H_START(hd_start_lines) |
++					      VD_H_END(hd_end_lines);
+ 	priv->viu.vpp_hsc_region12_startp = VD_REGION13_END(0) |
+ 					    VD_REGION24_START(hsc_startp);
+ 	priv->viu.vpp_hsc_region34_startp = VD_REGION13_END(hsc_startp) |
+@@ -291,6 +293,9 @@ static void meson_overlay_setup_scaler_params(struct meson_drm *priv,
+ 
+ 	priv->viu.vpp_postblend_vd1_v_start_end = VD_V_START(vsc_startp) |
+ 						  VD_V_END(vsc_endp);
++	priv->viu.vpp_blend_vd2_v_start_end =
++				VD_V_START((vd_end_lines + 1) >> 2) |
++				VD_V_END(vd_end_lines);
+ 
+ 	priv->viu.vpp_vsc_region12_startp = 0;
+ 	priv->viu.vpp_vsc_region34_startp =
+@@ -467,6 +472,8 @@ static void meson_overlay_atomic_update(struct drm_plane *plane,
+ 			 priv->viu.vd1_height0);
+ 	}
+ 
++	priv->viu.vd1_enabled = true;
++
+ 	spin_unlock_irqrestore(&priv->drm->event_lock, flags);
+ 
+ 	DRM_DEBUG_DRIVER("\n");
+@@ -479,6 +486,8 @@ static void meson_overlay_atomic_disable(struct drm_plane *plane,
+ 	struct meson_drm *priv = meson_overlay->priv;
+ 
+ 	DRM_DEBUG_DRIVER("\n");
++	
++	priv->viu.vd1_enabled = false;
+ 
+ 	/* TODO zorder */
+ 	/* Disable VD1 */
+diff --git a/drivers/gpu/drm/meson/meson_registers.h b/drivers/gpu/drm/meson/meson_registers.h
+index bca8714..f896069 100644
+--- a/drivers/gpu/drm/meson/meson_registers.h
++++ b/drivers/gpu/drm/meson/meson_registers.h
+@@ -286,6 +286,7 @@
+ #define VIU_OSD1_MATRIX_COEF22_30 0x1a9d
+ #define VIU_OSD1_MATRIX_COEF31_32 0x1a9e
+ #define VIU_OSD1_MATRIX_COEF40_41 0x1a9f
++#define VD1_IF0_GEN_REG3 0x1aa7
+ #define VIU_OSD1_EOTF_CTL 0x1ad4
+ #define VIU_OSD1_EOTF_COEF00_01 0x1ad5
+ #define VIU_OSD1_EOTF_COEF02_10 0x1ad6
+@@ -297,6 +298,7 @@
+ #define VIU_OSD1_OETF_CTL 0x1adc
+ #define VIU_OSD1_OETF_LUT_ADDR_PORT 0x1add
+ #define VIU_OSD1_OETF_LUT_DATA_PORT 0x1ade
++#define AFBC_ENABLE 0x1ae0
+ 
+ /* vpp */
+ #define VPP_DUMMY_DATA 0x1d00
+diff --git a/drivers/gpu/drm/meson/meson_vpp.c b/drivers/gpu/drm/meson/meson_vpp.c
+index f13ee11..dc9df4f 100644
+--- a/drivers/gpu/drm/meson/meson_vpp.c
++++ b/drivers/gpu/drm/meson/meson_vpp.c
+@@ -175,9 +175,16 @@ void meson_vpp_init(struct meson_drm *priv)
+ 
+ 	/* Force all planes off */
+ 	writel_bits_relaxed(VPP_OSD1_POSTBLEND | VPP_OSD2_POSTBLEND |
+-			    VPP_VD1_POSTBLEND | VPP_VD2_POSTBLEND, 0,
++			    VPP_VD1_POSTBLEND | VPP_VD2_POSTBLEND |
++			    VPP_VD1_PREBLEND | VPP_VD2_PREBLEND, 0,
+ 			    priv->io_base + _REG(VPP_MISC));
+ 
++	/* Setup default VD settings */
++	writel_relaxed(4096,
++			priv->io_base + _REG(VPP_PREBLEND_VD1_H_START_END));
++	writel_relaxed(4096,
++			priv->io_base + _REG(VPP_BLEND_VD2_H_START_END));
++
+ 	/* Disable Scalers */
+ 	writel_relaxed(0, priv->io_base + _REG(VPP_OSD_SC_CTRL0));
+ 	writel_relaxed(0, priv->io_base + _REG(VPP_OSD_VSC_CTRL0));
+diff --git a/drivers/soc/amlogic/meson-gx-pwrc-vpu.c b/drivers/soc/amlogic/meson-gx-pwrc-vpu.c
+index 6289965..05421d0 100644
+--- a/drivers/soc/amlogic/meson-gx-pwrc-vpu.c
++++ b/drivers/soc/amlogic/meson-gx-pwrc-vpu.c
+@@ -54,12 +54,12 @@ static int meson_gx_pwrc_vpu_power_off(struct generic_pm_domain *genpd)
+ 	/* Power Down Memories */
+ 	for (i = 0; i < 32; i += 2) {
+ 		regmap_update_bits(pd->regmap_hhi, HHI_VPU_MEM_PD_REG0,
+-				   0x2 << i, 0x3 << i);
++				   0x3 << i, 0x3 << i);
+ 		udelay(5);
+ 	}
+ 	for (i = 0; i < 32; i += 2) {
+ 		regmap_update_bits(pd->regmap_hhi, HHI_VPU_MEM_PD_REG1,
+-				   0x2 << i, 0x3 << i);
++				   0x3 << i, 0x3 << i);
+ 		udelay(5);
+ 	}
+ 	for (i = 8; i < 16; i++) {
+@@ -108,13 +108,13 @@ static int meson_gx_pwrc_vpu_power_on(struct generic_pm_domain *genpd)
+ 	/* Power Up Memories */
+ 	for (i = 0; i < 32; i += 2) {
+ 		regmap_update_bits(pd->regmap_hhi, HHI_VPU_MEM_PD_REG0,
+-				   0x2 << i, 0);
++				   0x3 << i, 0);
+ 		udelay(5);
+ 	}
+ 
+ 	for (i = 0; i < 32; i += 2) {
+ 		regmap_update_bits(pd->regmap_hhi, HHI_VPU_MEM_PD_REG1,
+-				   0x2 << i, 0);
++				   0x3 << i, 0);
+ 		udelay(5);
+ 	}
+ 
+-- 
+2.0.1
+

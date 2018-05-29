@@ -1,7 +1,7 @@
-From a2fe6421c1d66116e42553afde8c3eb0777b8b50 Mon Sep 17 00:00:00 2001
+From 3212abf16720627febe9bda75a785ba925a63d34 Mon Sep 17 00:00:00 2001
 From: Koen Kooi <koen@dominion.thruhere.net>
 Date: Fri, 11 May 2018 13:26:33 +0200
-Subject: [PATCH 4/4] meson-overlay: deal with
+Subject: [PATCH 04/83] meson-overlay: deal with
  drm_atomic_helper_check_plane_state() API change
 
 Upstream commit 81af63a4af82e739aaa391d1fbb97e02c58ea6a1 changed the

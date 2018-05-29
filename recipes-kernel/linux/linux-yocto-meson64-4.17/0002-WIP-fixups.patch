@@ -1,7 +1,7 @@
-From ce57d58e9742d9a20d5cf21f32b54eba64ea242c Mon Sep 17 00:00:00 2001
+From 0f8da7f026dd91d8498d0aa5091a7f13455ec040 Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Mon, 9 Apr 2018 15:41:11 +0200
-Subject: [PATCH 2/4] WIP fixups
+Subject: [PATCH 02/83] WIP fixups
 
 ---
  drivers/gpu/drm/meson/meson_crtc.c    |  73 ++++++++++++++----
