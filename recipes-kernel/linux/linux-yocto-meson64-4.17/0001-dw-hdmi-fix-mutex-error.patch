@@ -1,0 +1,80 @@
+From ed9799f4e30ed1ef2164c766aaf6a291072a00a5 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 30 May 2018 11:21:08 +0200
+Subject: [PATCH] dw-hdmi: fix mutex error
+
+---
+ drivers/gpu/drm/bridge/synopsys/dw-hdmi.c | 15 ++++-----------
+ drivers/gpu/drm/meson/meson_dw_hdmi.c     |  2 +-
+ include/drm/bridge/dw_hdmi.h              |  2 +-
+ 3 files changed, 6 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+index 2db0775..5b293b4 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -2077,7 +2077,7 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
+ 	return ret;
+ }
+ 
+-void __dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense)
++void dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense)
+ {
+ 	mutex_lock(&hdmi->mutex);
+ 
+@@ -2103,13 +2103,6 @@ void __dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense)
+ 	}
+ 	mutex_unlock(&hdmi->mutex);
+ }
+-
+-void dw_hdmi_setup_rx_sense(struct device *dev, bool hpd, bool rx_sense)
+-{
+-	struct dw_hdmi *hdmi = dev_get_drvdata(dev);
+-
+-	__dw_hdmi_setup_rx_sense(hdmi, hpd, rx_sense);
+-}
+ EXPORT_SYMBOL_GPL(dw_hdmi_setup_rx_sense);
+ 
+ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
+@@ -2145,9 +2138,9 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
+ 	 */
+ 	if (intr_stat &
+ 	    (HDMI_IH_PHY_STAT0_RX_SENSE | HDMI_IH_PHY_STAT0_HPD)) {
+-		__dw_hdmi_setup_rx_sense(hdmi,
+-					 phy_stat & HDMI_PHY_HPD,
+-					 phy_stat & HDMI_PHY_RX_SENSE);
++		dw_hdmi_setup_rx_sense(hdmi,
++				       phy_stat & HDMI_PHY_HPD,
++				       phy_stat & HDMI_PHY_RX_SENSE);
+ 
+ 		if ((phy_stat & (HDMI_PHY_RX_SENSE | HDMI_PHY_HPD)) == 0)
+ 			cec_notifier_set_phys_addr(hdmi->cec_notifier,
+diff --git a/drivers/gpu/drm/meson/meson_dw_hdmi.c b/drivers/gpu/drm/meson/meson_dw_hdmi.c
+index a393095..c9ad456 100644
+--- a/drivers/gpu/drm/meson/meson_dw_hdmi.c
++++ b/drivers/gpu/drm/meson/meson_dw_hdmi.c
+@@ -529,7 +529,7 @@ static irqreturn_t dw_hdmi_top_thread_irq(int irq, void *dev_id)
+ 		if (stat & HDMITX_TOP_INTR_HPD_RISE)
+ 			hpd_connected = true;
+ 
+-		dw_hdmi_setup_rx_sense(dw_hdmi->dev, hpd_connected,
++		dw_hdmi_setup_rx_sense(dw_hdmi->hdmi, hpd_connected,
+ 				       hpd_connected);
+ 
+ 		drm_helper_hpd_irq_event(dw_hdmi->encoder.dev);
+diff --git a/include/drm/bridge/dw_hdmi.h b/include/drm/bridge/dw_hdmi.h
+index dd2a8cf..ccb5aa8 100644
+--- a/include/drm/bridge/dw_hdmi.h
++++ b/include/drm/bridge/dw_hdmi.h
+@@ -151,7 +151,7 @@ struct dw_hdmi *dw_hdmi_bind(struct platform_device *pdev,
+ 			     struct drm_encoder *encoder,
+ 			     const struct dw_hdmi_plat_data *plat_data);
+ 
+-void dw_hdmi_setup_rx_sense(struct device *dev, bool hpd, bool rx_sense);
++void dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense);
+ 
+ void dw_hdmi_set_sample_rate(struct dw_hdmi *hdmi, unsigned int rate);
+ void dw_hdmi_audio_enable(struct dw_hdmi *hdmi);
+-- 
+2.9.5
+

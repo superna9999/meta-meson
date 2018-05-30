@@ -92,6 +92,8 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git;prot
            file://0081-drm-lima-wait-bo-fence-before-bo-close.patch \
            file://0082-drm-lima-refine-lima_gem_sync_bo.patch \
            file://0083-drm-lima-vm-will-be-freed-when-lima_sched_free_job.patch \
+           file://0001-fix-audio-picked-from-LE-slack.patch \
+           file://0001-dw-hdmi-fix-mutex-error.patch \
            file://defconfig \
            "
 
