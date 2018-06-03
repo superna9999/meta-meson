@@ -1,7 +1,7 @@
-From d24414958a7e7f8d08ecf0e9c0ac47999fb56a1c Mon Sep 17 00:00:00 2001
+From 5dcfbc3d6b6af30694b9e05a71923692a93fa467 Mon Sep 17 00:00:00 2001
 From: Qiang Yu <yuq825@gmail.com>
 Date: Mon, 28 May 2018 17:36:59 +0800
-Subject: [PATCH 81/83] drm/lima: wait bo fence before bo close
+Subject: [PATCH 81/86] drm/lima: wait bo fence before bo close
 
 We can't bring preclose back, so use this
 method for user application termination.

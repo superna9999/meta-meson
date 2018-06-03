@@ -1,7 +1,7 @@
-From dcf30a5a481b617244df521bc0467f27cfb809b1 Mon Sep 17 00:00:00 2001
+From 01ff98fde9a500eccd64d4ed97ab6d46efebbb00 Mon Sep 17 00:00:00 2001
 From: Qiang Yu <yuq825@gmail.com>
 Date: Mon, 28 May 2018 18:55:39 +0800
-Subject: [PATCH 82/83] drm/lima: refine lima_gem_sync_bo
+Subject: [PATCH 82/86] drm/lima: refine lima_gem_sync_bo
 
 Signed-off-by: Qiang Yu <yuq825@gmail.com>
 ---

@@ -1,7 +1,7 @@
-From 90c711b92e61e158ddb003b692d0c37b905e554a Mon Sep 17 00:00:00 2001
+From d9f34736677f24e8440a1a022b9eaebe2d458eaa Mon Sep 17 00:00:00 2001
 From: Qiang Yu <yuq825@gmail.com>
 Date: Thu, 24 May 2018 14:33:36 +0800
-Subject: [PATCH 80/83] drm/lima: add comments for lima_reg.h
+Subject: [PATCH 80/86] drm/lima: add comments for lima_reg.h
 
 This file is based on official ARM Mali Utgard GPU
 kernel driver.

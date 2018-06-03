@@ -4,7 +4,7 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-SRCREV_meson="786b71f5b754273ccef6d9462e52062b3e1f9877"
+SRCREV_meson = "918fe1b3157978ada4267468008c5f89ef101e7d"
 LINUX_VERSION ?= "4.17"
 	
 # Linux stable tree
@@ -92,8 +92,10 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git;prot
            file://0081-drm-lima-wait-bo-fence-before-bo-close.patch \
            file://0082-drm-lima-refine-lima_gem_sync_bo.patch \
            file://0083-drm-lima-vm-will-be-freed-when-lima_sched_free_job.patch \
+           file://0084-drm-lima-vm-alloc-buffer-with-multi-page-table.patch \
+           file://0085-drm-lima-clear-vm-page-table-when-alloc.patch \
+           file://0086-drm-lima-update-SPDX-header-to-match-kernel-rules.patch \
            file://0001-fix-audio-picked-from-LE-slack.patch \
-           file://0001-dw-hdmi-fix-mutex-error.patch \
            file://defconfig \
            "
 
