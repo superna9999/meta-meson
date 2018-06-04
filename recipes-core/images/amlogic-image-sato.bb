@@ -18,6 +18,5 @@ IMAGE_INSTALL = "\
 
 # 4G Rootfs
 IMAGE_ROOTFS_SIZE = "4194304"
-IMAGE_FSTYPES = "ext4 tar.bz2"
 
 inherit core-image
