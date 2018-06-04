@@ -4,8 +4,8 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-SRCREV_meson = "918fe1b3157978ada4267468008c5f89ef101e7d"
-LINUX_VERSION ?= "4.17"
+SRCREV_meson = "29dcea88779c856c7dc92040a0c01233263101d4"
+LINUX_VERSION = "4.17.0"
 	
 # Linux stable tree
 SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git;protocol=https;name=meson \
