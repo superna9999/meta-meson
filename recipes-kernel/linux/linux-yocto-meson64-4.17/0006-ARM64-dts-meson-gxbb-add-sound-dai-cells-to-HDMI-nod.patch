@@ -1,0 +1,25 @@
+From 636dc49955d5ee6f78cb18267473b17811a0d692 Mon Sep 17 00:00:00 2001
+From: Jonas Karlman <jonas@kwiboo.se>
+Date: Mon, 2 Apr 2018 10:34:10 +0200
+Subject: [PATCH 06/83] ARM64: dts: meson-gxbb: add sound-dai-cells to HDMI
+ node
+
+---
+ arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+index 562c26a..47a481d 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+@@ -305,6 +305,7 @@
+ 		 <&clkc CLKID_CLK81>,
+ 		 <&clkc CLKID_GCLK_VENCI_INT0>;
+ 	clock-names = "isfr", "iahb", "venci";
++	#sound-dai-cells = <0>;
+ };
+ 
+ &hiubus {
+-- 
+2.0.1
+

@@ -1,0 +1,29 @@
+From fb3a72078a1123c03e9f774a260bae374752ef0e Mon Sep 17 00:00:00 2001
+From: Erik Stromdahl <erik.stromdahl@gmail.com>
+Date: Sun, 25 Feb 2018 21:28:18 +0100
+Subject: [PATCH 51/83] ath10k: sdio: fix type mismatch in func prototype
+
+Signed-off-by: Erik Stromdahl <erik.stromdahl@gmail.com>
+---
+ drivers/net/wireless/ath/ath10k/sdio.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath10k/sdio.c b/drivers/net/wireless/ath/ath10k/sdio.c
+index 5321b5d..c364c0d 100644
+--- a/drivers/net/wireless/ath/ath10k/sdio.c
++++ b/drivers/net/wireless/ath/ath10k/sdio.c
+@@ -38,9 +38,9 @@
+ #define ATH10K_SDIO_VSG_BUF_SIZE	(32 * 1024)
+ 
+ static int ath10k_sdio_read(struct ath10k *ar, u32 addr, void *buf,
+-			    u32 len, bool incr);
++			    size_t len, bool incr);
+ static int ath10k_sdio_write(struct ath10k *ar, u32 addr, const void *buf,
+-			     u32 len, bool incr);
++			     size_t len, bool incr);
+ 
+ /* inlined helper functions */
+ 
+-- 
+2.0.1
+

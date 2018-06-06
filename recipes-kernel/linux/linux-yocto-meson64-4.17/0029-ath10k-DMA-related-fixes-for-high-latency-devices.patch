@@ -1,0 +1,91 @@
+From 046c8d5241fe7c86bc9f02a68ff39042b17e3411 Mon Sep 17 00:00:00 2001
+From: Erik Stromdahl <erik.stromdahl@gmail.com>
+Date: Sun, 25 Feb 2018 21:28:03 +0100
+Subject: [PATCH 29/83] ath10k: DMA related fixes for high latency devices
+
+Several DMA related functions (such as the dma_map_xxx functions)
+are not used with high latency devices and don't need to be invoked
+in this case.
+
+Signed-off-by: Erik Stromdahl <erik.stromdahl@gmail.com>
+---
+ drivers/net/wireless/ath/ath10k/htc.c    | 19 ++++++++++++-------
+ drivers/net/wireless/ath/ath10k/htt_tx.c |  3 ++-
+ drivers/net/wireless/ath/ath10k/txrx.c   |  3 ++-
+ 3 files changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath10k/htc.c b/drivers/net/wireless/ath/ath10k/htc.c
+index 492dc5b..dd69345 100644
+--- a/drivers/net/wireless/ath/ath10k/htc.c
++++ b/drivers/net/wireless/ath/ath10k/htc.c
+@@ -53,7 +53,8 @@ static inline void ath10k_htc_restore_tx_skb(struct ath10k_htc *htc,
+ {
+ 	struct ath10k_skb_cb *skb_cb = ATH10K_SKB_CB(skb);
+ 
+-	dma_unmap_single(htc->ar->dev, skb_cb->paddr, skb->len, DMA_TO_DEVICE);
++	if (!htc->ar->is_high_latency)
++		dma_unmap_single(htc->ar->dev, skb_cb->paddr, skb->len, DMA_TO_DEVICE);
+ 	skb_pull(skb, sizeof(struct ath10k_htc_hdr));
+ }
+ 
+@@ -137,11 +138,14 @@ int ath10k_htc_send(struct ath10k_htc *htc,
+ 	ath10k_htc_prepare_tx_skb(ep, skb);
+ 
+ 	skb_cb->eid = eid;
+-	skb_cb->paddr = dma_map_single(dev, skb->data, skb->len, DMA_TO_DEVICE);
+-	ret = dma_mapping_error(dev, skb_cb->paddr);
+-	if (ret) {
+-		ret = -EIO;
+-		goto err_credits;
++	if (!ar->is_high_latency) {
++		skb_cb->paddr = dma_map_single(dev, skb->data, skb->len,
++					       DMA_TO_DEVICE);
++		ret = dma_mapping_error(dev, skb_cb->paddr);
++		if (ret) {
++			ret = -EIO;
++			goto err_credits;
++		}
+ 	}
+ 
+ 	sg_item.transfer_id = ep->eid;
+@@ -157,7 +161,8 @@ int ath10k_htc_send(struct ath10k_htc *htc,
+ 	return 0;
+ 
+ err_unmap:
+-	dma_unmap_single(dev, skb_cb->paddr, skb->len, DMA_TO_DEVICE);
++	if (!ar->is_high_latency)
++		dma_unmap_single(dev, skb_cb->paddr, skb->len, DMA_TO_DEVICE);
+ err_credits:
+ 	if (ep->tx_credit_flow_enabled) {
+ 		spin_lock_bh(&htc->tx_lock);
+diff --git a/drivers/net/wireless/ath/ath10k/htt_tx.c b/drivers/net/wireless/ath/ath10k/htt_tx.c
+index a086958..4d0bfb4 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_tx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
+@@ -1125,7 +1125,8 @@ int ath10k_htt_mgmt_tx(struct ath10k_htt *htt, struct sk_buff *msdu)
+ 	return 0;
+ 
+ err_unmap_msdu:
+-	dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
++	if (!ar->is_high_latency)
++		dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
+ err_free_txdesc:
+ 	dev_kfree_skb_any(txdesc);
+ err_free_msdu_id:
+diff --git a/drivers/net/wireless/ath/ath10k/txrx.c b/drivers/net/wireless/ath/ath10k/txrx.c
+index 70e23bb..83dab15 100644
+--- a/drivers/net/wireless/ath/ath10k/txrx.c
++++ b/drivers/net/wireless/ath/ath10k/txrx.c
+@@ -94,7 +94,8 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
+ 		wake_up(&htt->empty_tx_wq);
+ 	spin_unlock_bh(&htt->tx_lock);
+ 
+-	dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
++	if (!ar->is_high_latency)
++		dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
+ 
+ 	ath10k_report_offchan_tx(htt->ar, msdu);
+ 
+-- 
+2.0.1
+
