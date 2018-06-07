@@ -1,6 +1,7 @@
 inherit image_types
 
 WIC_COMMAND_meson-gxl = "wic_command_meson_gxl"
+WIC_COMMAND_meson-gxm = "wic_command_meson_gxl"
 WIC_COMMAND_meson-gxbb = "wic_command_meson_gxbb"
 WIC_COMMAND_hardkernel-odroidc2 = "wic_command_odroidc2"
 
