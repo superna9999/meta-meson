@@ -1,7 +1,7 @@
-From c6f49c1b3b2cc1e55c41294b0197398151985264 Mon Sep 17 00:00:00 2001
+From e6794244bc4c59ffcf1ed4cbb452836dca10ad55 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Wed, 20 Sep 2017 18:10:08 +0200
-Subject: [PATCH 013/134] ARM64: dts: meson: activate hdmi audio HDMI enabled
+Subject: [PATCH 13/14] ARM64: dts: meson: activate hdmi audio HDMI enabled
  boards
 
 This patch activate audio over HDMI on selected boards
@@ -626,5 +626,5 @@ index f7a1cff..1af4891 100644
  	cvbs_vdac_out: endpoint {
  		remote-endpoint = <&cvbs_connector_in>;
 -- 
-2.0.1
+2.7.4
 

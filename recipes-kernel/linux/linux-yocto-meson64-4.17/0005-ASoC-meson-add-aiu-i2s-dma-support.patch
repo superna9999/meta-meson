@@ -1,7 +1,7 @@
-From 715b2cb88c9c054a2c4aa55bfc76059e61da41c1 Mon Sep 17 00:00:00 2001
+From 298241f7155bfeed607b68840950c4d193cbaf55 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 30 Mar 2017 12:14:40 +0200
-Subject: [PATCH 005/134] ASoC: meson: add aiu i2s dma support
+Subject: [PATCH 05/14] ASoC: meson: add aiu i2s dma support
 
 Add support for the i2s output dma which is part of the AIU block
 
@@ -413,5 +413,5 @@ index 0000000..bab950d
 +MODULE_AUTHOR("Jerome Brunet <jbrunet@baylibre.com>");
 +MODULE_LICENSE("GPL v2");
 -- 
-2.0.1
+2.7.4
 
