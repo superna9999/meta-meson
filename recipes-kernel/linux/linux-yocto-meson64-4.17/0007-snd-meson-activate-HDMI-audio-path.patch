@@ -1,7 +1,7 @@
-From 4a32831dff2d22b533e1bd9a587931c3d0cff5e0 Mon Sep 17 00:00:00 2001
+From 7833a66101aabad7f882fdf6dee62c7de9c3c71b Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 7 Jul 2017 17:39:21 +0200
-Subject: [PATCH 007/134] snd: meson: activate HDMI audio path
+Subject: [PATCH 07/14] snd: meson: activate HDMI audio path
 
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
 ---
@@ -51,5 +51,5 @@ index 1008af8..63fe098 100644
  }
  
 -- 
-2.0.1
+2.7.4
 

@@ -1,7 +1,7 @@
-From 23d80178377ee138de9633b6e3e9718ee4871862 Mon Sep 17 00:00:00 2001
+From c9a242f21d67baf22cb113ba37e9f77b96ba1027 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Wed, 20 Sep 2017 17:22:47 +0200
-Subject: [PATCH 011/134] ARM64: dts: meson-gx: add audio controller nodes
+Subject: [PATCH 11/14] ARM64: dts: meson-gx: add audio controller nodes
 
 Add audio controller nodes for Amlogic meson gxl.
 This includes the audio-core node, the i2s DAI and i2s
@@ -120,5 +120,5 @@ index dba365e..0a41e2e 100644
  	compatible = "amlogic,meson-gxl-saradc", "amlogic,meson-saradc";
  	clocks = <&xtal>,
 -- 
-2.0.1
+2.7.4
 

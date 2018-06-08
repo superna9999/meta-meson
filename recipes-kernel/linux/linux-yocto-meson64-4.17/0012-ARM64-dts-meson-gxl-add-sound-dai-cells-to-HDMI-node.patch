@@ -1,8 +1,7 @@
-From 89b195e476f951dce3f7a2ac7f21c449817451da Mon Sep 17 00:00:00 2001
+From fb45bc4b076c17a3f9c1dab64e652dce752371c2 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Wed, 20 Sep 2017 18:01:26 +0200
-Subject: [PATCH 012/134] ARM64: dts: meson-gxl: add sound-dai-cells to HDMI
- node
+Subject: [PATCH 12/14] ARM64: dts: meson-gxl: add sound-dai-cells to HDMI node
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
@@ -23,5 +22,5 @@ index 0a41e2e..a11ac15 100644
  
  &hiubus {
 -- 
-2.0.1
+2.7.4
 
