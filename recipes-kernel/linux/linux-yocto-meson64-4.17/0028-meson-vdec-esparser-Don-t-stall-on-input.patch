@@ -1,0 +1,181 @@
+From 2ac62f823dd913280fd907d5a218d2eeaffe603d Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 8 Apr 2018 18:58:21 +0200
+Subject: [PATCH] meson: vdec: esparser: Don't stall on input
+
+If the VIFIFO is full, don't error out. Instead, keep the input buffers
+for ourselves and try again later.
+---
+ drivers/media/platform/meson/vdec/codec_h264.c |  2 +-
+ drivers/media/platform/meson/vdec/esparser.c   | 33 ++++++++++++++++----------
+ drivers/media/platform/meson/vdec/esparser.h   |  2 +-
+ drivers/media/platform/meson/vdec/vdec.c       | 18 ++++----------
+ drivers/media/platform/meson/vdec/vdec.h       |  6 ++---
+ 5 files changed, 31 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index ad792b1..160a273 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -79,7 +79,7 @@ static int codec_h264_buffers_thread(void *data)
+ {
+ 	struct vdec_buffer *tmp;
+ 	struct vdec_session *sess = data;
+-	struct vdec_core *core = sess->core;;
++	struct vdec_core *core = sess->core;
+ 
+ 	while (!kthread_should_stop()) {
+ 		mutex_lock(&sess->bufs_recycle_lock);
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index c14c89f..39bde90 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -99,6 +99,12 @@ static int esparser_process_buf(struct vdec_core *core, struct vb2_buffer *vb)
+ 
+ 	esparser_append_start_code(vb);
+ 
++	/* Throwing in buffers too quickly (100+ fps) will unfortunately result
++	 * in random decode errors. There doesn't seem to be any way
++	 * to predict this.
++	 * This delay still permits ~100fps decoding
++	 */
++	//usleep_range(5000, 10000);
+ 	writel_relaxed(0, core->esparser_base + PFIFO_RD_PTR);
+ 	writel_relaxed(0, core->esparser_base + PFIFO_WR_PTR);
+ 	writel_relaxed(ES_WRITE | ES_PARSER_START | ES_SEARCH | (payload_size << ES_PACK_SIZE_BIT), core->esparser_base + PARSER_CONTROL);
+@@ -130,24 +136,15 @@ static u32 esparser_vififo_free_space(struct vdec_session *sess)
+ 	return sess->vififo_size - vififo_usage;
+ }
+ 
+-int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
++static int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ {
+ 	int ret;
+ 	struct vb2_buffer *vb = &vbuf->vb2_buf;
+ 	struct vdec_core *core = sess->core;
+-
+ 	u32 payload_size = vb2_get_plane_payload(vb, 0);
+ 
+-	ret = wait_event_interruptible_timeout(sess->vififo_wq,
+-		esparser_vififo_free_space(sess) >= payload_size, HZ);
+-	if (ret <= 0) {
+-		u32 nb = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
+-		dev_err(core->dev_dec,
+-		   "Timed out waiting for VIFIFO to free up:\n");
+-		dev_err(core->dev_dec,
+-		   "decoder stuck or not enough output buffers (%u) available\n", nb);
+-		return -ENODEV;
+-	}
++	if (esparser_vififo_free_space(sess) < payload_size)
++		return -EAGAIN;
+ 
+ 	v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
+ 	vdec_add_buf_reorder(sess, vb->timestamp);
+@@ -168,6 +165,18 @@ int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ 	return 0;
+ }
+ 
++void esparser_queue_all_src(struct work_struct *work)
++{
++	struct v4l2_m2m_buffer *buf, *n;
++	struct vdec_session *sess =
++		container_of(work, struct vdec_session, esparser_queue_work);
++
++	v4l2_m2m_for_each_src_buf_safe(sess->m2m_ctx, buf, n) {
++		if (esparser_queue(sess, &buf->vb) < 0)
++			break;
++	}
++}
++
+ int esparser_power_up(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
+diff --git a/drivers/media/platform/meson/vdec/esparser.h b/drivers/media/platform/meson/vdec/esparser.h
+index d60a7ea..852180b 100644
+--- a/drivers/media/platform/meson/vdec/esparser.h
++++ b/drivers/media/platform/meson/vdec/esparser.h
+@@ -5,6 +5,6 @@
+ 
+ int esparser_init(struct platform_device *pdev, struct vdec_core *core);
+ int esparser_power_up(struct vdec_session *sess);
+-int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf);
++void esparser_queue_all_src(struct work_struct *work);
+ 
+ #endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 8473454..f8c77cf 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -82,16 +82,10 @@ static void vdec_queue_recycle(struct vdec_session *sess, struct vb2_buffer *vb)
+ 
+ void vdec_m2m_device_run(void *priv)
+ {
+-	struct v4l2_m2m_buffer *buf, *n;
+ 	struct vdec_session *sess = priv;
+ 
+ 	printk("vdec_m2m_device_run\n");
+-	mutex_lock(&sess->lock);
+-	v4l2_m2m_for_each_src_buf_safe(sess->m2m_ctx, buf, n) {
+-		if (esparser_queue(sess, &buf->vb) < 0)
+-			vdec_abort(sess);
+-	}
+-	mutex_unlock(&sess->lock);
++	schedule_work(&sess->esparser_queue_work);
+ }
+ 
+ void vdec_m2m_job_abort(void *priv)
+@@ -148,10 +142,8 @@ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ 		goto unlock;
+ 	
+ 	if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+-		if (esparser_queue(sess, vbuf) < 0)
+-			vdec_abort(sess);
+-	}
+-	else
++		schedule_work(&sess->esparser_queue_work);
++	} else
+ 		vdec_queue_recycle(sess, vb);
+ 
+ unlock:
+@@ -644,7 +636,7 @@ static int vdec_open(struct file *file)
+ 	sess->height = 720;
+ 	INIT_LIST_HEAD(&sess->bufs);
+ 	INIT_LIST_HEAD(&sess->bufs_recycle);
+-	init_waitqueue_head(&sess->vififo_wq);
++	INIT_WORK(&sess->esparser_queue_work, esparser_queue_all_src);
+ 	spin_lock_init(&sess->bufs_spinlock);
+ 	mutex_init(&sess->lock);
+ 	mutex_init(&sess->bufs_recycle_lock);
+@@ -724,7 +716,7 @@ void vdec_dst_buf_done(struct vdec_session *sess, u32 buf_idx)
+ 	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+ 
+ 	/* Buffer done probably means the vififo got freed */
+-	wake_up_interruptible(&sess->vififo_wq);
++	schedule_work(&sess->esparser_queue_work);
+ }
+ 
+ /* Userspace will often queue input buffers that are not
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 46fd8c5..0b6b7a8 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -100,15 +100,15 @@ struct vdec_session {
+ 	u32 num_input_bufs;
+ 	u32 num_output_bufs;
+ 
++	/* Work for the ESPARSER to process src buffers */
++	struct work_struct esparser_queue_work;
++
+ 	/* Whether capture/output streaming are on */
+ 	unsigned int streamon_cap, streamon_out;
+ 	
+ 	/* Capture sequence counter */
+ 	unsigned int sequence_cap;
+ 
+-	/* ESPARSER Input buffer management */
+-	wait_queue_head_t vififo_wq;
+-
+ 	/* Big contiguous area for the VIFIFO */
+ 	void *vififo_vaddr;
+ 	dma_addr_t vififo_paddr;

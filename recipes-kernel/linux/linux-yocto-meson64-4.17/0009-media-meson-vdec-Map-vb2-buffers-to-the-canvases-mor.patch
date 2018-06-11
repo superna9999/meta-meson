@@ -1,0 +1,885 @@
+From e27306ccbc411e9a52e72b80b75168a0a8b7cc57 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <raptorteak@gmail.com>
+Date: Tue, 27 Mar 2018 23:40:19 +0200
+Subject: [PATCH] media: meson-vdec: Map vb2 buffers to the canvases [ + more..
+ ]
+
+* The VB2 buffers are now directly mapped to the canvases.
+This allows us to drop the huge 64MiB alloc and to avoid copy.
+
+We also take advantage of V4L2 multiplane features since the canvases are mapped to the Y/UV planes.
+
+Revert the pixfmt once more to V4L2_PIX_FMT_NV21M since we're now actually multiplane and FFmpeg supports it.
+
+* Change the mark_buffers_done work to a kthread. It's also responsible for processing the new recycle queue.
+* Bump the vdec_1 clock to 318.75MHz because why not.
+* Poweron/poweroff is still funky. Sometimes work, sometimes doesn't, sometimes indirectly causes a fatal kernel crash.
+---
+ arch/arm/boot/dts/meson8b.dtsi               |   8 +-
+ drivers/media/platform/meson/vdec/esparser.c |  19 +-
+ drivers/media/platform/meson/vdec/vdec.c     | 422 +++++++++++++--------------
+ drivers/media/platform/meson/vdec/vdec.h     |  15 +-
+ drivers/soc/amlogic/meson-pwrc-vdec.c        |   6 +-
+ 5 files changed, 232 insertions(+), 238 deletions(-)
+
+diff --git a/arch/arm/boot/dts/meson8b.dtsi b/arch/arm/boot/dts/meson8b.dtsi
+index 3a9d9c2..9da1d904 100644
+--- a/arch/arm/boot/dts/meson8b.dtsi
++++ b/arch/arm/boot/dts/meson8b.dtsi
+@@ -368,13 +368,13 @@
+ 	clock-names = "vpu_intr", "dos_parser", "vdec_1";
+ 
+ 	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
+-					  <&clkc CLKID_VDEC_1>;
++			  <&clkc CLKID_VDEC_1>;
+ 
+-	assigned-clock-parents = <&clkc CLKID_FCLK_DIV7>,
+-							 <0>;
++	assigned-clock-parents = <&clkc CLKID_FCLK_DIV4>,
++				 <0>;
+ 
+ 	assigned-clock-rates = <0>,
+-						   <200000000>;
++			       <318750000>;
+ };
+ 
+ &wdt {
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 17390b4..ec104b5 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -92,15 +92,13 @@ static irqreturn_t esparser_isr(int irq, void *dev) {
+ 	return IRQ_HANDLED;
+ }
+ 
+-static int first_pkt = 1;
+-
+ /**
+  * Userspace is very likely to feed us packets with timestamps not in chronological order
+  * because of B-frames. Rearrange them here.
+  */
+ static void add_buffer_to_list(struct vdec_core *core, struct vdec_buffer *new_buf) {
+ 	struct vdec_buffer *tmp;
+-	unsigned int flags;
++	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&core->bufs_spinlock, flags);
+ 	if (list_empty(&core->bufs))
+@@ -125,16 +123,18 @@ int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf) {
+ 	int ret;
+ 	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(&vbuf->vb2_buf, 0);
+ 
+-	printk("Putting buffer with address %08X; len %d ; flags %08X\n", phy, vb2_get_plane_payload(vb, 0), vbuf->flags);
++	v4l2_m2m_src_buf_remove_by_buf(core->m2m_ctx, vbuf);
++	//printk("Putting buffer with address %08X; len %d ; flags %08X\n", phy, vb2_get_plane_payload(vb, 0), vbuf->flags);
+ 
+ 	/* If the semaphore is locked, we have queued in 16 buffers
+ 	 * and no slots are available. Most likely because we haven't recycled the buffers
+ 	 * off the decoder yet.
+-	 * There are so many calls to schedule_work(&core->mark_buffers_done_work)
+-	 * that I might need to make it a thread instead..
+ 	 */
+-	while (down_timeout(&core->queue_sema, HZ/100) < 0)
+-		schedule_work(&core->mark_buffers_done_work);
++	if (down_timeout(&core->queue_sema, HZ) < 0) {
++		printk("esparser timeout - no input buffer slot available in time\n");
++		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
++		return -ENODEV;
++	}
+ 
+ 	wmb();
+ 	writel_relaxed(0, core->esparser_base + PFIFO_RD_PTR);
+@@ -149,10 +149,7 @@ int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf) {
+ 
+ 	ret = wait_event_interruptible_timeout(wq, search_done != 0, HZ/5);
+ 
+-	v4l2_m2m_src_buf_remove_by_buf(core->m2m_ctx, vbuf);
+ 	if (ret > 0) {
+-		schedule_work(&core->mark_buffers_done_work);
+-
+ 		new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
+ 		new_buf->timestamp = vb->timestamp;
+ 		new_buf->index = -1;
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 3af5fa8..5465626 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -22,6 +22,10 @@
+ #define DEF_BUF_START_ADDR	0x1000000
+ #define V_BUF_ADDR_OFFSET	0x13e000
+ 
++#define UNK1_SIZE 0x13e000
++#define REF_SIZE  0x100000
++#define UNK2_SIZE 0x300000
++
+ /* DOS registers */
+ #define ASSIST_MBOX1_CLR_REG 0x01d4
+ #define ASSIST_MBOX1_MASK    0x01d8
+@@ -128,24 +132,32 @@ static int vdec_load_firmware(struct vdec_core *core, const char* fwname)
+ 	return ret;
+ }
+ 
++static void vdec_abort(struct vdec_core *core) {
++	printk("Aborting decoding session!\n");
++	vb2_queue_error(&core->m2m_ctx->cap_q_ctx.q);
++	vb2_queue_error(&core->m2m_ctx->out_q_ctx.q);
++}
++
+ static void vh264_power_up(struct vdec_core *core) {
+ 	/* Taken from old AMLogic code. No idea. */
+ 	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 
+ 	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed((1<<9) | (1<<8), core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 
+ 	writel_relaxed(readl_relaxed(core->dos_base + POWER_CTL_VLD) | (1 << 9) | (1 << 6), core->dos_base + POWER_CTL_VLD);
+ 
+ 	writel_relaxed(0, core->dos_base + PSCALE_CTRL);
+ 
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-	writel_relaxed(core->dpb_paddr - DEF_BUF_START_ADDR, core->dos_base + AV_SCRATCH_1); // buf offset (?)
++	writel_relaxed(core->vh264_mem_paddr - DEF_BUF_START_ADDR, core->dos_base + AV_SCRATCH_1); // buf offset (?)
+ 	writel_relaxed(core->vh264_ext_fw_paddr, core->dos_base + AV_SCRATCH_G); // ext. firmware addr
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
+@@ -167,7 +179,7 @@ static void vh264_power_up(struct vdec_core *core) {
+ }
+ 
+ static u32 get_output_size(u32 width, u32 height) {
+-	return (width * height * 3) / 2;
++	return ALIGN(width, 64) * ALIGN(height, 64);
+ }
+ 
+ static u32 vdec_get_output_size(struct vdec_core *core) {
+@@ -206,11 +218,15 @@ static int vdec_poweron(struct vdec_core *core) {
+ 	vh264_power_up(core);
+ 
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 
+ 	writel_relaxed((1<<12)|(1<<11), core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+ 
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 
+ 	/* Enable VDEC? */
+ 	writel_relaxed(1, core->dos_base + MPSR);
+@@ -288,16 +304,18 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ {
+ 	struct vdec_core *core = vb2_get_drv_priv(q);
+ 	printk("vdec_queue_setup\n");
+-	*num_planes = 1;
+ 	
+ 	switch (q->type) {
+ 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+-		sizes[0] = vdec_get_output_size(core) / 2;
++		sizes[0] = vdec_get_output_size(core);
+ 		*num_buffers = 1;
++		*num_planes = 1;
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+ 		sizes[0] = vdec_get_output_size(core);
+-		*num_buffers = 8;
++		sizes[1] = vdec_get_output_size(core) / 2;
++		*num_buffers = 24;
++		*num_planes = 2;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -305,6 +323,16 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 	return 0;
+ }
+ 
++static void vdec_queue_recycle(struct vdec_core *core, struct vb2_buffer *vb)
++{
++	struct vdec_buffer *new_buf;
++
++	new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
++	new_buf->index = vb->index;
++
++	list_add_tail(&new_buf->list, &core->bufs_recycle);
++}
++
+ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ {
+ 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+@@ -319,11 +347,71 @@ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ 	
+ 	if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		esparser_process_buf(core, vbuf);
++	else
++		vdec_queue_recycle(core, vb);
+ 
+ unlock:
+ 	mutex_unlock(&core->lock);
+ }
+ 
++static int mark_buffers_done(void *data)
++{
++	struct vdec_core *core = data;
++	struct vdec_buffer *tmp;
++	struct vb2_v4l2_buffer *vbuf;
++	unsigned long flags;
++
++	while (!kthread_should_stop()) {
++		while (!list_empty(&core->bufs))
++		{
++			tmp = list_first_entry(&core->bufs, struct vdec_buffer, list);
++			if (tmp->index == -1)
++				break;
++
++			vbuf = v4l2_m2m_dst_buf_remove_by_idx(core->m2m_ctx, tmp->index);
++			if (!vbuf) {
++				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
++				continue;
++			}
++
++			vbuf->vb2_buf.timestamp = tmp->timestamp;
++			vbuf->sequence = core->sequence_cap++;
++			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++
++			//printk("Recycled buf %d ; seq = %d ; flags = %08X ; (timestamp %llu)\n", tmp->index, vbuf->sequence, vbuf->flags, vbuf->vb2_buf.timestamp);
++
++			spin_lock_irqsave(&core->bufs_spinlock, flags);
++			list_del(&tmp->list);
++			spin_unlock_irqrestore(&core->bufs_spinlock, flags);
++			kfree(tmp);
++		}
++
++		while (!list_empty(&core->bufs_recycle) &&
++		      (!readl_relaxed(core->dos_base + AV_SCRATCH_7) ||
++		       !readl_relaxed(core->dos_base + AV_SCRATCH_8)))
++		{
++			tmp = list_first_entry(&core->bufs_recycle, struct vdec_buffer, list);
++
++			/* Tell the decoder he can recycle this buffer.
++			 * AV_SCRATCH_8 serves the same purpose.
++			 */
++			if (!readl_relaxed(core->dos_base + AV_SCRATCH_7))
++				writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_7);
++			else
++				writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_8);
++
++			list_del(&tmp->list);
++			kfree(tmp);
++
++			up(&core->queue_sema);
++		}
++
++		msleep(20);
++	}
++
++	return 0;
++}
++
+ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ {
+ 	struct vdec_core *core = vb2_get_drv_priv(q);
+@@ -347,6 +435,9 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 		goto bufs_done;
+ 
+ 	core->sequence_cap = 0;
++
++	printk("Launching thread\n");
++	core->buffers_done_thread = kthread_run(mark_buffers_done, core, "buffers_done");
+ 	printk("start_streaming done\n");
+ 	mutex_unlock(&core->lock);
+ 
+@@ -369,9 +460,11 @@ void vdec_stop_streaming(struct vb2_queue *q)
+ 	mutex_lock(&core->lock);
+ 
+ 	if (core->streamon_out & core->streamon_cap) {
++		kthread_stop(core->buffers_done_thread);
+ 		vdec_poweroff(core);
+ 		INIT_LIST_HEAD(&core->bufs);
+-		sema_init(&core->queue_sema, 16);
++		INIT_LIST_HEAD(&core->bufs_recycle);
++		sema_init(&core->queue_sema, 20);
+ 	}
+ 
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+@@ -411,8 +504,8 @@ vdec_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
+ 
+ static const struct vdec_format vdec_formats[] = {
+ 	{
+-		.pixfmt = V4L2_PIX_FMT_NV12,
+-		.num_planes = 1,
++		.pixfmt = V4L2_PIX_FMT_NV21M,
++		.num_planes = 2,
+ 		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+ 	}, {
+ 		.pixfmt = V4L2_PIX_FMT_H264,
+@@ -444,7 +537,6 @@ vdec_try_fmt_common(struct v4l2_format *f)
+ 	struct v4l2_pix_format_mplane *pixmp = &f->fmt.pix_mp;
+ 	struct v4l2_plane_pix_format *pfmt = pixmp->plane_fmt;
+ 	const struct vdec_format *fmt;
+-	unsigned int p;
+ 
+ 	memset(pfmt[0].reserved, 0, sizeof(pfmt[0].reserved));
+ 	memset(pixmp->reserved, 0, sizeof(pixmp->reserved));
+@@ -452,7 +544,7 @@ vdec_try_fmt_common(struct v4l2_format *f)
+ 	fmt = find_format(pixmp->pixelformat, f->type);
+ 	if (!fmt) {
+ 		if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+-			pixmp->pixelformat = V4L2_PIX_FMT_NV12;
++			pixmp->pixelformat = V4L2_PIX_FMT_NV21M;
+ 		else if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 			pixmp->pixelformat = V4L2_PIX_FMT_H264;
+ 		else
+@@ -462,30 +554,33 @@ vdec_try_fmt_common(struct v4l2_format *f)
+ 		pixmp->height = 720;
+ 	}
+ 
+-	pixmp->width = clamp(pixmp->width, 256, 1920);
+-	pixmp->height = clamp(pixmp->height, 144, 1080);
++	pixmp->width  = clamp(pixmp->width,  (u32)256, (u32)1920);
++	pixmp->height = clamp(pixmp->height, (u32)144, (u32)1080);
+ 
+ 	if (pixmp->field == V4L2_FIELD_ANY)
+ 		pixmp->field = V4L2_FIELD_NONE;
++
+ 	pixmp->num_planes = fmt->num_planes;
+ 	pixmp->flags = 0;
+ 
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+-		for (p = 0; p < pixmp->num_planes; p++) {
+-			pfmt[p].sizeimage =
+-				get_output_size(pixmp->width, pixmp->height);
+-			pfmt[p].bytesperline = pixmp->width;
+-		}
++		pfmt[0].sizeimage = get_output_size(pixmp->width, pixmp->height);
++		pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
++
++		pfmt[1].sizeimage = get_output_size(pixmp->width, pixmp->height) / 2;
++		pfmt[1].bytesperline = ALIGN(pixmp->width, 64);
+ 	} else {
+-		pfmt[0].sizeimage = get_output_size(pixmp->width, pixmp->height) / 2;
++		pfmt[0].sizeimage = get_output_size(pixmp->width, pixmp->height);
+ 		pfmt[0].bytesperline = 0;
+ 	}
+ 
++
+ 	return fmt;
+ }
+ 
+ static int vdec_try_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ {
++	printk("vdec_try_fmt\n");
+ 	vdec_try_fmt_common(f);
+ 
+ 	return 0;
+@@ -497,6 +592,7 @@ static int vdec_g_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ 	const struct vdec_format *fmt = NULL;
+ 	struct v4l2_pix_format_mplane *pixmp = &f->fmt.pix_mp;
+ 
++	printk("vdec_g_fmt\n");
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+ 		fmt = core->fmt_cap;
+ 	else if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+@@ -530,6 +626,7 @@ static int vdec_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ 	struct v4l2_format format;
+ 	u32 pixfmt_out = 0, pixfmt_cap = 0;
+ 
++	printk("vdec_s_fmt\n");
+ 	orig_pixmp = *pixmp;
+ 
+ 	fmt = vdec_try_fmt_common(f);
+@@ -586,7 +683,7 @@ static int vdec_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *f)
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		f->pixelformat = V4L2_PIX_FMT_H264;
+ 	else if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+-		f->pixelformat = V4L2_PIX_FMT_NV12;
++		f->pixelformat = V4L2_PIX_FMT_NV21M;
+ 	else
+ 		return -EINVAL;
+ 
+@@ -663,7 +760,9 @@ static int m2m_queue_init(void *priv, struct vb2_queue *src_vq,
+ static int vdec_open(struct file *file)
+ {
+ 	struct vdec_core *core = video_drvdata(file);
+-	int ret;
++
++	printk("vdec_open\n");
++	pm_runtime_get_sync(core->dev_dec);
+ 
+ 	core->m2m_dev = v4l2_m2m_init(&vdec_m2m_ops);
+ 	if (IS_ERR(core->m2m_dev)) {
+@@ -690,11 +789,14 @@ static int vdec_close(struct file *file)
+ {
+ 	struct vdec_core *core = container_of(file->private_data, struct vdec_core, fh);
+ 
++	printk("vdec_close\n");
+ 	v4l2_m2m_ctx_release(core->m2m_ctx);
+ 	v4l2_m2m_release(core->m2m_dev);
+ 	v4l2_fh_del(&core->fh);
+ 	v4l2_fh_exit(&core->fh);
+ 
++	pm_runtime_put_sync(core->dev_dec);
++
+ 	return 0;
+ }
+ 
+@@ -710,24 +812,17 @@ static const struct v4l2_file_operations vdec_fops = {
+ #endif
+ };
+ 
+-static u32 frame_width = 1280, frame_height = 720;
+-static u32 last_mb_width = 0, last_mb_height = 0;
+-static uint mb_total = 0, mb_width = 0,  mb_height=0;
+-static u32 seq_info;
+-static u32 aspect_ratio_info;
+-static u32 num_units_in_tick;
+-static u32 time_scale;
+-
++/* Configure the H.264 decoder when the esparser finished parsing
++ * the first buffer.
++ * TODO: move this to a specific H.264 subdevice file
++ */
+ static void vdec_set_param(struct vdec_core *core) {
+-	int max_dpb_size, actual_dpb_size, max_reference_size;
+-	int i, mb_mv_byte;
+-	unsigned addr;
+-	unsigned int frame_mbs_only_flag;
+-	unsigned int chroma_format_idc, chroma444;
+-	unsigned int crop_infor, crop_bottom,crop_right;
+-	u32 frame_buffer_size = 0x01ec2000 + core->dpb_size - 0x2000000;
+-	u32 max_refer_buf = 1;
+-	u32 frame_size;
++	u32 max_reference_size;
++	u32 parsed_info, mb_width, mb_height, mb_total;
++	u32 mb_mv_byte;
++	u32 addr;
++	u32 actual_dpb_size = v4l2_m2m_num_dst_bufs_ready(core->m2m_ctx);
++	struct v4l2_m2m_buffer *buf;
+ 
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
+@@ -735,136 +830,47 @@ static void vdec_set_param(struct vdec_core *core) {
+ 
+ 	printk("vdec_set_param\n");
+ 
+-	/* The following is mostly AML code */
+-	mb_width = readl_relaxed(core->dos_base + AV_SCRATCH_1);
+-	seq_info = readl_relaxed(core->dos_base + AV_SCRATCH_2);
+-	aspect_ratio_info = readl_relaxed(core->dos_base + AV_SCRATCH_3);
+-	num_units_in_tick = readl_relaxed(core->dos_base + AV_SCRATCH_4);
+-	time_scale = readl_relaxed(core->dos_base + AV_SCRATCH_5);
+-	mb_total = (mb_width >> 8) & 0xffff;
+-	max_reference_size = (mb_width >> 24) & 0x7f;
+-	mb_mv_byte = (mb_width & 0x80000000) ? 24 : 96;
+-	mb_width = mb_width & 0xff;
+-	mb_height = mb_total / mb_width;
+-
+-		/* AV_SCRATCH_2
+-	   bit 15: frame_mbs_only_flag
+-	   bit 13-14: chroma_format_idc */
+-	frame_mbs_only_flag = (seq_info >> 15) & 0x01;
+-	chroma_format_idc = (seq_info >> 13) & 0x03;
+-	chroma444 = (chroma_format_idc == 3) ? 1 : 0;
+-
+-	/* @AV_SCRATCH_6.31-16 =  (left  << 8 | right ) << 1
+-	   @AV_SCRATCH_6.15-0   =  (top << 8  | bottom ) <<  (2 - frame_mbs_only_flag) */
+-	crop_infor = readl_relaxed(core->dos_base + AV_SCRATCH_6);
+-	crop_bottom = (crop_infor & 0xff) >> (2 - frame_mbs_only_flag);
+-	crop_right	  = ((crop_infor >>16) & 0xff) >> (2 - frame_mbs_only_flag);
+-
+-	/* if width or height from outside is not equal to mb, then use mb */
+-	/* add: for seeking stream with other resolution */
+-	if ((last_mb_width && (last_mb_width != mb_width))
+-		|| (mb_width != ((frame_width+15) >> 4))) {
+-		frame_width = 0;
+-	}
+-	if ((last_mb_height && (last_mb_height != mb_height))
+-		|| (mb_height != ((frame_height+15) >> 4))) {
+-		frame_height = 0;
+-	}
+-	last_mb_width = mb_width;
+-	last_mb_height = mb_height;
+-
+-	if ((frame_width == 0) ||( frame_height == 0) ||crop_infor) {
+-		frame_width = mb_width << 4;
+-		frame_height = mb_height << 4;
+-		if (frame_mbs_only_flag) {
+-			frame_height = frame_height - (2>>chroma444)*min(crop_bottom, (unsigned int)((8<<chroma444)-1));
+-			frame_width  = frame_width - (2>>chroma444)*min(crop_right, (unsigned int)((8<<chroma444)-1));
+-		} else {
+-			frame_height = frame_height - (4>>chroma444)*min(crop_bottom, (unsigned int)((8<<chroma444)-1));
+-			frame_width   = frame_width - (4>>chroma444)*min(crop_right, (unsigned int)((8<<chroma444)-1));			
+-		}
+-		printk("frame_mbs_only_flag %d, crop_bottom %d,  frame_height %d, mb_height %d,crop_right %d, frame_width %d, mb_width %d\n",
+-			frame_mbs_only_flag, crop_bottom,frame_height, mb_height,crop_right,frame_width, mb_height);
+-
+-		if (frame_height == 1088) {
+-			frame_height = 1080;
+-		}
+-	}
++	parsed_info = readl_relaxed(core->dos_base + AV_SCRATCH_1);
+ 
+-	mb_width = (mb_width + 3) & 0xfffffffc;
+-	mb_height = (mb_height + 3) & 0xfffffffc;
+-	mb_total = mb_width * mb_height;
++	/* Total number of 16x16 macroblocks */
++	mb_total = (parsed_info >> 8) & 0xffff;
+ 
+-	max_dpb_size = (frame_buffer_size - mb_total * 384 * 4 - mb_total * mb_mv_byte) / (mb_total * 384 + mb_total * mb_mv_byte);
+-	if (max_reference_size <= max_dpb_size) {
+-		max_dpb_size = MAX_DPB_BUFF_SIZE / (mb_total * 384);
+-		if (max_dpb_size > 16) {
+-			max_dpb_size = 16;
+-		}
++	/* Size of Motion Vector per macroblock ? */
++	mb_mv_byte = (parsed_info & 0x80000000) ? 24 : 96;
+ 
+-		if (max_refer_buf && (max_reference_size < max_dpb_size)) {
+-			max_reference_size = max_dpb_size + 1;
+-		} else {
+-			max_dpb_size = max_reference_size;
+-			max_reference_size++;
+-		}
+-	} else {
+-		max_dpb_size = max_reference_size;
+-		max_reference_size++;
+-	}
++	/* Number of macroblocks per line */
++	mb_width = parsed_info & 0xff;
+ 
+-	if (mb_total * 384 * (max_dpb_size + 3) + mb_total * mb_mv_byte * max_reference_size > frame_buffer_size) {
+-		max_dpb_size = (frame_buffer_size - mb_total * 384 * 3 - mb_total * mb_mv_byte) / (mb_total * 384 + mb_total * mb_mv_byte);
+-		max_reference_size = max_dpb_size + 1;
+-	}
++	/* Number of macroblock lines */
++	mb_height = mb_total / mb_width;
+ 
+-	actual_dpb_size = (frame_buffer_size - mb_total * mb_mv_byte * max_reference_size) / (mb_total * 384);
+-	if (actual_dpb_size > 24) {
+-		actual_dpb_size = 24;
+-	}
++	max_reference_size = (parsed_info >> 24) & 0x7f;
+ 
+-	if (max_dpb_size > 5) {
+-		if (actual_dpb_size < max_dpb_size + 3) {
+-			actual_dpb_size = max_dpb_size + 3;
+-			if (actual_dpb_size > 24) {
+-				actual_dpb_size = 24;
+-			}
+-			max_reference_size = (frame_buffer_size - mb_total * 384 * actual_dpb_size) / (mb_total * mb_mv_byte);
+-		}
+-	} else {
+-		if (actual_dpb_size < max_dpb_size + 4) {
+-			actual_dpb_size = max_dpb_size + 4;
+-			if (actual_dpb_size > 24) {
+-				actual_dpb_size = 24;
+-			}
+-			max_reference_size = (frame_buffer_size - mb_total * 384 * actual_dpb_size) / (mb_total * mb_mv_byte);
+-		}
+-	}
++	/* Align to a multiple of 4 macroblocks */
++	mb_width = (mb_width + 3) & 0xfffffffc;
++	mb_height = (mb_height + 3) & 0xfffffffc;
++	mb_total = mb_width * mb_height;
+ 
+-	frame_size = frame_width * frame_height;
+-	if (!(readl_relaxed(core->dos_base + AV_SCRATCH_F) & 0x1)) {
+-		addr = core->dpb_paddr + V_BUF_ADDR_OFFSET;
+-
+-		/* Setup NV21 canvases for Decoded Picture Buffer (dpb)
+-		 * TODO: map those to the user buffers? Unsure if they hold the full frames
+-		 * Note: It is a proprietary, tiled NV21 pixel format.
+-		 */
+-		printk("Configuring %d canvases..\n", actual_dpb_size*2);
+-		for (i = 0; i < actual_dpb_size; i++) {
+-			/* Y plane */
+-			vdec_canvas_setup(core->dmc_base, 128 + i * 2, addr, frame_width, frame_height, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-			addr += frame_size;
+-
+-			/* U/V plane */
+-			vdec_canvas_setup(core->dmc_base, 128 + i * 2 + 1, addr, frame_width, frame_height / 2, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-			addr += frame_size / 2;
+-
+-			writel_relaxed(((128 + i * 2 + 1) << 16) |
+-				       ((128 + i * 2 + 1) << 8)  |
+-					(128 + i * 2), core->dos_base + ANC0_CANVAS_ADDR + i*4);
+-		}
+-	} else {
+-		addr = core->dpb_paddr + V_BUF_ADDR_OFFSET + mb_total * 384 * actual_dpb_size;
++	/* Setup NV21 canvases for Decoded Picture Buffer (dpb)
++	 * Map them to the user buffers' planes
++	 */
++	printk("Configuring %d canvases..\n", actual_dpb_size*2);
++	v4l2_m2m_for_each_dst_buf(core->m2m_ctx, buf) {
++		u32 buf_idx    = buf->vb.vb2_buf.index;
++		u32 cnv_y_idx  = 128 + buf_idx * 2;
++		u32 cnv_uv_idx = 128 + buf_idx * 2 + 1;
++		dma_addr_t buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
++		dma_addr_t buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
++
++		/* Y plane */
++		vdec_canvas_setup(core->dmc_base, cnv_y_idx, buf_y_paddr, mb_width * 16, mb_height * 16, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++		/* U/V plane */
++		vdec_canvas_setup(core->dmc_base, cnv_uv_idx, buf_uv_paddr, mb_width * 16, mb_height * 8, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++		writel_relaxed(((cnv_uv_idx) << 16) |
++			       ((cnv_uv_idx) << 8)  |
++				(cnv_y_idx), core->dos_base + ANC0_CANVAS_ADDR + buf_idx*4);
+ 	}
+ 
+ 	/* I don't really know the purpose of this post canvas.
+@@ -875,67 +881,30 @@ static void vdec_set_param(struct vdec_core *core) {
+ 	vdec_canvas_setup(core->dmc_base, 0x00, core->dummy_post_canvas_paddr, mb_width << 4, mb_height << 4, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+ 	/* Setup post canvas for U/V */
+ 	vdec_canvas_setup(core->dmc_base, 0x1, core->dummy_post_canvas_paddr + (mb_total << 8), mb_width << 4, mb_height << 3, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-	
+-	printk("AV_SCRATCH_F = %08X\n", readl_relaxed(core->dos_base + AV_SCRATCH_F));
+-	printk("addr = %08X; mb_total = %d; mb_mv_byte = %d; actual_dpb_size = %d; max_dpb_size = %d; max_reference_size = %d; frame_width = %d; frame_height = %d\n",
+-			addr, mb_total, mb_mv_byte, actual_dpb_size, max_dpb_size, max_reference_size, frame_width, frame_height);
+ 
+-	/* End of DPB / Start of something else ? */
+-	writel_relaxed(addr, core->dos_base + AV_SCRATCH_1);
++	printk("mb_total = %d; mb_mv_byte = %d; actual_dpb_size = %d;\n max_reference_size = %d; mb_width = %d; mb_height = %d\n", mb_total, mb_mv_byte, actual_dpb_size, max_reference_size, mb_width, mb_height);
+ 
+ 	printk("Setting POST CANVAS to %08X\n", (0x1 << 16) | (0x1 << 8) | 0x0);
+ 	writel_relaxed((0x1 << 16) | (0x1 << 8) | 0x0, core->dos_base + AV_SCRATCH_3);
+ 
+-	/* End of that something else ? */
++	/* Address to store the references' MVs ? */
++	addr = core->vh264_mem_paddr + V_BUF_ADDR_OFFSET;
++	writel_relaxed(addr, core->dos_base + AV_SCRATCH_1);
++	printk("Max references buffer size: %d\n", mb_total * mb_mv_byte * max_reference_size);
++
++	/* End of ref MV or start of something else ? */
+ 	addr += mb_total * mb_mv_byte * max_reference_size;
+ 	writel_relaxed(addr, core->dos_base + AV_SCRATCH_4);
++	printk("Remaining buffer size: %d\n", core->vh264_mem_paddr + core->vh264_mem_size - addr);
+ 
+-	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (max_dpb_size << 8), core->dos_base + AV_SCRATCH_0);
+-}
+-
+-static void mark_buffers_done(struct work_struct *work) {
+-	struct vdec_core *core =
+-			container_of(work, struct vdec_core, mark_buffers_done_work);
+-	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned int flags;
+-	u32 output_size = vdec_get_output_size(core);
+-
+-	while (!list_empty(&core->bufs) &&
+-		v4l2_m2m_num_dst_bufs_ready(core->m2m_ctx) &&
+-	       (!readl_relaxed(core->dos_base + AV_SCRATCH_7) ||
+-		!readl_relaxed(core->dos_base + AV_SCRATCH_8)))
+-	{
+-		tmp = list_first_entry(&core->bufs, struct vdec_buffer, list);
+-		if (tmp->index == -1)
+-			return;
+-
+-		vbuf = v4l2_m2m_dst_buf_remove(core->m2m_ctx);
+-		memcpy(vb2_plane_vaddr(&vbuf->vb2_buf, 0), core->dpb_vaddr + V_BUF_ADDR_OFFSET + tmp->index * output_size, output_size);
+-		vbuf->vb2_buf.timestamp = tmp->timestamp;
+-		vbuf->sequence = core->sequence_cap++;
+-		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-
+-		/* Tell the decoder he can recycle this buffer. AV_SCRATCH_8 serves the same purpose */
+-		if (!readl_relaxed(core->dos_base + AV_SCRATCH_7))
+-			writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_7);
+-		else
+-			writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_8);
+-
+-		up(&core->queue_sema);
+-		printk("Recycled buf %d ; seq = %d ; flags = %08X ; (timestamp %llu)\n", tmp->index, vbuf->sequence, vbuf->flags, vbuf->vb2_buf.timestamp);
+-
+-		spin_lock_irqsave(&core->bufs_spinlock, flags);
+-		list_del(&tmp->list);
+-		spin_unlock_irqrestore(&core->bufs_spinlock, flags);
+-		kfree(tmp);
+-	}
++	/* Hardcode max_dpb_size to 4 because I'm not sure what it is */
++	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (4 << 8), core->dos_base + AV_SCRATCH_0);
+ }
+ 
++/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+ static void fill_buffer_index(struct vdec_core *core, u32 buffer_index) {
+ 	struct vdec_buffer *tmp;
+-	unsigned int flags;
+-	u32 i = 0;
++	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&core->bufs_spinlock, flags);
+ 	list_for_each_entry(tmp, &core->bufs, list) {
+@@ -970,7 +939,7 @@ static irqreturn_t vdec_isr(int irq, void *dev)
+ 			printk("decoder error(s) happened, count %d\n", error_count);
+ 		}
+ 
+-		printk("Decoded %d frames\n", num_frame);
++		//printk("Decoded %d frames\n", num_frame);
+ 
+ 		for (i = 0 ; (i < num_frame) && (!eos) ; i++) {
+ 
+@@ -981,7 +950,7 @@ static irqreturn_t vdec_isr(int irq, void *dev)
+ 			if (error) {
+ 				printk("Buffer %d decode error: %08X\n", buffer_index, error);
+ 			} else {
+-				printk("Buffer %d decoded & ready!\n", buffer_index);
++				//printk("Buffer %d decoded & ready!\n", buffer_index);
+ 			}
+ 
+ 			eos = (status >> 15) & 1;
+@@ -1000,7 +969,7 @@ static irqreturn_t vdec_isr(int irq, void *dev)
+ 		}
+ 
+ 		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-		schedule_work(&core->mark_buffers_done_work);
++		//schedule_work(&core->mark_buffers_done_work);
+ 	} else {
+ 		printk("Unexpected cpu_cmd: %08X\n", cpu_cmd);
+ 		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+@@ -1070,18 +1039,30 @@ static int vdec_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 	}
+ 
+-	/* TODO: do the allocations later than probe to not hog memory */
++	/* TODO: do the allocations at start_stream to not hog memory */
+ 
+-	/* Allocate 64 MiB for the DPB buffers
++	/* Allocate 64 MiB for the DPB buffers <-- Obsolete since we map the canvases to the user buffers
+ 	 * TODO: Pretty sure most of that chunk can be directly mapped to user buffers? must test.
+ 	*/
+-	core->dpb_size = 0x4000000;
++	/*core->dpb_size = 0x4000000;
+ 	core->dpb_vaddr = dma_alloc_coherent(NULL, core->dpb_size, &core->dpb_paddr, GFP_KERNEL);
+ 	if (!core->dpb_vaddr) {
+ 		printk("Failed to request 64MiB DPB video buffer\n");
+ 		return -ENOMEM;
+ 	}
+-	printk("Allocated 64MiB: %08X - %08X\n", core->dpb_paddr, core->dpb_paddr + core->dpb_size);
++	printk("Allocated 64MiB: %08X - %08X\n", core->dpb_paddr, core->dpb_paddr + core->dpb_size);*/
++
++	/* Allocate some memory for the H.264 decoder's state
++	 * (references motion vectors, and other things)
++	 * TODO: move this to a specific H.264 subdevice file
++	 */
++	core->vh264_mem_size = UNK1_SIZE + REF_SIZE + UNK2_SIZE;
++	core->vh264_mem_vaddr = dma_alloc_coherent(NULL, core->vh264_mem_size, &core->vh264_mem_paddr, GFP_KERNEL);
++	if (!core->vh264_mem_vaddr) {
++		printk("Failed to request 5.24MiB H.264 extra memory\n");
++		return -ENOMEM;
++	}
++	printk("Allocated 5.24MiB: %08X - %08X\n", core->vh264_mem_paddr, core->vh264_mem_paddr + core->vh264_mem_size);
+ 
+ 	/* Allocate 32 MiB for the VIFIFO buffer */
+ 	core->vififo_size = 0x2000000;
+@@ -1094,6 +1075,9 @@ static int vdec_probe(struct platform_device *pdev)
+ 
+ 	ret = esparser_init(pdev, core);
+ 
++	/* Allocate a "post canvas", purpose unknown
++	 * TODO: move this to a specific H.264 subdevice file
++	 */
+ 	core->dummy_post_canvas_vaddr = dma_alloc_coherent(NULL, 0x400000, &core->dummy_post_canvas_paddr, GFP_KERNEL);
+ 	if (!core->dummy_post_canvas_paddr) {
+ 		printk("Failed to request 4MiB post canvas\n");
+@@ -1120,10 +1104,11 @@ static int vdec_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	INIT_LIST_HEAD(&core->bufs);
+-	INIT_WORK(&core->mark_buffers_done_work, mark_buffers_done);
++	INIT_LIST_HEAD(&core->bufs_recycle);
++	//INIT_WORK(&core->mark_buffers_done_work, mark_buffers_done);
+ 	spin_lock_init(&core->bufs_spinlock);
+ 	mutex_init(&core->lock);
+-	sema_init(&core->queue_sema, 16);
++	sema_init(&core->queue_sema, 20);
+ 
+ 	core->fmt_cap = &vdec_formats[0];
+ 	core->fmt_out = &vdec_formats[1];
+@@ -1132,6 +1117,7 @@ static int vdec_probe(struct platform_device *pdev)
+ 	core->dev_dec = dev;
+ 
+ 	video_set_drvdata(vdev, core);
++	pm_runtime_enable(dev);
+ 
+ 	return 0;
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 523f352..4b7f6e8 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -56,9 +56,9 @@ struct vdec_core {
+ 	struct mutex lock;
+ 
+ 	/* Big contiguous area for the Decoded Picture Buffer */
+-	void *dpb_vaddr;
++	/*void *dpb_vaddr;
+ 	dma_addr_t dpb_paddr;
+-	u32 dpb_size;
++	u32 dpb_size;*/
+ 
+ 	/* Big contiguous area for the VIFIFO */
+ 	void *vififo_vaddr;
+@@ -77,6 +77,11 @@ struct vdec_core {
+ 	void      *dummy_post_canvas_vaddr;
+ 	dma_addr_t dummy_post_canvas_paddr;
+ 
++	/* Buffer for the H.264 decoder. Unk (1.24 MiB), References MV (1 MiB), Unk (3 MiB) */
++	void      *vh264_mem_vaddr;
++	dma_addr_t vh264_mem_paddr;
++	u32	   vh264_mem_size;
++
+ 	/* Whether capture/output streaming are on */
+ 	unsigned int streamon_cap, streamon_out;
+ 	
+@@ -95,7 +100,11 @@ struct vdec_core {
+ 	/* Buffers queued into the HW */
+ 	struct list_head bufs;
+ 	spinlock_t bufs_spinlock;
+-	struct work_struct mark_buffers_done_work;
++	//struct work_struct mark_buffers_done_work;
++	struct task_struct *buffers_done_thread;
++
++	/* Buffers that need to be recycled by the HW */
++	struct list_head bufs_recycle;
+ 
+ 	struct semaphore queue_sema;
+ };
+diff --git a/drivers/soc/amlogic/meson-pwrc-vdec.c b/drivers/soc/amlogic/meson-pwrc-vdec.c
+index ae09684..c719248 100644
+--- a/drivers/soc/amlogic/meson-pwrc-vdec.c
++++ b/drivers/soc/amlogic/meson-pwrc-vdec.c
+@@ -37,6 +37,7 @@ static int meson_pwrc_vdec_power_off(struct generic_pm_domain *genpd)
+ {
+ 	struct meson_pwrc_vdec *pd = genpd_to_pd(genpd);
+ 
++	printk("meson_pwrc_vdec_power_off\n");
+ 	regmap_update_bits(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
+ 			GEN_PWR_VDEC_1, GEN_PWR_VDEC_1);
+ 	udelay(20);
+@@ -60,9 +61,10 @@ static int meson_pwrc_vdec_power_on(struct generic_pm_domain *genpd)
+ {
+ 	struct meson_pwrc_vdec *pd = genpd_to_pd(genpd);
+ 
++	printk("meson_pwrc_vdec_power_on\n");
+ 	meson_pwrc_vdec_setup_clk(pd);
+ 	regmap_update_bits(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0, GEN_PWR_VDEC_1, 0);
+-	udelay(10);
++	udelay(20);
+ 
+ 	return 0;
+ }
+@@ -103,7 +105,7 @@ static int meson_pwrc_vdec_probe(struct platform_device *pdev)
+ 
+ 	powered_off = meson_pwrc_vdec_get_power(&vdec_pd);
+ 
+-	pm_genpd_init(&vdec_pd.genpd, &pm_domain_always_on_gov,
++	pm_genpd_init(&vdec_pd.genpd, &simple_qos_governor,
+ 		      powered_off);
+ 
+ 	/* If already powered, sync the clock states */

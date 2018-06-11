@@ -1,0 +1,24 @@
+From c4c9fd3117a3b60aec16af7c4b1b48125e95d567 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Thu, 5 Apr 2018 13:55:07 +0200
+Subject: [PATCH] meson: vdec: esparser: Fix VIFIFO end bound
+
+This fixes video artifacts that can be seen when decoding H.264,
+when the VIFIFO wraps around.
+---
+ drivers/media/platform/meson/vdec/esparser.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index d5dd933..3a04f52 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -213,7 +213,7 @@ int esparser_power_up(struct vdec_session *sess) {
+ 
+ 	/* parser video */
+ 	writel_relaxed(sess->vififo_paddr, core->esparser_base + PARSER_VIDEO_START_PTR);
+-	writel_relaxed(sess->vififo_paddr + sess->vififo_size, core->esparser_base + PARSER_VIDEO_END_PTR);
++	writel_relaxed(sess->vififo_paddr + sess->vififo_size - 8, core->esparser_base + PARSER_VIDEO_END_PTR);
+ 	writel_relaxed(readl_relaxed(core->esparser_base + PARSER_ES_CONTROL) & ~1, core->esparser_base + PARSER_ES_CONTROL);
+ 	
+ 	writel_relaxed(0xffff, core->esparser_base + PARSER_INT_STATUS);

@@ -1,0 +1,33 @@
+From a592c1954d20d0a153f3fde136301347df4ca3ed Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Fri, 13 Apr 2018 06:29:07 +0200
+Subject: [PATCH] dts: meson-gxbb: add vdec entries
+
+---
+ arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+index 67d794b..8afc345 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+@@ -795,3 +795,19 @@
+ 	compatible = "amlogic,meson-gxbb-vpu", "amlogic,meson-gx-vpu";
+ 	power-domains = <&pwrc_vpu>;
+ };
++
++&vdec {
++	power-domains = <&pwrc_vdec>;
++};
++
++&pwrc_vdec {
++	clocks = <&clkc CLKID_VPU_INTR>, <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
++	clock-names = "vpu_intr", "dos_parser", "vdec_1", "vdec_hevc";
++
++	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
++			  <&clkc CLKID_VDEC_1>;
++	assigned-clock-parents = <&clkc CLKID_FCLK_DIV3>,
++				 <0>;
++	assigned-clock-rates = <0>,
++			       <666666666>;
++};

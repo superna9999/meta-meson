@@ -1,0 +1,27 @@
+From e8e75f8abbf97bb9c38c79b9814041ae73615b07 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Wed, 11 Apr 2018 00:19:40 +0200
+Subject: [PATCH] meson: vdec: h264: Increase the minimum amount of buffers to
+ 16
+
+It's the only way to be bulletproof for bitstreams that have
+a big amount of reference frames.
+
+Drawback: the minimum memory footprint for 4K is 200MB. (+vififo +input buffers ..)
+---
+ drivers/media/platform/meson/vdec/vdec.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index dfa840f..b21878a72 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -257,7 +257,7 @@ static const struct vdec_format vdec_formats[] = {
+ 		.pixfmt = V4L2_PIX_FMT_H264,
+ 		.num_planes = 1,
+ 		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+-		.min_buffers = 8,
++		.min_buffers = 16,
+ 		.max_buffers = 32,
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_h264_ops,

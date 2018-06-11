@@ -1,0 +1,32 @@
+From 9ab20ec38b08a122fb6c5d37578507cabefef6cd Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Mon, 11 Jun 2018 05:08:38 +0200
+Subject: [PATCH] meson: vdec: Cleanup buffers when start_streaming fails
+
+---
+ drivers/media/platform/meson/vdec/vdec.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 24e0009..700963d 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -155,6 +155,7 @@ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ {
+ 	struct vdec_session *sess = vb2_get_drv_priv(q);
++	struct vb2_v4l2_buffer *buf;
+ 	int ret;
+ 	
+ 	printk("vdec_start_streaming\n");
+@@ -192,6 +193,10 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ vififo_free:
+ 	dma_free_coherent(sess->core->dev, sess->vififo_size, sess->vififo_vaddr, sess->vififo_paddr);
+ bufs_done:
++	while ((buf = v4l2_m2m_src_buf_remove(sess->m2m_ctx)))
++		v4l2_m2m_buf_done(buf, VB2_BUF_STATE_QUEUED);
++	while ((buf = v4l2_m2m_dst_buf_remove(sess->m2m_ctx)))
++		v4l2_m2m_buf_done(buf, VB2_BUF_STATE_QUEUED);
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		sess->streamon_out = 0;
+ 	else

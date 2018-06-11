@@ -1,0 +1,2319 @@
+From 31a0836990f57ae108907ed948283e4e4cb02948 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Wed, 4 Apr 2018 04:46:44 +0200
+Subject: [PATCH] meson: vdec: add MPEG 1/2 support
+
+Definitely a breeze of fresh air compared to the ongoing HEVC stuff.
+
+This commit also does some renaming, introduces codec_helpers.c
+with common code, and adds min_buffers/max_buffers properties
+to the vdec_formats.
+---
+ drivers/media/platform/meson/vdec/Makefile        |   2 +-
+ drivers/media/platform/meson/vdec/codec_h264.c    | 438 +++++++++++++++++++++
+ drivers/media/platform/meson/vdec/codec_h264.h    |   8 +
+ drivers/media/platform/meson/vdec/codec_helpers.c |  33 ++
+ drivers/media/platform/meson/vdec/codec_helpers.h |   8 +
+ drivers/media/platform/meson/vdec/codec_hevc.c    | 375 ++++++++++++++++++
+ drivers/media/platform/meson/vdec/codec_hevc.h    |   8 +
+ drivers/media/platform/meson/vdec/codec_mpeg12.c  | 235 +++++++++++
+ drivers/media/platform/meson/vdec/codec_mpeg12.h  |   8 +
+ drivers/media/platform/meson/vdec/esparser.c      |   2 +-
+ drivers/media/platform/meson/vdec/h264.c          | 458 ----------------------
+ drivers/media/platform/meson/vdec/h264.h          |   8 -
+ drivers/media/platform/meson/vdec/hevc.c          | 363 -----------------
+ drivers/media/platform/meson/vdec/hevc.h          |   8 -
+ drivers/media/platform/meson/vdec/vdec.c          |  38 +-
+ drivers/media/platform/meson/vdec/vdec.h          |   6 +-
+ drivers/media/platform/meson/vdec/vdec_hevc.c     |   7 +-
+ vmpeg12_mc                                        | Bin 0 -> 16384 bytes
+ 18 files changed, 1158 insertions(+), 847 deletions(-)
+ create mode 100644 drivers/media/platform/meson/vdec/codec_h264.c
+ create mode 100644 drivers/media/platform/meson/vdec/codec_h264.h
+ create mode 100644 drivers/media/platform/meson/vdec/codec_helpers.c
+ create mode 100644 drivers/media/platform/meson/vdec/codec_helpers.h
+ create mode 100644 drivers/media/platform/meson/vdec/codec_hevc.c
+ create mode 100644 drivers/media/platform/meson/vdec/codec_hevc.h
+ create mode 100644 drivers/media/platform/meson/vdec/codec_mpeg12.c
+ create mode 100644 drivers/media/platform/meson/vdec/codec_mpeg12.h
+ delete mode 100644 drivers/media/platform/meson/vdec/h264.c
+ delete mode 100644 drivers/media/platform/meson/vdec/h264.h
+ delete mode 100644 drivers/media/platform/meson/vdec/hevc.c
+ delete mode 100644 drivers/media/platform/meson/vdec/hevc.h
+ create mode 100644 vmpeg12_mc
+
+diff --git a/drivers/media/platform/meson/vdec/Makefile b/drivers/media/platform/meson/vdec/Makefile
+index 4a4ac15..5847d2f 100644
+--- a/drivers/media/platform/meson/vdec/Makefile
++++ b/drivers/media/platform/meson/vdec/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Makefile for Qualcomm Venus driver
+ 
+-meson-vdec-objs += vdec.o vdec_1.o esparser.o canvas.o h264.o vdec_hevc.o hevc.o
++meson-vdec-objs += vdec.o vdec_1.o vdec_hevc.o esparser.o canvas.o codec_helpers.o codec_mpeg12.o codec_h264.o codec_hevc.o
+ 
+ obj-$(CONFIG_VIDEO_AML_MESON_VDEC) += meson-vdec.o
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+new file mode 100644
+index 0000000..4b2acae
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -0,0 +1,438 @@
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "codec_h264.h"
++#include "codec_helpers.h"
++#include "canvas.h"
++
++#define SIZE_EXT_FW    (SZ_1K * 20)
++#define SIZE_POST_CNV  ((3860 * 2160 * 3) / 2)
++#define SIZE_WORKSPACE 0x1ee000
++
++/* Offset added by the firmware which must be substracted
++ * from the workspace paddr
++ */
++#define DEF_BUF_START_ADDR 0x1000000
++
++
++/* DOS registers */
++#define ASSIST_MBOX1_CLR_REG 0x01d4
++#define ASSIST_MBOX1_MASK    0x01d8
++
++#define LMEM_DMA_CTRL 0x0d40
++
++#define PSCALE_CTRL 0x2444
++
++#define MDEC_PIC_DC_CTRL   0x2638
++#define ANC0_CANVAS_ADDR   0x2640
++#define MDEC_PIC_DC_THRESH 0x26e0
++
++#define AV_SCRATCH_0  0x2700
++#define AV_SCRATCH_1  0x2704
++#define AV_SCRATCH_2  0x2708
++#define AV_SCRATCH_3  0x270c
++#define AV_SCRATCH_4  0x2710
++#define AV_SCRATCH_5  0x2714
++#define AV_SCRATCH_6  0x2718
++#define AV_SCRATCH_7  0x271c
++#define AV_SCRATCH_8  0x2720
++#define AV_SCRATCH_9  0x2724
++#define AV_SCRATCH_D  0x2734
++#define AV_SCRATCH_F  0x273c
++#define AV_SCRATCH_G  0x2740
++#define AV_SCRATCH_H  0x2744
++
++#define POWER_CTL_VLD 0x3020
++
++#define DCAC_DMA_CTRL 0x3848
++
++#define DOS_SW_RESET0 0xfc00
++
++struct codec_h264 {
++	/* H.264 decoder requires an extended firmware loaded in contiguous RAM */
++	void      *ext_fw_vaddr;
++	dma_addr_t ext_fw_paddr;
++
++	/* The decoder requires a "post canvas", don't really know what it's for */
++	void      *post_canvas_vaddr;
++	dma_addr_t post_canvas_paddr;
++
++	/* Buffer for the H.264 Workspace */
++	void      *workspace_vaddr;
++	dma_addr_t workspace_paddr;
++	
++	/* Buffer for the H.264 references MV */
++	void      *ref_vaddr;
++	dma_addr_t ref_paddr;
++	u32	   ref_size;
++
++	/* Housekeeping thread for marking buffers to DONE
++	 * and recycling them into the hardware
++	 */
++	struct task_struct *buffers_thread;
++};
++
++static int codec_h264_buffers_thread(void *data)
++{
++	struct vdec_buffer *tmp;
++	struct vb2_v4l2_buffer *vbuf;
++	unsigned long flags;
++	struct vdec_session *sess = data;
++	struct vdec_core *core = sess->core;;
++
++	while (!kthread_should_stop()) {
++		spin_lock_irqsave(&sess->bufs_spinlock, flags);
++		while (!list_empty(&sess->bufs))
++		{
++			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
++			if (tmp->index == -1)
++				break;
++
++			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
++			if (!vbuf) {
++				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
++				break;
++			}
++
++			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
++			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
++			vbuf->vb2_buf.timestamp = tmp->timestamp;
++			vbuf->sequence = sess->sequence_cap++;
++			if (!(vbuf->sequence % 100))
++				printk("%d\n", vbuf->sequence);
++				
++			printk("Buffer %d done\n", tmp->index);
++
++			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++			list_del(&tmp->list);
++			kfree(tmp);
++		}
++		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++
++		mutex_lock(&sess->bufs_recycle_lock);
++		while (!list_empty(&sess->bufs_recycle) &&
++		      (!readl_relaxed(core->dos_base + AV_SCRATCH_7) ||
++		       !readl_relaxed(core->dos_base + AV_SCRATCH_8)))
++		{
++			tmp = list_first_entry(&sess->bufs_recycle, struct vdec_buffer, list);
++
++			/* Tell the decoder he can recycle this buffer.
++			 * AV_SCRATCH_8 serves the same purpose.
++			 */
++			if (!readl_relaxed(core->dos_base + AV_SCRATCH_7))
++				writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_7);
++			else
++				writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_8);
++				
++			printk("Buffer %d recycled\n", tmp->index);
++
++			list_del(&tmp->list);
++			kfree(tmp);
++
++			up(&sess->queue_sema);
++		}
++		mutex_unlock(&sess->bufs_recycle_lock);
++
++		usleep_range(5000, 10000);
++	}
++
++	return 0;
++}
++
++static int codec_h264_start(struct vdec_session *sess) {
++	struct vdec_core *core = sess->core;
++	struct codec_h264 *h264 = sess->priv;
++	int ret;
++	
++	printk("codec_h264_start\n");
++	
++	/* Allocate a "post canvas", purpose unknown */
++	h264->post_canvas_vaddr = dma_alloc_coherent(core->dev, SIZE_POST_CNV, &h264->post_canvas_paddr, GFP_KERNEL);
++	if (!h264->post_canvas_paddr) {
++		printk("Failed to request post canvas\n");
++		return -ENOMEM;
++	}
++	printk("Allocated post canvas: %08X - %08X\n", h264->post_canvas_paddr, h264->post_canvas_paddr + SIZE_POST_CNV);
++	
++	/* Allocate some memory for the H.264 decoder's state */
++	h264->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &h264->workspace_paddr, GFP_KERNEL);
++	if (!h264->workspace_vaddr) {
++		printk("Failed to request H.264 Workspace\n");
++		ret = -ENOMEM;
++		goto free_post;
++	}
++	printk("Allocated Workspace: %08X - %08X\n", h264->workspace_paddr, h264->workspace_paddr + SIZE_WORKSPACE);
++
++	while (readl_relaxed(core->dos_base + DCAC_DMA_CTRL) & 0x8000) { }
++	while (readl_relaxed(core->dos_base + LMEM_DMA_CTRL) & 0x8000) { }
++
++	/* Taken from old AMLogic code. No idea. */
++	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++
++	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++	writel_relaxed((1<<9) | (1<<8), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++
++	writel_relaxed(readl_relaxed(core->dos_base + POWER_CTL_VLD) | (1 << 9) | (1 << 6), core->dos_base + POWER_CTL_VLD);
++
++	writel_relaxed(0, core->dos_base + PSCALE_CTRL);
++
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
++	writel_relaxed(h264->workspace_paddr - DEF_BUF_START_ADDR, core->dos_base + AV_SCRATCH_1);
++	writel_relaxed(h264->ext_fw_paddr, core->dos_base + AV_SCRATCH_G);
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_9);
++
++	/* Enable "error correction", don't know what it means */
++	writel_relaxed((readl_relaxed(core->dos_base + AV_SCRATCH_F) & 0xffffffc3) | (1 << 4), core->dos_base + AV_SCRATCH_F);
++
++	/* Enable IRQ */
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_MASK);
++
++	/* Enable NV21 */
++	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
++
++	/* ?? */
++	writel_relaxed(0x404038aa, core->dos_base + MDEC_PIC_DC_THRESH);
++	
++	writel_relaxed((1<<12)|(1<<11), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++	
++	h264->buffers_thread = kthread_run(codec_h264_buffers_thread, sess, "buffers_done");
++	
++	return 0;
++	
++free_post:
++	dma_free_coherent(core->dev, SIZE_EXT_FW, h264->post_canvas_vaddr, h264->post_canvas_paddr);
++	h264->post_canvas_paddr = 0;
++	
++	return ret;
++}
++
++static int codec_h264_stop(struct vdec_session *sess)
++{
++	struct codec_h264 *h264 = sess->priv;
++	struct vdec_core *core = sess->core;
++
++	printk("codec_h264_stop\n");
++
++	kthread_stop(h264->buffers_thread);
++
++	if (h264->ext_fw_vaddr) {
++		dma_free_coherent(core->dev, SIZE_EXT_FW, h264->ext_fw_vaddr, h264->ext_fw_paddr);
++		h264->ext_fw_vaddr = 0;
++	}
++	
++	if (h264->post_canvas_vaddr) {
++		dma_free_coherent(core->dev, SIZE_POST_CNV, h264->post_canvas_vaddr, h264->post_canvas_paddr);
++		h264->post_canvas_vaddr = 0;
++	}
++	
++	if (h264->workspace_vaddr) {
++		dma_free_coherent(core->dev, SIZE_WORKSPACE, h264->workspace_vaddr, h264->workspace_paddr);
++		h264->workspace_vaddr = 0;
++	}
++	
++	if (h264->ref_vaddr) {
++		dma_free_coherent(core->dev, h264->ref_size, h264->ref_vaddr, h264->ref_paddr);
++		h264->ref_vaddr = 0;
++	}
++	
++	kfree(h264);
++	sess->priv = 0;
++	
++	return 0;
++}
++
++static int codec_h264_load_extended_firmware(struct vdec_session *sess, const u8 *data, u32 len)
++{
++	struct codec_h264 *h264;
++	struct vdec_core *core = sess->core;
++
++	printk("codec_h264_load_extended_firmware\n");
++	
++	h264 = kzalloc(sizeof(*h264), GFP_KERNEL);
++	if (!h264)
++		return -ENOMEM;
++		
++	sess->priv = h264;
++
++	if (len != SIZE_EXT_FW)
++		return -EINVAL;
++	
++	h264->ext_fw_vaddr = dma_alloc_coherent(core->dev, SIZE_EXT_FW, &h264->ext_fw_paddr, GFP_KERNEL);
++	if (!h264->ext_fw_vaddr) {
++		dev_err(core->dev, "Couldn't allocate memory for H.264 extended firmware\n");
++		return -ENOMEM;
++	}
++
++	memcpy(h264->ext_fw_vaddr, data, SIZE_EXT_FW);
++
++	return 0;
++}
++
++/* Configure the H.264 decoder when the esparser finished parsing
++ * the first buffer.
++ */
++static void codec_h264_set_param(struct vdec_session *sess) {
++	u32 max_reference_size;
++	u32 parsed_info, mb_width, mb_height, mb_total;
++	u32 mb_mv_byte;
++	u32 actual_dpb_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
++	u32 max_dpb_size = 4;
++	struct vdec_core *core = sess->core;
++	struct codec_h264 *h264 = sess->priv;
++
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
++	writel_relaxed(0, core->dos_base + AV_SCRATCH_9);
++
++	parsed_info = readl_relaxed(core->dos_base + AV_SCRATCH_1);
++
++	/* Total number of 16x16 macroblocks */
++	mb_total = (parsed_info >> 8) & 0xffff;
++
++	/* Size of Motion Vector per macroblock ? */
++	mb_mv_byte = (parsed_info & 0x80000000) ? 24 : 96;
++
++	/* Number of macroblocks per line */
++	mb_width = parsed_info & 0xff;
++
++	/* Number of macroblock lines */
++	mb_height = mb_total / mb_width;
++
++	max_reference_size = (parsed_info >> 24) & 0x7f;
++
++	/* Align to a multiple of 4 macroblocks */
++	mb_width = (mb_width + 3) & 0xfffffffc;
++	mb_height = (mb_height + 3) & 0xfffffffc;
++	mb_total = mb_width * mb_height;
++
++	codec_helper_set_canvases(sess, core->dos_base + ANC0_CANVAS_ADDR);
++
++	if (max_reference_size >= max_dpb_size)
++		max_dpb_size = max_reference_size;
++
++	max_reference_size++;
++
++	/* I don't really know the purpose of this post canvas.
++	 * It seems required with the write to AV_SCRATCH_3 though..
++	 */
++	printk("Configuring post canvas to %08X\n", h264->post_canvas_paddr);
++	/* Setup post canvas for Y */
++	vdec_canvas_setup(core->dmc_base, 0x00, h264->post_canvas_paddr, mb_width << 4, mb_height << 4, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++	/* Setup post canvas for U/V */
++	vdec_canvas_setup(core->dmc_base, 0x1, h264->post_canvas_paddr + (mb_total << 8), mb_width << 4, mb_height << 3, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++	printk("mb_total = %d; mb_mv_byte = %d; actual_dpb_size = %d; max_dpb_size = %d\n max_reference_size = %d; mb_width = %d; mb_height = %d\n", mb_total, mb_mv_byte, actual_dpb_size, max_dpb_size, max_reference_size, mb_width, mb_height);
++
++	printk("Setting POST CANVAS to %08X\n", (0x1 << 16) | (0x1 << 8) | 0x0);
++	writel_relaxed((0x1 << 16) | (0x1 << 8) | 0x0, core->dos_base + AV_SCRATCH_3);
++
++	h264->ref_size = mb_total * mb_mv_byte * max_reference_size;
++	h264->ref_vaddr = dma_alloc_coherent(core->dev, h264->ref_size, &h264->ref_paddr, GFP_ATOMIC);
++
++	/* Address to store the references' MVs ? */
++	writel_relaxed(h264->ref_paddr, core->dos_base + AV_SCRATCH_1);
++	printk("Max references buffer size: %d\n", mb_total * mb_mv_byte * max_reference_size);
++
++	/* End of ref MV */
++	writel_relaxed(h264->ref_paddr + h264->ref_size, core->dos_base + AV_SCRATCH_4);
++
++	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (max_dpb_size << 8), core->dos_base + AV_SCRATCH_0);
++}
++
++/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
++static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
++	struct vdec_buffer *tmp;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (tmp->index == -1) {
++			tmp->index = buffer_index;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
++
++static irqreturn_t codec_h264_isr(struct vdec_session *sess)
++{
++	unsigned int cpu_cmd;
++	unsigned int buffer_index;
++	int i;
++	u32 slice_type;
++	struct vdec_core *core = sess->core;
++
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++	cpu_cmd = readl_relaxed(core->dos_base + AV_SCRATCH_0);
++
++	//printk("vdec_isr ; cpu_cmd = %08X!\n", cpu_cmd);
++
++	if ((cpu_cmd & 0xff) == 1) {
++		codec_h264_set_param(sess);
++	} else if ((cpu_cmd & 0xff) == 2) {
++		int error_count, error, num_frame, status, eos = 0;
++		error_count = readl_relaxed(core->dos_base + AV_SCRATCH_D);
++		num_frame = (cpu_cmd >> 8) & 0xff;
++		if (error_count)
++			printk("decoder error(s) happened, count %d\n", error_count);
++
++		//printk("Decoded %d frames\n", num_frame);
++
++		for (i = 0 ; (i < num_frame) && (!eos) ; i++) {
++			slice_type = (readl_relaxed(core->dos_base + AV_SCRATCH_H) >> (i * 4)) & 0xf;
++			status = readl_relaxed(core->dos_base + AV_SCRATCH_1 + i*4);
++			buffer_index = status & 0x1f;
++			error = status & 0x200;
++
++			/* A buffer decode error means it was decoded,
++			 * but part of the picture will have artifacts.
++			 * Typical reason is a temporarily corrupted bitstream
++			 */
++			if (error) {
++				printk("Buffer %d decode error: %08X\n", buffer_index, error);
++			} else {
++				//printk("Buffer %d decoded & ready!\n", buffer_index);
++			}
++
++			eos = (status >> 15) & 1;
++		
++			if (eos) {
++				printk("Reached EOS!\n");
++			}
++
++			/* Fatal error ? */
++			if (buffer_index >= 24) {
++				printk("buffer_index >= 24 !! (%u)\n", buffer_index);
++				continue;
++			}
++
++			fill_buffer_index(sess, buffer_index);
++		}
++
++		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
++	} else {
++		printk("Unexpected cpu_cmd: %08X\n", cpu_cmd);
++		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
++	}
++
++	return IRQ_HANDLED;
++}
++
++struct vdec_codec_ops codec_h264_ops = {
++	.start = codec_h264_start,
++	.stop = codec_h264_stop,
++	.load_extended_firmware = codec_h264_load_extended_firmware,
++	.isr = codec_h264_isr,
++};
++
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.h b/drivers/media/platform/meson/vdec/codec_h264.h
+new file mode 100644
+index 0000000..19b9988
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_h264.h
+@@ -0,0 +1,8 @@
++#ifndef __MESON_VDEC_CODEC_H264_H_
++#define __MESON_VDEC_CODEC_H264_H_
++
++#include "vdec.h"
++
++extern struct vdec_codec_ops codec_h264_ops;
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.c b/drivers/media/platform/meson/vdec/codec_helpers.c
+new file mode 100644
+index 0000000..8d8ff4e
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_helpers.c
+@@ -0,0 +1,33 @@
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "codec_helpers.h"
++#include "canvas.h"
++
++void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base) {
++	struct vdec_core *core = sess->core;
++	u32 width = ALIGN(sess->width, 64);
++	u32 height = ALIGN(sess->height, 64);
++	struct v4l2_m2m_buffer *buf;
++
++	/* Setup NV12 canvases for Decoded Picture Buffer (dpb)
++	 * Map them to the user buffers' planes
++	 */
++	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
++		u32 buf_idx    = buf->vb.vb2_buf.index;
++		u32 cnv_y_idx  = 128 + buf_idx * 2;
++		u32 cnv_uv_idx = 128 + buf_idx * 2 + 1;
++		dma_addr_t buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
++		dma_addr_t buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
++
++		/* Y plane */
++		vdec_canvas_setup(core->dmc_base, cnv_y_idx, buf_y_paddr, width, height, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++		/* U/V plane */
++		vdec_canvas_setup(core->dmc_base, cnv_uv_idx, buf_uv_paddr, width, height / 2, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++		writel_relaxed(((cnv_uv_idx) << 16) |
++			       ((cnv_uv_idx) << 8)  |
++				(cnv_y_idx), reg_base + buf_idx*4);
++	}
++}
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.h b/drivers/media/platform/meson/vdec/codec_helpers.h
+new file mode 100644
+index 0000000..0a778ba
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_helpers.h
+@@ -0,0 +1,8 @@
++#ifndef __MESON_VDEC_CODEC_HELPERS_H_
++#define __MESON_VDEC_CODEC_HELPERS_H_
++
++#include "vdec.h"
++
++void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base);
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+new file mode 100644
+index 0000000..4bed8ea
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -0,0 +1,375 @@
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "codec_hevc.h"
++#include "canvas.h"
++#include "hevc_regs.h"
++
++/* DOS registers */
++#define ASSIST_MBOX1_CLR_REG 0x01d4
++#define ASSIST_MBOX1_MASK    0x01d8
++
++#define DOS_SW_RESET3        0xfcd0
++
++/* DMC Registers */
++#define DMC_REQ_CTRL	0x00
++
++/* HEVC reg mapping */
++#define HEVC_DEC_STATUS_REG       HEVC_ASSIST_SCRATCH_0
++	#define HEVC_ACTION_DONE	0xff
++#define HEVC_RPM_BUFFER           HEVC_ASSIST_SCRATCH_1
++#define HEVC_SHORT_TERM_RPS       HEVC_ASSIST_SCRATCH_2
++#define HEVC_VPS_BUFFER           HEVC_ASSIST_SCRATCH_3
++#define HEVC_SPS_BUFFER           HEVC_ASSIST_SCRATCH_4
++#define HEVC_PPS_BUFFER           HEVC_ASSIST_SCRATCH_5
++#define HEVC_SAO_UP               HEVC_ASSIST_SCRATCH_6
++#define HEVC_STREAM_SWAP_BUFFER   HEVC_ASSIST_SCRATCH_7
++#define HEVC_STREAM_SWAP_BUFFER2  HEVC_ASSIST_SCRATCH_8
++#define HEVC_sao_mem_unit         HEVC_ASSIST_SCRATCH_9
++#define HEVC_SAO_ABV              HEVC_ASSIST_SCRATCH_A
++#define HEVC_sao_vb_size          HEVC_ASSIST_SCRATCH_B
++#define HEVC_SAO_VB               HEVC_ASSIST_SCRATCH_C
++#define HEVC_SCALELUT             HEVC_ASSIST_SCRATCH_D
++#define HEVC_WAIT_FLAG            HEVC_ASSIST_SCRATCH_E
++#define RPM_CMD_REG               HEVC_ASSIST_SCRATCH_F
++#define LMEM_DUMP_ADR             HEVC_ASSIST_SCRATCH_F
++#define NAL_SEARCH_CTL            HEVC_ASSIST_SCRATCH_I
++#define HEVC_DECODE_MODE	  HEVC_ASSIST_SCRATCH_J
++	#define DECODE_MODE_SINGLE 0
++#define DECODE_STOP_POS		  HEVC_ASSIST_SCRATCH_K
++#define HEVC_AUX_ADR		  HEVC_ASSIST_SCRATCH_L
++#define HEVC_AUX_DATA_SIZE	  HEVC_ASSIST_SCRATCH_M
++#define HEVC_DECODE_SIZE	  HEVC_ASSIST_SCRATCH_N
++
++#define HEVCD_MPP_ANC2AXI_TBL_DATA (0x3464 * 4)
++
++/* HEVC Infos */
++#define MAX_REF_PIC_NUM 24
++
++#define IPP_OFFSET       0x00
++#define SAO_ABV_OFFSET   (IPP_OFFSET + 0x4000)
++#define SAO_VB_OFFSET    (SAO_ABV_OFFSET + 0x30000)
++#define SH_TM_RPS_OFFSET (SAO_VB_OFFSET + 0x30000)
++#define VPS_OFFSET       (SH_TM_RPS_OFFSET + 0x800)
++#define SPS_OFFSET       (VPS_OFFSET + 0x800)
++#define PPS_OFFSET       (SPS_OFFSET + 0x800)
++#define SAO_UP_OFFSET    (PPS_OFFSET + 0x2000)
++#define SWAP_BUF_OFFSET  (SAO_UP_OFFSET + 0x800)
++#define SWAP_BUF2_OFFSET (SWAP_BUF_OFFSET + 0x800)
++#define SCALELUT_OFFSET  (SWAP_BUF2_OFFSET + 0x800)
++#define DBLK_PARA_OFFSET (SCALELUT_OFFSET + 0x8000)
++#define DBLK_DATA_OFFSET (DBLK_PARA_OFFSET + 0x20000)
++#define MMU_VBH_OFFSET   (DBLK_DATA_OFFSET + 0x40000)
++#define MPRED_ABV_OFFSET (MMU_VBH_OFFSET + 0x5000)
++#define MPRED_MV_OFFSET  (MPRED_ABV_OFFSET + 0x8000)
++#define RPM_OFFSET       (MPRED_MV_OFFSET + 0x120000 * MAX_REF_PIC_NUM)
++#define LMEM_OFFSET      (RPM_OFFSET + 0x100)
++
++#define SIZE_WORKSPACE ALIGN(LMEM_OFFSET + 0xA00, 64 * SZ_1K)
++
++#define PARSER_CMD_SKIP_CFG_0 0x0000090b
++#define PARSER_CMD_SKIP_CFG_1 0x1b14140f
++#define PARSER_CMD_SKIP_CFG_2 0x001b1910
++
++static const u16 parser_cmd[] = {
++	0x0401,
++	0x8401,
++	0x0800,
++	0x0402,
++	0x9002,
++	0x1423,
++	0x8CC3,
++	0x1423,
++	0x8804,
++	0x9825,
++	0x0800,
++	0x04FE,
++	0x8406,
++	0x8411,
++	0x1800,
++	0x8408,
++	0x8409,
++	0x8C2A,
++	0x9C2B,
++	0x1C00,
++	0x840F,
++	0x8407,
++	0x8000,
++	0x8408,
++	0x2000,
++	0xA800,
++	0x8410,
++	0x04DE,
++	0x840C,
++	0x840D,
++	0xAC00,
++	0xA000,
++	0x08C0,
++	0x08E0,
++	0xA40E,
++	0xFC00,
++	0x7C00
++};
++
++struct codec_hevc {
++	/* Buffer for the HEVC Workspace */
++	void      *workspace_vaddr;
++	dma_addr_t workspace_paddr;
++
++	/* Housekeeping thread for marking buffers to DONE
++	 * and recycling them into the hardware
++	 */
++	struct task_struct *buffers_thread;
++};
++
++static int codec_hevc_buffers_thread(void *data)
++{
++	struct vdec_buffer *tmp;
++	struct vb2_v4l2_buffer *vbuf;
++	unsigned long flags;
++	struct vdec_session *sess = data;
++	struct vdec_core *core = sess->core;
++
++	while (!kthread_should_stop()) {
++		//printk("status: %08X\n", readl_relaxed(core->dos_base + HEVC_PARSER_INT_STATUS));
++		/* The DONE part should probably be in a common thread */
++		spin_lock_irqsave(&sess->bufs_spinlock, flags);
++		while (!list_empty(&sess->bufs))
++		{
++			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
++			if (tmp->index == -1)
++				break;
++
++			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
++			if (!vbuf) {
++				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
++				break;
++			}
++
++			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
++			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
++			vbuf->vb2_buf.timestamp = tmp->timestamp;
++			vbuf->sequence = sess->sequence_cap++;
++			if (!(vbuf->sequence % 100))
++				printk("%d\n", vbuf->sequence);
++
++			printk("Buffer %d done\n", tmp->index);
++
++			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++
++			list_del(&tmp->list);
++
++			kfree(tmp);
++		}
++		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++
++		usleep_range(5000, 10000);
++	}
++
++	return 0;
++}
++
++static void codec_hevc_setup_buffers(struct vdec_session *sess) {
++	int i;
++	dma_addr_t buf_y_paddr = 0;
++	dma_addr_t buf_uv_paddr;
++	struct v4l2_m2m_buffer *buf;
++	struct vdec_core *core = sess->core;
++	u32 buf_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
++
++	/* >= GXL */
++	writel_relaxed((1 << 2) | (1 << 1), core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
++
++	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
++		buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
++		buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
++
++		writel_relaxed(buf_y_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		/* Double write mode ?? */
++		writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++	}
++
++	/* Fill the remaining unused slots with the last buffer's Y addr ? */
++	for (i = buf_size; i < MAX_REF_PIC_NUM; ++i) {
++		writel_relaxed(buf_y_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++	}
++
++	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
++	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
++	for (i = 0; i < 32; ++i)
++		writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++}
++
++static int codec_hevc_setup_workspace(struct vdec_session *sess) {
++	struct vdec_core *core = sess->core;
++	struct codec_hevc *hevc = sess->priv;
++
++	/* Allocate some memory for the HEVC decoder's state */
++	hevc->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &hevc->workspace_paddr, GFP_KERNEL);
++	if (!hevc->workspace_vaddr) {
++		printk("Failed to request HEVC Workspace\n");
++		return -ENOMEM;
++	}
++	printk("Allocated Workspace: %08X - %08X\n", hevc->workspace_paddr, hevc->workspace_paddr + SIZE_WORKSPACE);
++
++	/* Setup Workspace */
++	writel_relaxed(hevc->workspace_paddr + IPP_OFFSET, core->dos_base + HEVCD_IPP_LINEBUFF_BASE);
++	writel_relaxed(hevc->workspace_paddr + SH_TM_RPS_OFFSET, core->dos_base + HEVC_SHORT_TERM_RPS);
++	writel_relaxed(hevc->workspace_paddr + VPS_OFFSET, core->dos_base + HEVC_VPS_BUFFER);
++	writel_relaxed(hevc->workspace_paddr + SPS_OFFSET, core->dos_base + HEVC_SPS_BUFFER);
++	writel_relaxed(hevc->workspace_paddr + PPS_OFFSET, core->dos_base + HEVC_PPS_BUFFER);
++	writel_relaxed(hevc->workspace_paddr + SAO_UP_OFFSET, core->dos_base + HEVC_SAO_UP);
++	writel_relaxed(hevc->workspace_paddr + SWAP_BUF_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER);
++	writel_relaxed(hevc->workspace_paddr + SWAP_BUF2_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER2);
++	writel_relaxed(hevc->workspace_paddr + SCALELUT_OFFSET, core->dos_base + HEVC_SCALELUT);
++	writel_relaxed(hevc->workspace_paddr + DBLK_PARA_OFFSET, core->dos_base + HEVC_DBLK_CFG4);
++	writel_relaxed(hevc->workspace_paddr + DBLK_DATA_OFFSET, core->dos_base + HEVC_DBLK_CFG5);
++	//writel_relaxed(hevc->workspace_paddr + LMEM_OFFSET, core->dos_base + LMEM_DUMP_ADR);
++
++	return 0;
++}
++
++static int codec_hevc_start(struct vdec_session *sess) {
++	struct vdec_core *core = sess->core;
++	struct codec_hevc *hevc;
++	int ret;
++	int i;
++
++	printk("Workspace size: %u\n", SIZE_WORKSPACE);
++
++	hevc = kzalloc(sizeof(*hevc), GFP_KERNEL);
++	if (!hevc)
++		return -ENOMEM;
++
++	sess->priv = hevc;
++
++	writel_relaxed(readl_relaxed(core->dmc_base + DMC_REQ_CTRL) | (1 << 4), core->dmc_base + DMC_REQ_CTRL);
++
++	codec_hevc_setup_workspace(sess);
++
++	writel_relaxed(0x5a5a55aa, core->dos_base + HEVC_PARSER_VERSION);
++	writel_relaxed((1 << 14), core->dos_base + DOS_SW_RESET3);
++	writel_relaxed(0, core->dos_base + HEVC_CABAC_CONTROL);
++	writel_relaxed(0, core->dos_base + HEVC_PARSER_CORE_CONTROL);
++	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | 1, core->dos_base + HEVC_STREAM_CONTROL);
++	writel_relaxed(0x12345678, core->dos_base + HEVC_SHIFT_STARTCODE);
++	writel_relaxed(0x9abcdef0, core->dos_base + HEVC_SHIFT_EMULATECODE);
++	writel_relaxed(0x00000100, core->dos_base + HEVC_SHIFT_STARTCODE);
++	writel_relaxed(0x00000300, core->dos_base + HEVC_SHIFT_EMULATECODE);
++	writel_relaxed((readl_relaxed(core->dos_base + HEVC_PARSER_INT_CONTROL) & 0x03ffffff) |
++			(3 << 29) | (2 << 26) | (1 << 24) | (1 << 22) | (1 << 7) | (1 << 4) | 1, core->dos_base + HEVC_PARSER_INT_CONTROL);
++	writel_relaxed(readl_relaxed(core->dos_base + HEVC_SHIFT_STATUS) | (1 << 1) | 1, core->dos_base + HEVC_SHIFT_STATUS);
++	writel_relaxed((3 << 6) | (2 << 4) | (2 << 1) | 1, core->dos_base + HEVC_SHIFT_CONTROL);
++	writel_relaxed(1, core->dos_base + HEVC_CABAC_CONTROL);
++	writel_relaxed(1, core->dos_base + HEVC_PARSER_CORE_CONTROL);
++	writel_relaxed(0, core->dos_base + HEVC_DEC_STATUS_REG);
++
++	writel_relaxed(0, core->dos_base + HEVC_IQIT_SCALELUT_WR_ADDR);
++	for (i = 0; i < 1024; ++i)
++		writel_relaxed(0, core->dos_base + HEVC_IQIT_SCALELUT_DATA);
++
++	writel_relaxed(0, core->dos_base + HEVC_DECODE_SIZE);
++	writel_relaxed((1 << 16), core->dos_base + HEVC_PARSER_CMD_WRITE);
++	for (i = 0; i < ARRAY_SIZE(parser_cmd); ++i)
++		writel_relaxed(parser_cmd[i], core->dos_base + HEVC_PARSER_CMD_WRITE);
++
++	writel_relaxed(PARSER_CMD_SKIP_CFG_0, core->dos_base + HEVC_PARSER_CMD_SKIP_0);
++	writel_relaxed(PARSER_CMD_SKIP_CFG_1, core->dos_base + HEVC_PARSER_CMD_SKIP_1);
++	writel_relaxed(PARSER_CMD_SKIP_CFG_2, core->dos_base + HEVC_PARSER_CMD_SKIP_2);
++	writel_relaxed((1 << 5) | (1 << 2) | 1, core->dos_base + HEVC_PARSER_IF_CONTROL);
++
++	writel_relaxed(1, core->dos_base + HEVCD_IPP_TOP_CNTL);
++	writel_relaxed((1 << 1), core->dos_base + HEVCD_IPP_TOP_CNTL);
++
++	/* Enable NV21 reference read mode for MC */
++	writel_relaxed(1 << 31, core->dos_base + HEVCD_MPP_DECOMP_CTL1);
++
++	writel_relaxed(1, core->dos_base + HEVC_WAIT_FLAG);
++
++	/* clear mailbox interrupt */
++	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_CLR_REG);
++	/* enable mailbox interrupt */
++	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_MASK);
++	/* disable PSCALE for hardware sharing */
++	writel_relaxed(0, core->dos_base + HEVC_PSCALE_CTRL);
++	/* Let the uCode do all the parsing */
++	writel_relaxed(8, core->dos_base + NAL_SEARCH_CTL);
++
++	/*WRITE_VREG(NAL_SEARCH_CTL,
++	READ_VREG(NAL_SEARCH_CTL)
++	| ((parser_sei_enable & 0x7) << 17));*/
++
++	writel_relaxed(0, core->dos_base + DECODE_STOP_POS);
++	writel_relaxed(DECODE_MODE_SINGLE, core->dos_base + HEVC_DECODE_MODE);
++
++	/*WRITE_VREG(HEVC_AUX_ADR, hevc->aux_phy_addr);
++	WRITE_VREG(HEVC_AUX_DATA_SIZE,
++	((hevc->prefix_aux_size >> 4) << 16) |
++	(hevc->suffix_aux_size >> 4)
++	);*/
++
++	codec_hevc_setup_buffers(sess);
++
++	writel_relaxed(HEVC_ACTION_DONE, core->dos_base + HEVC_DEC_STATUS_REG);
++	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_IRQ_REG);
++
++	//writel_relaxed(HEVC_ACTION_DONE, core->dos_base + HEVC_DECODE_SIZE);
++
++	hevc->buffers_thread = kthread_run(codec_hevc_buffers_thread, sess, "buffers_done");
++
++	printk("HEVC start OK!\n");
++
++	return 0;
++}
++
++static int codec_hevc_stop(struct vdec_session *sess)
++{
++	struct codec_hevc *hevc = sess->priv;
++	struct vdec_core *core = sess->core;
++
++	printk("codec_hevc_stop\n");
++
++	kthread_stop(hevc->buffers_thread);
++
++	if (hevc->workspace_vaddr) {
++		dma_free_coherent(core->dev, SIZE_WORKSPACE, hevc->workspace_vaddr, hevc->workspace_paddr);
++		hevc->workspace_vaddr = 0;
++	}
++
++	kfree(hevc);
++	sess->priv = 0;
++
++	return 0;
++}
++
++/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
++static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
++	struct vdec_buffer *tmp;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (tmp->index == -1) {
++			tmp->index = buffer_index;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
++
++static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
++{
++	u32 dec_status;
++	struct vdec_core *core = sess->core;
++
++	dec_status = readl_relaxed(core->dos_base + HEVC_DEC_STATUS_REG);
++	printk("codec_hevc_isr: %08X\n", dec_status);
++	return IRQ_HANDLED;
++}
++
++struct vdec_codec_ops codec_hevc_ops = {
++	.start = codec_hevc_start,
++	.stop = codec_hevc_stop,
++	.isr = codec_hevc_isr,
++};
++
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.h b/drivers/media/platform/meson/vdec/codec_hevc.h
+new file mode 100644
+index 0000000..ff72243
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_hevc.h
+@@ -0,0 +1,8 @@
++#ifndef __MESON_VDEC_CODEC_HEVC_H_
++#define __MESON_VDEC_CODEC_HEVC_H_
++
++#include "vdec.h"
++
++extern struct vdec_codec_ops codec_hevc_ops;
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.c b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+new file mode 100644
+index 0000000..3be5b47
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+@@ -0,0 +1,235 @@
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "codec_mpeg12.h"
++#include "codec_helpers.h"
++
++#define SIZE_WORKSPACE	(2 * SZ_64K)
++#define SIZE_CCBUF	(5 * SZ_1K)
++
++/* DOS registers */
++#define ASSIST_MBOX1_CLR_REG 0x01d4
++#define ASSIST_MBOX1_MASK    0x01d8
++
++#define PSCALE_CTRL 0x2444
++
++#define MDEC_PIC_DC_CTRL   0x2638
++#define MDEC_PIC_DC_THRESH 0x26e0
++
++#define AV_SCRATCH_0		0x2700
++#define MREG_SEQ_INFO		0x2710
++#define MREG_PIC_INFO		0x2714
++#define MREG_PIC_WIDTH		0x2718
++#define MREG_PIC_HEIGHT		0x271c
++#define MREG_BUFFERIN		0x2720
++#define MREG_BUFFEROUT		0x2724
++#define MREG_CMD		0x2728
++#define MREG_CO_MV_START	0x272c
++#define MREG_ERROR_COUNT	0x2730
++#define MREG_FRAME_OFFSET	0x2734
++#define MREG_WAIT_BUFFER	0x2738
++#define MREG_FATAL_ERROR	0x273c
++
++#define MPEG1_2_REG	0x3004
++#define PIC_HEAD_INFO	0x300c
++#define POWER_CTL_VLD	0x3020
++#define M4_CONTROL_REG	0x30a4
++
++#define DOS_SW_RESET0 0xfc00
++
++struct codec_mpeg12 {
++	/* Buffer for the MPEG1/2 Workspace */
++	void      *workspace_vaddr;
++	dma_addr_t workspace_paddr;
++
++	/* Housekeeping thread for marking buffers to DONE
++	 * and recycling them into the hardware
++	 */
++	struct task_struct *buffers_thread;
++};
++
++static int codec_mpeg12_buffers_thread(void *data)
++{
++	struct vdec_buffer *tmp;
++	struct vb2_v4l2_buffer *vbuf;
++	unsigned long flags;
++	struct vdec_session *sess = data;
++	struct vdec_core *core = sess->core;;
++
++	while (!kthread_should_stop()) {
++		spin_lock_irqsave(&sess->bufs_spinlock, flags);
++		while (!list_empty(&sess->bufs))
++		{
++			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
++			if (tmp->index == -1)
++				break;
++
++			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
++			if (!vbuf) {
++				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
++				break;
++			}
++
++			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
++			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
++			vbuf->vb2_buf.timestamp = tmp->timestamp;
++			vbuf->sequence = sess->sequence_cap++;
++			if (!(vbuf->sequence % 100))
++				printk("%d\n", vbuf->sequence);
++
++			printk("Buffer %d done\n", tmp->index);
++
++			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++			list_del(&tmp->list);
++			kfree(tmp);
++		}
++		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++
++		mutex_lock(&sess->bufs_recycle_lock);
++		while (!list_empty(&sess->bufs_recycle) &&
++		       !readl_relaxed(core->dos_base + MREG_BUFFERIN))
++		{
++			tmp = list_first_entry(&sess->bufs_recycle, struct vdec_buffer, list);
++
++			/* Tell the decoder he can recycle this buffer */
++			writel_relaxed(tmp->index + 1, core->dos_base + MREG_BUFFERIN);
++
++			printk("Buffer %d recycled\n", tmp->index);
++
++			list_del(&tmp->list);
++			kfree(tmp);
++
++			up(&sess->queue_sema);
++		}
++		mutex_unlock(&sess->bufs_recycle_lock);
++
++		usleep_range(5000, 10000);
++	}
++
++	return 0;
++}
++
++static int codec_mpeg12_start(struct vdec_session *sess) {
++	struct vdec_core *core = sess->core;
++	struct codec_mpeg12 *mpeg12 = sess->priv;
++	int ret;
++
++	printk("codec_mpeg12_start\n");
++
++	mpeg12 = kzalloc(sizeof(*mpeg12), GFP_KERNEL);
++	if (!mpeg12)
++		return -ENOMEM;
++
++	sess->priv = mpeg12;
++
++	/* Allocate some memory for the MPEG1/2 decoder's state */
++	mpeg12->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &mpeg12->workspace_paddr, GFP_KERNEL);
++	if (!mpeg12->workspace_vaddr) {
++		printk("Failed to request H.264 Workspace\n");
++		ret = -ENOMEM;
++		goto free_mpeg12;
++	}
++	printk("Allocated Workspace: %08X - %08X\n", mpeg12->workspace_paddr, mpeg12->workspace_paddr + SIZE_WORKSPACE);
++
++	writel_relaxed((1<<9) | (1<<8) | (1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++
++	writel_relaxed((1 << 4), core->dos_base + POWER_CTL_VLD);
++
++	codec_helper_set_canvases(sess, core->dos_base + AV_SCRATCH_0);
++	writel_relaxed(mpeg12->workspace_paddr + SIZE_CCBUF, core->dos_base + MREG_CO_MV_START);
++
++	writel_relaxed(0, core->dos_base + MPEG1_2_REG);
++	writel_relaxed(0, core->dos_base + PSCALE_CTRL);
++	writel_relaxed(0x380, core->dos_base + PIC_HEAD_INFO);
++	writel_relaxed(0, core->dos_base + M4_CONTROL_REG);
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++	writel_relaxed(0, core->dos_base + MREG_BUFFERIN);
++	writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
++	writel_relaxed((sess->width << 16) | sess->height, core->dos_base + MREG_CMD);
++	writel_relaxed(0, core->dos_base + MREG_ERROR_COUNT);
++	writel_relaxed(0, core->dos_base + MREG_FATAL_ERROR);
++	writel_relaxed(0, core->dos_base + MREG_WAIT_BUFFER);
++
++	/* Enable NV21 */
++	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
++
++	mpeg12->buffers_thread = kthread_run(codec_mpeg12_buffers_thread, sess, "buffers_done");
++
++	return 0;
++
++free_mpeg12:
++	kfree(mpeg12);
++	return ret;
++}
++
++static int codec_mpeg12_stop(struct vdec_session *sess)
++{
++	struct codec_mpeg12 *mpeg12 = sess->priv;
++	struct vdec_core *core = sess->core;
++
++	printk("codec_mpeg12_stop\n");
++
++	kthread_stop(mpeg12->buffers_thread);
++
++	if (mpeg12->workspace_vaddr) {
++		dma_free_coherent(core->dev, SIZE_WORKSPACE, mpeg12->workspace_vaddr, mpeg12->workspace_paddr);
++		mpeg12->workspace_vaddr = 0;
++	}
++
++	kfree(mpeg12);
++	sess->priv = 0;
++
++	return 0;
++}
++
++/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
++static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
++	struct vdec_buffer *tmp;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (tmp->index == -1) {
++			tmp->index = buffer_index;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
++
++static irqreturn_t codec_mpeg12_isr(struct vdec_session *sess)
++{
++	u32 reg;
++	u32 buffer_index;
++	struct vdec_core *core = sess->core;
++
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++
++	reg = readl_relaxed(core->dos_base + MREG_FATAL_ERROR);
++	if (reg == 1)
++		printk("MPEG12 fatal error\n");
++
++	reg = readl_relaxed(core->dos_base + MREG_BUFFEROUT);
++	//printk("codec_mpeg12_isr ; reg = %08X\n", reg);
++	if (!reg)
++		return IRQ_HANDLED;
++
++	if ((reg >> 16) & 0xfe)
++		goto end;
++
++	buffer_index = ((reg & 0xf) - 1) & 7;
++	fill_buffer_index(sess, buffer_index);
++
++end:
++	writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
++	return IRQ_HANDLED;
++}
++
++struct vdec_codec_ops codec_mpeg12_ops = {
++	.start = codec_mpeg12_start,
++	.stop = codec_mpeg12_stop,
++	.isr = codec_mpeg12_isr,
++};
++
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.h b/drivers/media/platform/meson/vdec/codec_mpeg12.h
+new file mode 100644
+index 0000000..e61d3dd
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.h
+@@ -0,0 +1,8 @@
++#ifndef __MESON_VDEC_CODEC_MPEG12_H_
++#define __MESON_VDEC_CODEC_MPEG12_H_
++
++#include "vdec.h"
++
++extern struct vdec_codec_ops codec_mpeg12_ops;
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 1cba1f3..d5dd933 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -141,7 +141,7 @@ int esparser_queue(void *data) {
+ 	int ret;
+ 
+ 	for (;;) {
+-		ret = wait_event_interruptible(sess->input_buf_wq, sess->input_bufs_ready  == 1  || kthread_should_stop());
++		ret = wait_event_interruptible(sess->input_buf_wq, sess->input_bufs_ready == 1 || kthread_should_stop());
+ 		if (kthread_should_stop())
+ 			break;
+ 
+diff --git a/drivers/media/platform/meson/vdec/h264.c b/drivers/media/platform/meson/vdec/h264.c
+deleted file mode 100644
+index 8b5d06c..0000000
+--- a/drivers/media/platform/meson/vdec/h264.c
++++ /dev/null
+@@ -1,458 +0,0 @@
+-#include <media/v4l2-mem2mem.h>
+-#include <media/videobuf2-dma-contig.h>
+-
+-#include "h264.h"
+-#include "canvas.h"
+-
+-#define SIZE_EXT_FW    (SZ_1K * 20)
+-#define SIZE_POST_CNV  ((3860 * 2160 * 3) / 2)
+-#define SIZE_WORKSPACE 0x1ee000
+-
+-/* Offset added by the firmware which must be substracted
+- * from the workspace paddr
+- */
+-#define DEF_BUF_START_ADDR 0x1000000
+-
+-
+-/* DOS registers */
+-#define ASSIST_MBOX1_CLR_REG 0x01d4
+-#define ASSIST_MBOX1_MASK    0x01d8
+-
+-#define LMEM_DMA_CTRL 0x0d40
+-
+-#define PSCALE_CTRL 0x2444
+-
+-#define MDEC_PIC_DC_CTRL   0x2638
+-#define ANC0_CANVAS_ADDR   0x2640
+-#define MDEC_PIC_DC_THRESH 0x26e0
+-
+-#define AV_SCRATCH_0  0x2700
+-#define AV_SCRATCH_1  0x2704
+-#define AV_SCRATCH_2  0x2708
+-#define AV_SCRATCH_3  0x270c
+-#define AV_SCRATCH_4  0x2710
+-#define AV_SCRATCH_5  0x2714
+-#define AV_SCRATCH_6  0x2718
+-#define AV_SCRATCH_7  0x271c
+-#define AV_SCRATCH_8  0x2720
+-#define AV_SCRATCH_9  0x2724
+-#define AV_SCRATCH_D  0x2734
+-#define AV_SCRATCH_F  0x273c
+-#define AV_SCRATCH_G  0x2740
+-#define AV_SCRATCH_H  0x2744
+-
+-#define POWER_CTL_VLD 0x3020
+-
+-#define DCAC_DMA_CTRL 0x3848
+-
+-#define DOS_SW_RESET0 0xfc00
+-
+-struct vdec_h264 {
+-	/* H.264 decoder requires an extended firmware loaded in contiguous RAM */
+-	void      *ext_fw_vaddr;
+-	dma_addr_t ext_fw_paddr;
+-
+-	/* The decoder requires a "post canvas", don't really know what it's for */
+-	void      *post_canvas_vaddr;
+-	dma_addr_t post_canvas_paddr;
+-
+-	/* Buffer for the H.264 Workspace */
+-	void      *workspace_vaddr;
+-	dma_addr_t workspace_paddr;
+-	
+-	/* Buffer for the H.264 references MV */
+-	void      *ref_vaddr;
+-	dma_addr_t ref_paddr;
+-	u32	   ref_size;
+-
+-	/* Housekeeping thread for marking buffers to DONE
+-	 * and recycling them into the hardware
+-	 */
+-	struct task_struct *buffers_thread;
+-};
+-
+-static int vdec_h264_buffers_thread(void *data)
+-{
+-	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned long flags;
+-	struct vdec_session *sess = data;
+-	struct vdec_core *core = sess->core;;
+-
+-	while (!kthread_should_stop()) {
+-		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-		while (!list_empty(&sess->bufs))
+-		{
+-			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
+-			if (tmp->index == -1)
+-				break;
+-
+-			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
+-			if (!vbuf) {
+-				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
+-				break;
+-			}
+-
+-			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
+-			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
+-			vbuf->vb2_buf.timestamp = tmp->timestamp;
+-			vbuf->sequence = sess->sequence_cap++;
+-			if (!(vbuf->sequence % 100))
+-				printk("%d\n", vbuf->sequence);
+-				
+-			printk("Buffer %d done\n", tmp->index);
+-
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-			list_del(&tmp->list);
+-			kfree(tmp);
+-		}
+-		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-
+-		mutex_lock(&sess->bufs_recycle_lock);
+-		while (!list_empty(&sess->bufs_recycle) &&
+-		      (!readl_relaxed(core->dos_base + AV_SCRATCH_7) ||
+-		       !readl_relaxed(core->dos_base + AV_SCRATCH_8)))
+-		{
+-			tmp = list_first_entry(&sess->bufs_recycle, struct vdec_buffer, list);
+-
+-			/* Tell the decoder he can recycle this buffer.
+-			 * AV_SCRATCH_8 serves the same purpose.
+-			 */
+-			if (!readl_relaxed(core->dos_base + AV_SCRATCH_7))
+-				writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_7);
+-			else
+-				writel_relaxed(tmp->index + 1, core->dos_base + AV_SCRATCH_8);
+-				
+-			printk("Buffer %d recycled\n", tmp->index);
+-
+-			list_del(&tmp->list);
+-			kfree(tmp);
+-
+-			up(&sess->queue_sema);
+-		}
+-		mutex_unlock(&sess->bufs_recycle_lock);
+-
+-		usleep_range(5000, 10000);
+-	}
+-
+-	return 0;
+-}
+-
+-static int vdec_h264_start(struct vdec_session *sess) {
+-	struct vdec_core *core = sess->core;
+-	struct vdec_h264 *h264 = sess->priv;
+-	int ret;
+-	
+-	printk("vdec_h264_start\n");
+-	
+-	/* Allocate a "post canvas", purpose unknown */
+-	h264->post_canvas_vaddr = dma_alloc_coherent(core->dev, SIZE_POST_CNV, &h264->post_canvas_paddr, GFP_KERNEL);
+-	if (!h264->post_canvas_paddr) {
+-		printk("Failed to request post canvas\n");
+-		return -ENOMEM;
+-	}
+-	printk("Allocated post canvas: %08X - %08X\n", h264->post_canvas_paddr, h264->post_canvas_paddr + SIZE_POST_CNV);
+-	
+-	/* Allocate some memory for the H.264 decoder's state */
+-	h264->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &h264->workspace_paddr, GFP_KERNEL);
+-	if (!h264->workspace_vaddr) {
+-		printk("Failed to request H.264 Workspace\n");
+-		ret = -ENOMEM;
+-		goto free_post;
+-	}
+-	printk("Allocated Workspace: %08X - %08X\n", h264->workspace_paddr, h264->workspace_paddr + SIZE_WORKSPACE);
+-
+-	while (readl_relaxed(core->dos_base + DCAC_DMA_CTRL) & 0x8000) { }
+-	while (readl_relaxed(core->dos_base + LMEM_DMA_CTRL) & 0x8000) { }
+-
+-	/* Taken from old AMLogic code. No idea. */
+-	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
+-	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+-	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+-
+-	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
+-	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+-	writel_relaxed((1<<9) | (1<<8), core->dos_base + DOS_SW_RESET0);
+-	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+-	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+-
+-	writel_relaxed(readl_relaxed(core->dos_base + POWER_CTL_VLD) | (1 << 9) | (1 << 6), core->dos_base + POWER_CTL_VLD);
+-
+-	writel_relaxed(0, core->dos_base + PSCALE_CTRL);
+-
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-	writel_relaxed(h264->workspace_paddr - DEF_BUF_START_ADDR, core->dos_base + AV_SCRATCH_1);
+-	writel_relaxed(h264->ext_fw_paddr, core->dos_base + AV_SCRATCH_G);
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_9);
+-
+-	/* Enable "error correction", don't know what it means */
+-	writel_relaxed((readl_relaxed(core->dos_base + AV_SCRATCH_F) & 0xffffffc3) | (1 << 4), core->dos_base + AV_SCRATCH_F);
+-
+-	/* Enable IRQ */
+-	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
+-	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_MASK);
+-
+-	/* Enable NV21 */
+-	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
+-
+-	/* ?? */
+-	writel_relaxed(0x404038aa, core->dos_base + MDEC_PIC_DC_THRESH);
+-	
+-	writel_relaxed((1<<12)|(1<<11), core->dos_base + DOS_SW_RESET0);
+-	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+-
+-	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+-	
+-	h264->buffers_thread = kthread_run(vdec_h264_buffers_thread, sess, "buffers_done");
+-	
+-	return 0;
+-	
+-free_post:
+-	dma_free_coherent(core->dev, SIZE_EXT_FW, h264->post_canvas_vaddr, h264->post_canvas_paddr);
+-	h264->post_canvas_paddr = 0;
+-	
+-	return ret;
+-}
+-
+-static int vdec_h264_stop(struct vdec_session *sess)
+-{
+-	struct vdec_h264 *h264 = sess->priv;
+-	struct vdec_core *core = sess->core;
+-
+-	printk("vdec_h264_stop\n");
+-
+-	kthread_stop(h264->buffers_thread);
+-
+-	if (h264->ext_fw_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_EXT_FW, h264->ext_fw_vaddr, h264->ext_fw_paddr);
+-		h264->ext_fw_vaddr = 0;
+-	}
+-	
+-	if (h264->post_canvas_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_POST_CNV, h264->post_canvas_vaddr, h264->post_canvas_paddr);
+-		h264->post_canvas_vaddr = 0;
+-	}
+-	
+-	if (h264->workspace_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_WORKSPACE, h264->workspace_vaddr, h264->workspace_paddr);
+-		h264->workspace_vaddr = 0;
+-	}
+-	
+-	if (h264->ref_vaddr) {
+-		dma_free_coherent(core->dev, h264->ref_size, h264->ref_vaddr, h264->ref_paddr);
+-		h264->ref_vaddr = 0;
+-	}
+-	
+-	kfree(h264);
+-	sess->priv = 0;
+-	
+-	return 0;
+-}
+-
+-static int vdec_h264_load_extended_firmware(struct vdec_session *sess, const u8 *data, u32 len)
+-{
+-	struct vdec_h264 *h264;
+-	struct vdec_core *core = sess->core;
+-
+-	printk("vdec_h264_load_extended_firmware\n");
+-	
+-	h264 = kzalloc(sizeof(*h264), GFP_KERNEL);
+-	if (!h264)
+-		return -ENOMEM;
+-		
+-	sess->priv = h264;
+-
+-	if (len != SIZE_EXT_FW)
+-		return -EINVAL;
+-	
+-	h264->ext_fw_vaddr = dma_alloc_coherent(core->dev, SIZE_EXT_FW, &h264->ext_fw_paddr, GFP_KERNEL);
+-	if (!h264->ext_fw_vaddr) {
+-		dev_err(core->dev, "Couldn't allocate memory for H.264 extended firmware\n");
+-		return -ENOMEM;
+-	}
+-
+-	memcpy(h264->ext_fw_vaddr, data, SIZE_EXT_FW);
+-
+-	return 0;
+-}
+-
+-/* Configure the H.264 decoder when the esparser finished parsing
+- * the first buffer.
+- */
+-static void vdec_h264_set_param(struct vdec_session *sess) {
+-	u32 max_reference_size;
+-	u32 parsed_info, mb_width, mb_height, mb_total;
+-	u32 mb_mv_byte;
+-	u32 actual_dpb_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
+-	u32 max_dpb_size = 4;
+-	struct v4l2_m2m_buffer *buf;
+-	struct vdec_core *core = sess->core;
+-	struct vdec_h264 *h264 = sess->priv;
+-
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
+-	writel_relaxed(0, core->dos_base + AV_SCRATCH_9);
+-
+-	parsed_info = readl_relaxed(core->dos_base + AV_SCRATCH_1);
+-
+-	/* Total number of 16x16 macroblocks */
+-	mb_total = (parsed_info >> 8) & 0xffff;
+-
+-	/* Size of Motion Vector per macroblock ? */
+-	mb_mv_byte = (parsed_info & 0x80000000) ? 24 : 96;
+-
+-	/* Number of macroblocks per line */
+-	mb_width = parsed_info & 0xff;
+-
+-	/* Number of macroblock lines */
+-	mb_height = mb_total / mb_width;
+-
+-	max_reference_size = (parsed_info >> 24) & 0x7f;
+-
+-	/* Align to a multiple of 4 macroblocks */
+-	mb_width = (mb_width + 3) & 0xfffffffc;
+-	mb_height = (mb_height + 3) & 0xfffffffc;
+-	mb_total = mb_width * mb_height;
+-
+-	/* Setup NV12 canvases for Decoded Picture Buffer (dpb)
+-	 * Map them to the user buffers' planes
+-	 */
+-	printk("Configuring %d canvases..\n", actual_dpb_size*2);
+-	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
+-		u32 buf_idx    = buf->vb.vb2_buf.index;
+-		u32 cnv_y_idx  = 128 + buf_idx * 2;
+-		u32 cnv_uv_idx = 128 + buf_idx * 2 + 1;
+-		dma_addr_t buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+-		dma_addr_t buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+-
+-		/* Y plane */
+-		vdec_canvas_setup(core->dmc_base, cnv_y_idx, buf_y_paddr, mb_width * 16, mb_height * 16, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-
+-		/* U/V plane */
+-		vdec_canvas_setup(core->dmc_base, cnv_uv_idx, buf_uv_paddr, mb_width * 16, mb_height * 8, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-
+-		writel_relaxed(((cnv_uv_idx) << 16) |
+-			       ((cnv_uv_idx) << 8)  |
+-				(cnv_y_idx), core->dos_base + ANC0_CANVAS_ADDR + buf_idx*4);
+-	}
+-
+-	if (max_reference_size >= max_dpb_size)
+-		max_dpb_size = max_reference_size;
+-
+-	max_reference_size++;
+-
+-	/* I don't really know the purpose of this post canvas.
+-	 * It seems required with the write to AV_SCRATCH_3 though..
+-	 */
+-	printk("Configuring post canvas to %08X\n", h264->post_canvas_paddr);
+-	/* Setup post canvas for Y */
+-	vdec_canvas_setup(core->dmc_base, 0x00, h264->post_canvas_paddr, mb_width << 4, mb_height << 4, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-	/* Setup post canvas for U/V */
+-	vdec_canvas_setup(core->dmc_base, 0x1, h264->post_canvas_paddr + (mb_total << 8), mb_width << 4, mb_height << 3, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-
+-	printk("mb_total = %d; mb_mv_byte = %d; actual_dpb_size = %d; max_dpb_size = %d\n max_reference_size = %d; mb_width = %d; mb_height = %d\n", mb_total, mb_mv_byte, actual_dpb_size, max_dpb_size, max_reference_size, mb_width, mb_height);
+-
+-	printk("Setting POST CANVAS to %08X\n", (0x1 << 16) | (0x1 << 8) | 0x0);
+-	writel_relaxed((0x1 << 16) | (0x1 << 8) | 0x0, core->dos_base + AV_SCRATCH_3);
+-
+-	h264->ref_size = mb_total * mb_mv_byte * max_reference_size;
+-	h264->ref_vaddr = dma_alloc_coherent(core->dev, h264->ref_size, &h264->ref_paddr, GFP_ATOMIC);
+-
+-	/* Address to store the references' MVs ? */
+-	writel_relaxed(h264->ref_paddr, core->dos_base + AV_SCRATCH_1);
+-	printk("Max references buffer size: %d\n", mb_total * mb_mv_byte * max_reference_size);
+-
+-	/* End of ref MV */
+-	writel_relaxed(h264->ref_paddr + h264->ref_size, core->dos_base + AV_SCRATCH_4);
+-
+-	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (max_dpb_size << 8), core->dos_base + AV_SCRATCH_0);
+-}
+-
+-/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+-static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->index == -1) {
+-			tmp->index = buffer_index;
+-			break;
+-		}
+-	}
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+-static irqreturn_t vdec_h264_isr(struct vdec_session *sess)
+-{
+-	unsigned int cpu_cmd;
+-	unsigned int buffer_index;
+-	int i;
+-	u32 slice_type;
+-	struct vdec_core *core = sess->core;
+-
+-	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
+-	cpu_cmd = readl_relaxed(core->dos_base + AV_SCRATCH_0);
+-
+-	//printk("vdec_isr ; cpu_cmd = %08X!\n", cpu_cmd);
+-
+-	if ((cpu_cmd & 0xff) == 1) {
+-		vdec_h264_set_param(sess);
+-	} else if ((cpu_cmd & 0xff) == 2) {
+-		int error_count, error, num_frame, status, eos = 0;
+-		error_count = readl_relaxed(core->dos_base + AV_SCRATCH_D);
+-		num_frame = (cpu_cmd >> 8) & 0xff;
+-		if (error_count)
+-			printk("decoder error(s) happened, count %d\n", error_count);
+-
+-		//printk("Decoded %d frames\n", num_frame);
+-
+-		for (i = 0 ; (i < num_frame) && (!eos) ; i++) {
+-			slice_type = (readl_relaxed(core->dos_base + AV_SCRATCH_H) >> (i * 4)) & 0xf;
+-			status = readl_relaxed(core->dos_base + AV_SCRATCH_1 + i*4);
+-			buffer_index = status & 0x1f;
+-			error = status & 0x200;
+-
+-			/* A buffer decode error means it was decoded,
+-			 * but part of the picture will have artifacts.
+-			 * Typical reason is a temporarily corrupted bitstream
+-			 */
+-			if (error) {
+-				printk("Buffer %d decode error: %08X\n", buffer_index, error);
+-			} else {
+-				//printk("Buffer %d decoded & ready!\n", buffer_index);
+-			}
+-
+-			eos = (status >> 15) & 1;
+-		
+-			if (eos) {
+-				printk("Reached EOS!\n");
+-			}
+-
+-			/* Fatal error ? */
+-			if (buffer_index >= 24) {
+-				printk("buffer_index >= 24 !! (%u)\n", buffer_index);
+-				continue;
+-			}
+-
+-			fill_buffer_index(sess, buffer_index);
+-		}
+-
+-		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-	} else {
+-		printk("Unexpected cpu_cmd: %08X\n", cpu_cmd);
+-		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-	}
+-
+-	return IRQ_HANDLED;
+-}
+-
+-struct vdec_codec_ops codec_h264_ops = {
+-	.start = vdec_h264_start,
+-	.stop = vdec_h264_stop,
+-	.load_extended_firmware = vdec_h264_load_extended_firmware,
+-	.isr = vdec_h264_isr,
+-};
+-
+diff --git a/drivers/media/platform/meson/vdec/h264.h b/drivers/media/platform/meson/vdec/h264.h
+deleted file mode 100644
+index ff3e023..0000000
+--- a/drivers/media/platform/meson/vdec/h264.h
++++ /dev/null
+@@ -1,8 +0,0 @@
+-#ifndef __MESON_VDEC_H264_H_
+-#define __MESON_VDEC_H264_H_
+-
+-#include "vdec.h"
+-
+-extern struct vdec_codec_ops codec_h264_ops;
+-
+-#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/hevc.c b/drivers/media/platform/meson/vdec/hevc.c
+deleted file mode 100644
+index 7f27cae..0000000
+--- a/drivers/media/platform/meson/vdec/hevc.c
++++ /dev/null
+@@ -1,363 +0,0 @@
+-#include <media/v4l2-mem2mem.h>
+-#include <media/videobuf2-dma-contig.h>
+-
+-#include "hevc.h"
+-#include "canvas.h"
+-#include "hevc_regs.h"
+-
+-/* DOS registers */
+-#define ASSIST_MBOX1_CLR_REG 0x01d4
+-#define ASSIST_MBOX1_MASK    0x01d8
+-
+-#define DOS_SW_RESET3        0xfcd0
+-
+-/* HEVC reg mapping */
+-#define HEVC_DEC_STATUS_REG       HEVC_ASSIST_SCRATCH_0
+-#define HEVC_RPM_BUFFER           HEVC_ASSIST_SCRATCH_1
+-#define HEVC_SHORT_TERM_RPS       HEVC_ASSIST_SCRATCH_2
+-#define HEVC_VPS_BUFFER           HEVC_ASSIST_SCRATCH_3
+-#define HEVC_SPS_BUFFER           HEVC_ASSIST_SCRATCH_4
+-#define HEVC_PPS_BUFFER           HEVC_ASSIST_SCRATCH_5
+-#define HEVC_SAO_UP               HEVC_ASSIST_SCRATCH_6
+-#define HEVC_STREAM_SWAP_BUFFER   HEVC_ASSIST_SCRATCH_7
+-#define HEVC_STREAM_SWAP_BUFFER2  HEVC_ASSIST_SCRATCH_8
+-#define HEVC_sao_mem_unit         HEVC_ASSIST_SCRATCH_9
+-#define HEVC_SAO_ABV              HEVC_ASSIST_SCRATCH_A
+-#define HEVC_sao_vb_size          HEVC_ASSIST_SCRATCH_B
+-#define HEVC_SAO_VB               HEVC_ASSIST_SCRATCH_C
+-#define HEVC_SCALELUT             HEVC_ASSIST_SCRATCH_D
+-#define HEVC_WAIT_FLAG            HEVC_ASSIST_SCRATCH_E
+-#define RPM_CMD_REG               HEVC_ASSIST_SCRATCH_F
+-#define LMEM_DUMP_ADR             HEVC_ASSIST_SCRATCH_F
+-#define NAL_SEARCH_CTL            HEVC_ASSIST_SCRATCH_I
+-#define HEVC_DECODE_MODE	  HEVC_ASSIST_SCRATCH_J
+-	#define DECODE_MODE_SINGLE 0
+-#define DECODE_STOP_POS		  HEVC_ASSIST_SCRATCH_K
+-#define HEVC_AUX_ADR		  HEVC_ASSIST_SCRATCH_L
+-#define HEVC_AUX_DATA_SIZE	  HEVC_ASSIST_SCRATCH_M
+-#define HEVC_DECODE_SIZE	  HEVC_ASSIST_SCRATCH_N
+-
+-#define HEVCD_MPP_ANC2AXI_TBL_DATA (0x3464 * 4)
+-
+-/* HEVC Infos */
+-#define MAX_REF_PIC_NUM 24
+-
+-#define IPP_OFFSET       0x00
+-#define SAO_ABV_OFFSET   (IPP_OFFSET + 0x4000)
+-#define SAO_VB_OFFSET    (SAO_ABV_OFFSET + 0x30000)
+-#define SH_TM_RPS_OFFSET (SAO_VB_OFFSET + 0x30000)
+-#define VPS_OFFSET       (SH_TM_RPS_OFFSET + 0x800)
+-#define SPS_OFFSET       (VPS_OFFSET + 0x800)
+-#define PPS_OFFSET       (SPS_OFFSET + 0x800)
+-#define SAO_UP_OFFSET    (PPS_OFFSET + 0x2000)
+-#define SWAP_BUF_OFFSET  (SAO_UP_OFFSET + 0x800)
+-#define SWAP_BUF2_OFFSET (SWAP_BUF_OFFSET + 0x800)
+-#define SCALELUT_OFFSET  (SWAP_BUF2_OFFSET + 0x800)
+-#define DBLK_PARA_OFFSET (SCALELUT_OFFSET + 0x8000)
+-#define DBLK_DATA_OFFSET (DBLK_PARA_OFFSET + 0x20000)
+-#define MMU_VBH_OFFSET   (DBLK_DATA_OFFSET + 0x40000)
+-#define MPRED_ABV_OFFSET (MMU_VBH_OFFSET + 0x5000)
+-#define MPRED_MV_OFFSET  (MPRED_ABV_OFFSET + 0x8000)
+-#define RPM_OFFSET       (MPRED_MV_OFFSET + 0x120000 * MAX_REF_PIC_NUM)
+-#define LMEM_OFFSET      (RPM_OFFSET + 0x100)
+-
+-#define SIZE_WORKSPACE ALIGN(LMEM_OFFSET + 0xA00, 64 * SZ_1K)
+-
+-#define PARSER_CMD_SKIP_CFG_0 0x0000090b
+-#define PARSER_CMD_SKIP_CFG_1 0x1b14140f
+-#define PARSER_CMD_SKIP_CFG_2 0x001b1910
+-
+-static const u16 parser_cmd[] = {
+-	0x0401,
+-	0x8401,
+-	0x0800,
+-	0x0402,
+-	0x9002,
+-	0x1423,
+-	0x8CC3,
+-	0x1423,
+-	0x8804,
+-	0x9825,
+-	0x0800,
+-	0x04FE,
+-	0x8406,
+-	0x8411,
+-	0x1800,
+-	0x8408,
+-	0x8409,
+-	0x8C2A,
+-	0x9C2B,
+-	0x1C00,
+-	0x840F,
+-	0x8407,
+-	0x8000,
+-	0x8408,
+-	0x2000,
+-	0xA800,
+-	0x8410,
+-	0x04DE,
+-	0x840C,
+-	0x840D,
+-	0xAC00,
+-	0xA000,
+-	0x08C0,
+-	0x08E0,
+-	0xA40E,
+-	0xFC00,
+-	0x7C00
+-};
+-
+-struct codec_hevc {
+-	/* Buffer for the HEVC Workspace */
+-	void      *workspace_vaddr;
+-	dma_addr_t workspace_paddr;
+-
+-	/* Housekeeping thread for marking buffers to DONE
+-	 * and recycling them into the hardware
+-	 */
+-	struct task_struct *buffers_thread;
+-};
+-
+-static int codec_hevc_buffers_thread(void *data)
+-{
+-	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned long flags;
+-	struct vdec_session *sess = data;
+-
+-	while (!kthread_should_stop()) {
+-
+-		/* The DONE part should probably be in a common thread */
+-		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-		while (!list_empty(&sess->bufs))
+-		{
+-			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
+-			if (tmp->index == -1)
+-				break;
+-
+-			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
+-			if (!vbuf) {
+-				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
+-				break;
+-			}
+-
+-			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
+-			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
+-			vbuf->vb2_buf.timestamp = tmp->timestamp;
+-			vbuf->sequence = sess->sequence_cap++;
+-			if (!(vbuf->sequence % 100))
+-				printk("%d\n", vbuf->sequence);
+-
+-			printk("Buffer %d done\n", tmp->index);
+-
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-
+-			list_del(&tmp->list);
+-
+-			kfree(tmp);
+-		}
+-		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-
+-		usleep_range(5000, 10000);
+-	}
+-
+-	return 0;
+-}
+-
+-static void codec_hevc_setup_buffers(struct vdec_session *sess) {
+-	int i;
+-	dma_addr_t buf_y_paddr = 0;
+-	dma_addr_t buf_uv_paddr;
+-	struct v4l2_m2m_buffer *buf;
+-	struct vdec_core *core = sess->core;
+-	u32 buf_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
+-
+-	/* >= GXL */
+-	writel_relaxed((1 << 2) | (1 << 1), core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+-
+-	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
+-		buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+-		buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+-
+-		writel_relaxed(buf_y_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+-		/* Double write mode ?? */
+-		writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+-	}
+-
+-	/* Fill the remaining unused slots with the last buffer's Y addr ? */
+-	for (i = buf_size; i < MAX_REF_PIC_NUM; ++i) {
+-		writel_relaxed(buf_y_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+-	}
+-
+-	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+-	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
+-	for (i = 0; i < 32; ++i)
+-		writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+-}
+-
+-static int codec_hevc_setup_workspace(struct vdec_session *sess) {
+-	struct vdec_core *core = sess->core;
+-	struct codec_hevc *hevc = sess->priv;
+-
+-	/* Allocate some memory for the HEVC decoder's state */
+-	hevc->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &hevc->workspace_paddr, GFP_KERNEL);
+-	if (!hevc->workspace_vaddr) {
+-		printk("Failed to request HEVC Workspace\n");
+-		return -ENOMEM;
+-	}
+-	printk("Allocated Workspace: %08X - %08X\n", hevc->workspace_paddr, hevc->workspace_paddr + SIZE_WORKSPACE);
+-
+-	/* Setup Workspace */
+-	writel_relaxed(hevc->workspace_paddr + IPP_OFFSET, core->dos_base + HEVCD_IPP_LINEBUFF_BASE);
+-	writel_relaxed(hevc->workspace_paddr + SH_TM_RPS_OFFSET, core->dos_base + HEVC_SHORT_TERM_RPS);
+-	writel_relaxed(hevc->workspace_paddr + VPS_OFFSET, core->dos_base + HEVC_VPS_BUFFER);
+-	writel_relaxed(hevc->workspace_paddr + SPS_OFFSET, core->dos_base + HEVC_SPS_BUFFER);
+-	writel_relaxed(hevc->workspace_paddr + PPS_OFFSET, core->dos_base + HEVC_PPS_BUFFER);
+-	writel_relaxed(hevc->workspace_paddr + SAO_UP_OFFSET, core->dos_base + HEVC_SAO_UP);
+-	writel_relaxed(hevc->workspace_paddr + SWAP_BUF_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER);
+-	writel_relaxed(hevc->workspace_paddr + SWAP_BUF2_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER2);
+-	writel_relaxed(hevc->workspace_paddr + SCALELUT_OFFSET, core->dos_base + HEVC_SCALELUT);
+-	writel_relaxed(hevc->workspace_paddr + DBLK_PARA_OFFSET, core->dos_base + HEVC_DBLK_CFG4);
+-	writel_relaxed(hevc->workspace_paddr + DBLK_DATA_OFFSET, core->dos_base + HEVC_DBLK_CFG5);
+-	writel_relaxed(hevc->workspace_paddr + LMEM_OFFSET, core->dos_base + LMEM_DUMP_ADR);
+-
+-	return 0;
+-}
+-
+-static int codec_hevc_start(struct vdec_session *sess) {
+-	struct vdec_core *core = sess->core;
+-	struct codec_hevc *hevc;
+-	int ret;
+-	int i;
+-
+-	printk("Workspace size: %u\n", SIZE_WORKSPACE);
+-
+-	hevc = kzalloc(sizeof(*hevc), GFP_KERNEL);
+-	if (!hevc)
+-		return -ENOMEM;
+-
+-	sess->priv = hevc;
+-
+-	codec_hevc_setup_workspace(sess);
+-
+-	writel_relaxed(0x5a5a55aa, core->dos_base + HEVC_PARSER_VERSION);
+-	writel_relaxed((1 << 14), core->dos_base + DOS_SW_RESET3);
+-	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | 1, core->dos_base + HEVC_STREAM_CONTROL);
+-	writel_relaxed(0x12345678, core->dos_base + HEVC_SHIFT_STARTCODE);
+-	writel_relaxed(0x9abcdef0, core->dos_base + HEVC_SHIFT_EMULATECODE);
+-	writel_relaxed(0x00000100, core->dos_base + HEVC_SHIFT_STARTCODE);
+-	writel_relaxed(0x00000300, core->dos_base + HEVC_SHIFT_EMULATECODE);
+-	writel_relaxed((readl_relaxed(core->dos_base + HEVC_PARSER_INT_CONTROL) & 0x03ffffff) |
+-			(3 << 29) | (2 << 26) | (1 << 24) | (1 << 22) | (1 << 7) | (1 << 4) | 1, core->dos_base + HEVC_PARSER_INT_CONTROL);
+-	writel_relaxed(readl_relaxed(core->dos_base + HEVC_SHIFT_STATUS) | (1 << 1) | 1, core->dos_base + HEVC_SHIFT_STATUS);
+-	writel_relaxed((3 << 6) | (2 << 4) | (2 << 1) | 1, core->dos_base + HEVC_SHIFT_CONTROL);
+-	writel_relaxed(1, core->dos_base + HEVC_CABAC_CONTROL);
+-	writel_relaxed(1, core->dos_base + HEVC_PARSER_CORE_CONTROL);
+-	writel_relaxed(0, core->dos_base + HEVC_DEC_STATUS_REG);
+-
+-	writel_relaxed(0, core->dos_base + HEVC_IQIT_SCALELUT_WR_ADDR);
+-	for (i = 0; i < 1024; ++i)
+-		writel_relaxed(0, core->dos_base + HEVC_IQIT_SCALELUT_DATA);
+-
+-	writel_relaxed(0, core->dos_base + HEVC_DECODE_SIZE);
+-	writel_relaxed((1 << 16), core->dos_base + HEVC_PARSER_CMD_WRITE);
+-	for (i = 0; i < ARRAY_SIZE(parser_cmd); ++i)
+-		writel_relaxed(parser_cmd[i], core->dos_base + HEVC_PARSER_CMD_WRITE);
+-
+-	writel_relaxed(PARSER_CMD_SKIP_CFG_0, core->dos_base + HEVC_PARSER_CMD_SKIP_0);
+-	writel_relaxed(PARSER_CMD_SKIP_CFG_1, core->dos_base + HEVC_PARSER_CMD_SKIP_1);
+-	writel_relaxed(PARSER_CMD_SKIP_CFG_2, core->dos_base + HEVC_PARSER_CMD_SKIP_2);
+-	writel_relaxed((1 << 5) | (1 << 2) | 1, core->dos_base + HEVC_PARSER_IF_CONTROL);
+-
+-	writel_relaxed(1, core->dos_base + HEVCD_IPP_TOP_CNTL);
+-	writel_relaxed((1 << 1), core->dos_base + HEVCD_IPP_TOP_CNTL);
+-
+-	writel_relaxed(1, core->dos_base + HEVC_WAIT_FLAG);
+-
+-	/* clear mailbox interrupt */
+-	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_CLR_REG);
+-	/* enable mailbox interrupt */
+-	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_MASK);
+-	/* disable PSCALE for hardware sharing */
+-	writel_relaxed(0, core->dos_base + HEVC_PSCALE_CTRL);
+-	/* Let the uCode do all the parsing */
+-	writel_relaxed(8, core->dos_base + NAL_SEARCH_CTL);
+-
+-	/*WRITE_VREG(NAL_SEARCH_CTL,
+-	READ_VREG(NAL_SEARCH_CTL)
+-	| ((parser_sei_enable & 0x7) << 17));*/
+-
+-	writel_relaxed(0, core->dos_base + DECODE_STOP_POS);
+-	writel_relaxed(DECODE_MODE_SINGLE, core->dos_base + HEVC_DECODE_MODE);
+-
+-	/*WRITE_VREG(HEVC_AUX_ADR, hevc->aux_phy_addr);
+-	WRITE_VREG(HEVC_AUX_DATA_SIZE,
+-	((hevc->prefix_aux_size >> 4) << 16) |
+-	(hevc->suffix_aux_size >> 4)
+-	);*/
+-
+-	codec_hevc_setup_buffers(sess);
+-	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_IRQ_REG);
+-
+-	writel_relaxed((1<<12)|(1<<11), core->dos_base + DOS_SW_RESET3);
+-	writel_relaxed(0, core->dos_base + DOS_SW_RESET3);
+-	readl_relaxed(core->dos_base + DOS_SW_RESET3);
+-
+-	hevc->buffers_thread = kthread_run(codec_hevc_buffers_thread, sess, "buffers_done");
+-
+-	printk("HEVC start OK!\n");
+-
+-	return 0;
+-}
+-
+-static int codec_hevc_stop(struct vdec_session *sess)
+-{
+-	struct codec_hevc *hevc = sess->priv;
+-	struct vdec_core *core = sess->core;
+-
+-	printk("codec_hevc_stop\n");
+-
+-	kthread_stop(hevc->buffers_thread);
+-
+-	if (hevc->workspace_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_WORKSPACE, hevc->workspace_vaddr, hevc->workspace_paddr);
+-		hevc->workspace_vaddr = 0;
+-	}
+-
+-	kfree(hevc);
+-	sess->priv = 0;
+-
+-	return 0;
+-}
+-
+-/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+-static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->index == -1) {
+-			tmp->index = buffer_index;
+-			break;
+-		}
+-	}
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+-static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
+-{
+-	u32 dec_status;
+-	struct vdec_core *core = sess->core;
+-
+-	dec_status = readl_relaxed(core->dos_base + HEVC_DEC_STATUS_REG);
+-	printk("codec_hevc_isr: %08X\n", dec_status);
+-	return IRQ_HANDLED;
+-}
+-
+-struct vdec_codec_ops codec_hevc_ops = {
+-	.start = codec_hevc_start,
+-	.stop = codec_hevc_stop,
+-	.isr = codec_hevc_isr,
+-};
+-
+diff --git a/drivers/media/platform/meson/vdec/hevc.h b/drivers/media/platform/meson/vdec/hevc.h
+deleted file mode 100644
+index 522818d..0000000
+--- a/drivers/media/platform/meson/vdec/hevc.h
++++ /dev/null
+@@ -1,8 +0,0 @@
+-#ifndef __MESON_VDEC_HEVC_H_
+-#define __MESON_VDEC_HEVC_H_
+-
+-#include "vdec.h"
+-
+-extern struct vdec_codec_ops codec_hevc_ops;
+-
+-#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 5d152a3..c0eec7e 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -15,11 +15,14 @@
+ #include "vdec.h"
+ #include "esparser.h"
+ #include "canvas.h"
+-#include "h264.h"
++
+ #include "vdec_1.h"
+-#include "hevc.h"
+ #include "vdec_hevc.h"
+ 
++#include "codec_mpeg12.h"
++#include "codec_h264.h"
++#include "codec_hevc.h"
++
+ static void vdec_abort(struct vdec_session *sess) {
+ 	printk("Aborting decoding session!\n");
+ 	vb2_queue_error(&sess->m2m_ctx->cap_q_ctx.q);
+@@ -88,20 +91,21 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 		unsigned int sizes[], struct device *alloc_devs[])
+ {
+ 	struct vdec_session *sess = vb2_get_drv_priv(q);
++	struct vdec_format *fmt_out = sess->fmt_out;
++	struct vdec_format *fmt_cap = sess->fmt_cap;
+ 	printk("vdec_queue_setup\n");
+ 	
+ 	switch (q->type) {
+ 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+ 		sizes[0] = vdec_get_output_size(sess);
+ 		//*num_buffers = 2;
+-		*num_planes = 1;
++		*num_planes = fmt_out->num_planes;
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+ 		sizes[0] = vdec_get_output_size(sess);
+ 		sizes[1] = vdec_get_output_size(sess) / 2;
+-		*num_buffers = max(*num_buffers, 12 + 1);
+-		//*num_buffers = 24;
+-		*num_planes = 2;
++		*num_buffers = min(max(*num_buffers, fmt_out->min_buffers), fmt_out->max_buffers);
++		*num_planes = fmt_cap->num_planes;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -259,6 +263,8 @@ static const struct vdec_format vdec_formats[] = {
+ 		.pixfmt = V4L2_PIX_FMT_H264,
+ 		.num_planes = 1,
+ 		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 32,
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_h264_ops,
+ 		.firmware_path = "meson/gxl/gxtvbb_vh264_mc",
+@@ -266,9 +272,29 @@ static const struct vdec_format vdec_formats[] = {
+ 		.pixfmt = V4L2_PIX_FMT_HEVC,
+ 		.num_planes = 1,
+ 		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 32,
+ 		.vdec_ops = &vdec_hevc_ops,
+ 		.codec_ops = &codec_hevc_ops,
+ 		.firmware_path = "meson/gxl/vh265_mc",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_MPEG1,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 8,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mpeg12_ops,
++		.firmware_path = "meson/gxl/vmpeg12_mc",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_MPEG2,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 8,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mpeg12_ops,
++		.firmware_path = "meson/gxl/vmpeg12_mc",
+ 	},
+ };
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 12c3659..0cbb112 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -66,10 +66,14 @@ struct vdec_codec_ops {
+ /* Describes one of the format that can be decoded/encoded */
+ struct vdec_format {
+ 	u32 pixfmt;
+-	unsigned int num_planes;
++	u32 num_planes;
+ 	u32 type;
++	u32 min_buffers;
++	u32 max_buffers;
++
+ 	struct vdec_ops *vdec_ops;
+ 	struct vdec_codec_ops *codec_ops;
++
+ 	char *firmware_path;
+ };
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index 77998f2..4d21138 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -100,14 +100,19 @@ static int vdec_hevc_start(struct vdec_session *sess)
+ 	udelay(10);
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET3);
+ 
++	vdec_hevc_stbuf_init(sess);
++
+ 	ret = vdec_hevc_load_firmware(sess, sess->fmt_out->firmware_path);
+ 	if (ret)
+ 		return ret;
+ 
+ 	codec_ops->start(sess);
+ 
++	writel_relaxed((1<<12)|(1<<11), core->dos_base + DOS_SW_RESET3);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET3);
++	readl_relaxed(core->dos_base + DOS_SW_RESET3);
++
+ 	writel_relaxed(1, core->dos_base + HEVC_MPSR);
+-	vdec_hevc_stbuf_init(sess);
+ 
+ 	/* VDEC_HEVC specific ESPARSER stuff */
+ 	writel_relaxed(3 << 1, core->dos_base + DOS_GEN_CTRL0); // set vififo_vbuf_rp_sel=>vdec_hevc
+diff --git a/vmpeg12_mc b/vmpeg12_mc
+new file mode 100644
+index 0000000000000000000000000000000000000000..65d0cacb662576008589220a5d05d49107d4c748
+GIT binary patch
+literal 16384
+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
+W1O^BU5EvjZKwyBt0D=E62>dtRU~Mn}
+
+literal 0
+HcmV?d00001
+

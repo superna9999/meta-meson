@@ -1,0 +1,22 @@
+From 6d3095b0bd2df492d57eea4e0946b019a4271f6d Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sat, 14 Apr 2018 22:07:24 +0200
+Subject: [PATCH] meson: vdec: fix crash on module remove
+
+---
+ drivers/media/platform/meson/vdec/vdec.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index b21878a72..b31cc81 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -876,7 +876,7 @@ static int vdec_probe(struct platform_device *pdev)
+ 
+ static int vdec_remove(struct platform_device *pdev)
+ {
+-	struct vdec_core *core = dev_get_drvdata(pdev->dev.parent);
++	struct vdec_core *core = platform_get_drvdata(pdev);
+ 
+ 	video_unregister_device(core->vdev_dec);
+ 

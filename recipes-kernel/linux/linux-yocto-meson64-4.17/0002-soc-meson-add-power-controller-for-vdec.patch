@@ -1,0 +1,170 @@
+From c3f67fe4c2114c6636b32bd6e096067030d18ede Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <raptorteak@gmail.com>
+Date: Thu, 15 Mar 2018 13:39:41 +0100
+Subject: [PATCH] soc: meson: add power controller for vdec
+
+---
+ drivers/soc/amlogic/Makefile          |   1 +
+ drivers/soc/amlogic/meson-pwrc-vdec.c | 144 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 145 insertions(+)
+ create mode 100644 drivers/soc/amlogic/meson-pwrc-vdec.c
+
+diff --git a/drivers/soc/amlogic/Makefile b/drivers/soc/amlogic/Makefile
+index 8fa3218..ffb388d 100644
+--- a/drivers/soc/amlogic/Makefile
++++ b/drivers/soc/amlogic/Makefile
+@@ -1,3 +1,4 @@
+ obj-$(CONFIG_MESON_GX_SOCINFO) += meson-gx-socinfo.o
+ obj-$(CONFIG_MESON_GX_PM_DOMAINS) += meson-gx-pwrc-vpu.o
++obj-$(CONFIG_MESON_GX_PM_DOMAINS) += meson-pwrc-vdec.o
+ obj-$(CONFIG_MESON_MX_SOCINFO) += meson-mx-socinfo.o
+diff --git a/drivers/soc/amlogic/meson-pwrc-vdec.c b/drivers/soc/amlogic/meson-pwrc-vdec.c
+new file mode 100644
+index 0000000..fac704c
+--- /dev/null
++++ b/drivers/soc/amlogic/meson-pwrc-vdec.c
+@@ -0,0 +1,144 @@
++/*
++ * Author: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ *
++ * SPDX-License-Identifier: GPL-2.0+
++ */
++
++#include <linux/of_address.h>
++#include <linux/platform_device.h>
++#include <linux/pm_domain.h>
++#include <linux/bitfield.h>
++#include <linux/regmap.h>
++#include <linux/mfd/syscon.h>
++#include <linux/reset.h>
++#include <linux/clk.h>
++#include <linux/clk-provider.h>
++
++/* AO Offsets */
++#define AO_RTI_GEN_PWR_SLEEP0 (0x3a << 2)
++
++#define GEN_PWR_VDEC_1 (BIT(3) | BIT(2))
++
++struct meson_pwrc_vdec {
++	struct generic_pm_domain genpd;
++	struct regmap *regmap_ao;
++	struct clk *dos_parser_clk;
++	struct clk *vpu_intr_clk;
++	struct clk *vdec_1_clk;
++};
++
++static inline
++struct meson_pwrc_vdec *genpd_to_pd(struct generic_pm_domain *d)
++{
++	return container_of(d, struct meson_pwrc_vdec, genpd);
++}
++
++static int meson_pwrc_vdec_power_off(struct generic_pm_domain *genpd)
++{
++	struct meson_pwrc_vdec *pd = genpd_to_pd(genpd);
++
++	regmap_update_bits(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
++			GEN_PWR_VDEC_1, GEN_PWR_VDEC_1);
++	udelay(20);
++
++	clk_disable_unprepare(pd->vpu_intr_clk);
++	clk_disable_unprepare(pd->dos_parser_clk);
++	clk_disable_unprepare(pd->vdec_1_clk);
++
++	return 0;
++}
++
++static int meson_pwrc_vdec_setup_clk(struct meson_pwrc_vdec *pd) {
++	clk_prepare_enable(pd->dos_parser_clk);
++	clk_prepare_enable(pd->vpu_intr_clk);
++	clk_prepare_enable(pd->vdec_1_clk);
++
++	return 0;
++}
++
++static int meson_pwrc_vdec_power_on(struct generic_pm_domain *genpd)
++{
++	struct meson_pwrc_vdec *pd = genpd_to_pd(genpd);
++
++	meson_pwrc_vdec_setup_clk(pd);
++	regmap_update_bits(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0, GEN_PWR_VDEC_1, 0);
++	udelay(10);
++
++	return 0;
++}
++
++static bool meson_pwrc_vdec_get_power(struct meson_pwrc_vdec *pd)
++{
++	u32 reg;
++	
++	regmap_read(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0, &reg);
++
++	return ((reg & GEN_PWR_VDEC_1) == GEN_PWR_VDEC_1);
++}
++
++static struct meson_pwrc_vdec vdec_pd = {
++	.genpd = {
++		.name = "vdec",
++		.power_off = meson_pwrc_vdec_power_off,
++		.power_on = meson_pwrc_vdec_power_on,
++	},
++};
++
++static int meson_pwrc_vdec_probe(struct platform_device *pdev)
++{
++	struct regmap *regmap_ao;
++	bool powered_off;
++	int ret;
++
++	regmap_ao = syscon_node_to_regmap(of_get_parent(pdev->dev.of_node));
++	if (IS_ERR(regmap_ao)) {
++		dev_err(&pdev->dev, "failed to get AO regmap\n");
++		return PTR_ERR(regmap_ao);
++	}
++
++	vdec_pd.vpu_intr_clk = devm_clk_get(&pdev->dev, "vpu_intr");
++	vdec_pd.dos_parser_clk = devm_clk_get(&pdev->dev, "dos_parser");
++	vdec_pd.vdec_1_clk = devm_clk_get(&pdev->dev, "vdec_1");
++	vdec_pd.regmap_ao = regmap_ao;
++
++	powered_off = meson_pwrc_vdec_get_power(&vdec_pd);
++
++	pm_genpd_init(&vdec_pd.genpd, &pm_domain_always_on_gov,
++		      powered_off);
++
++	/* If already powered, sync the clock states */
++	if (!powered_off) {
++		ret = meson_pwrc_vdec_setup_clk(&vdec_pd);
++		if (ret)
++			return ret;
++	} else {
++		meson_pwrc_vdec_power_on(&vdec_pd.genpd);
++	}
++
++	return of_genpd_add_provider_simple(pdev->dev.of_node,
++					    &vdec_pd.genpd);
++}
++
++static void meson_pwrc_vdec_shutdown(struct platform_device *pdev)
++{
++	bool powered_off;
++
++	powered_off = meson_pwrc_vdec_get_power(&vdec_pd);
++	if (!powered_off)
++		meson_pwrc_vdec_power_off(&vdec_pd.genpd);
++}
++
++static const struct of_device_id meson_pwrc_vdec_match_table[] = {
++	{ .compatible = "amlogic,meson-pwrc-vdec" },
++	{ /* sentinel */ }
++};
++
++static struct platform_driver meson_pwrc_vdec_driver = {
++	.probe	= meson_pwrc_vdec_probe,
++	.shutdown = meson_pwrc_vdec_shutdown,
++	.driver = {
++		.name		= "meson_pwrc_vdec",
++		.of_match_table	= meson_pwrc_vdec_match_table,
++	},
++};
++builtin_platform_driver(meson_pwrc_vdec_driver);

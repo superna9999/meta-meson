@@ -1,0 +1,745 @@
+From dd8c834e36bf458105132feb3c5bda08636e4b2f Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Thu, 29 Mar 2018 21:02:32 +0200
+Subject: [PATCH] meson: gxl: add vdec support
+
+This adds the various DTS/clock/firmware pieces to run the vdec
+on GXL (tested on S905X).
+
+Fortunately there were only 2 minor issues preventing drop-in
+porting from S805 -> S905X.
+
+Place the firmware gxtvbb_vh264_mc in /lib/firmware/meson/gxl
+
+It *might* have broken support for S805/odroid-c1, untested.
+(minus the hardcoded firmware name change)
+
+Known bugs: This support seems to disable the VPU (drm) during boot.
+---
+ arch/arm64/boot/dts/amlogic/meson-gx.dtsi    |  21 ++++++++++
+ arch/arm64/boot/dts/amlogic/meson-gxl.dtsi   |  18 +++++++++
+ drivers/clk/meson/gxbb.c                     |  58 +++++++++++++++++++++++++++
+ drivers/clk/meson/gxbb.h                     |   3 +-
+ drivers/media/platform/meson/vdec/esparser.c |  34 +++++++++++-----
+ drivers/media/platform/meson/vdec/vdec.c     |  40 +++++++-----------
+ drivers/soc/amlogic/meson-pwrc-vdec.c        |   3 ++
+ gxtvbb_vh264_mc                              | Bin 0 -> 36864 bytes
+ include/dt-bindings/clock/gxbb-clkc.h        |   2 +
+ 9 files changed, 143 insertions(+), 36 deletions(-)
+ create mode 100644 gxtvbb_vh264_mc
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gx.dtsi b/arch/arm64/boot/dts/amlogic/meson-gx.dtsi
+index e4ebc87..d6a57b1 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gx.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gx.dtsi
+@@ -369,6 +369,12 @@
+ 					amlogic,hhi-sysctrl = <&sysctrl>;
+ 				};
+ 
++				pwrc_vdec: power-controller-vdec@0 {
++					//reg = <0x0 0x80 0x0 0x80>;
++					compatible = "amlogic,meson-pwrc-vdec";
++					#power-domain-cells = <0>;
++				};
++
+ 				clkc_AO: clock-controller {
+ 					compatible = "amlogic,meson-gx-aoclkc";
+ 					#clock-cells = <1>;
+@@ -499,6 +505,21 @@
+ 			};
+ 		};
+ 
++		vdec: video-decoder@0xd0050000 {
++			compatible = "amlogic,meson8b-vdec";
++			reg = <0x0 0xc8820000 0x0 0x10000
++			       0x0 0xc110a580 0x0 0xe4
++			       0x0 0xc8838000 0x0 0x60>;
++			reg-names = "dos", "esparser", "dmc";
++
++			interrupts = <GIC_SPI 44 IRQ_TYPE_EDGE_RISING
++				      GIC_SPI 32 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "vdecirq", "esparserirq";
++
++			amlogic,ao-sysctrl = <&sysctrl_AO>;
++			status = "okay";
++		};
++
+ 		vpu: vpu@d0100000 {
+ 			compatible = "amlogic,meson-gx-vpu";
+ 			reg = <0x0 0xd0100000 0x0 0x100000>,
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+index a11ac15..2f7bad2 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+@@ -805,3 +805,21 @@
+ 	compatible = "amlogic,meson-gxl-vpu", "amlogic,meson-gx-vpu";
+ 	power-domains = <&pwrc_vpu>;
+ };
++
++&vdec {
++	power-domains = <&pwrc_vdec>;
++};
++
++&pwrc_vdec {
++	clocks = <&clkc CLKID_VPU_INTR>, <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>;
++	clock-names = "vpu_intr", "dos_parser", "vdec_1";
++
++	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
++			  <&clkc CLKID_VDEC_1>;
++
++	assigned-clock-parents = <&clkc CLKID_FCLK_DIV4>,
++				 <0>;
++
++	assigned-clock-rates = <0>,
++			       <318750000>;
++};
+diff --git a/drivers/clk/meson/gxbb.c b/drivers/clk/meson/gxbb.c
+index b1e4d95..f08066d 100644
+--- a/drivers/clk/meson/gxbb.c
++++ b/drivers/clk/meson/gxbb.c
+@@ -1543,6 +1543,55 @@ static struct clk_regmap gxbb_vapb = {
+ 	},
+ };
+ 
++/* VDEC clocks */
++
++static u32 mux_table_vdec[] = {0, 1, 2, 3};
++static const char * const gxbb_vdec_parent_names[] = {
++	"fclk_div4", "fclk_div3", "fclk_div5", "fclk_div7"
++};
++
++static struct clk_mux gxbb_vdec_1_sel = {
++	.reg = (void *)HHI_VDEC_CLK_CNTL,
++	.mask = 0x3,
++	.shift = 9,
++	.lock = &meson_clk_lock,
++	.table = mux_table_vdec,
++	.hw.init = &(struct clk_init_data){
++		.name = "vdec_1_sel",
++		.ops = &clk_mux_ops,
++		.parent_names = gxbb_vdec_parent_names,
++		.num_parents = ARRAY_SIZE(gxbb_vdec_parent_names),
++		.flags = CLK_SET_RATE_NO_REPARENT,
++	},
++};
++
++static struct clk_divider gxbb_vdec_1_div = {
++	.reg = (void *)HHI_VDEC_CLK_CNTL,
++	.shift = 0,
++	.width = 7,
++	.lock = &meson_clk_lock,
++	.hw.init = &(struct clk_init_data){
++		.name = "vdec_1_div",
++		.ops = &clk_divider_ops,
++		.parent_names = (const char *[]){ "vdec_1_sel" },
++		.num_parents = 1,
++		.flags = CLK_SET_RATE_PARENT,
++	},
++};
++
++static struct clk_gate gxbb_vdec_1 = {
++	.reg = (void *)HHI_VDEC_CLK_CNTL,
++	.bit_idx = 8,
++	.lock = &meson_clk_lock,
++	.hw.init = &(struct clk_init_data) {
++		.name = "vdec_1",
++		.ops = &clk_gate_ops,
++		.parent_names = (const char *[]){ "vdec_1_div" },
++		.num_parents = 1,
++		.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
++	},
++};
++
+ /* Everything Else (EE) domain gates */
+ static MESON_GATE(gxbb_ddr, HHI_GCLK_MPEG0, 0);
+ static MESON_GATE(gxbb_dos, HHI_GCLK_MPEG0, 1);
+@@ -1786,6 +1835,9 @@ static struct clk_hw_onecell_data gxbb_hw_onecell_data = {
+ 		[CLKID_FCLK_DIV4_DIV]	    = &gxbb_fclk_div4_div.hw,
+ 		[CLKID_FCLK_DIV5_DIV]	    = &gxbb_fclk_div5_div.hw,
+ 		[CLKID_FCLK_DIV7_DIV]	    = &gxbb_fclk_div7_div.hw,
++		[CLKID_VDEC_1_SEL]	    = &gxbb_vdec_1_sel.hw,
++		[CLKID_VDEC_1_DIV]          = &gxbb_vdec_1_div.hw,
++		[CLKID_VDEC_1]         	    = &gxbb_vdec_1.hw,
+ 		[NR_CLKS]		    = NULL,
+ 	},
+ 	.num = NR_CLKS,
+@@ -1942,6 +1994,9 @@ static struct clk_hw_onecell_data gxl_hw_onecell_data = {
+ 		[CLKID_FCLK_DIV4_DIV]	    = &gxbb_fclk_div4_div.hw,
+ 		[CLKID_FCLK_DIV5_DIV]	    = &gxbb_fclk_div5_div.hw,
+ 		[CLKID_FCLK_DIV7_DIV]	    = &gxbb_fclk_div7_div.hw,
++		[CLKID_VDEC_1_SEL]	    = &gxbb_vdec_1_sel.hw,
++		[CLKID_VDEC_1_DIV]          = &gxbb_vdec_1_div.hw,
++		[CLKID_VDEC_1]         	    = &gxbb_vdec_1.hw,
+ 		[NR_CLKS]		    = NULL,
+ 	},
+ 	.num = NR_CLKS,
+@@ -2100,6 +2155,9 @@ static struct clk_regmap *const gx_clk_regmaps[] = {
+ 	&gxbb_fclk_div4,
+ 	&gxbb_fclk_div5,
+ 	&gxbb_fclk_div7,
++	&gxbb_vdec_1_sel,
++	&gxbb_vdec_1_div,
++	&gxbb_vdec_1,
+ };
+ 
+ struct clkc_data {
+diff --git a/drivers/clk/meson/gxbb.h b/drivers/clk/meson/gxbb.h
+index 9febf3f..32045ee 100644
+--- a/drivers/clk/meson/gxbb.h
++++ b/drivers/clk/meson/gxbb.h
+@@ -204,8 +204,9 @@
+ #define CLKID_FCLK_DIV4_DIV	  148
+ #define CLKID_FCLK_DIV5_DIV	  149
+ #define CLKID_FCLK_DIV7_DIV	  150
++#define CLKID_VDEC_1_DIV	  152
+ 
+-#define NR_CLKS			  151
++#define NR_CLKS			  154
+ 
+ /* include the CLKIDs that have been made part of the DT binding */
+ #include <dt-bindings/clock/gxbb-clkc.h>
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 35ab012..2262e17 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -30,10 +30,10 @@
+ #define PARSER_VIDEO_END_PTR 0x84
+ #define PARSER_ES_CONTROL 0x5c
+ #define PARSER_CONFIG 0x14
+-	#define PS_CFG_MAX_FETCH_CYCLE_BIT 0
+-	#define PS_CFG_STARTCODE_WID_24	10
+-	#define PS_CFG_MAX_ES_WR_CYCLE_BIT 12
+-	#define PS_CFG_PFIFO_EMPTY_CNT_BIT 16
++	#define PS_CFG_MAX_FETCH_CYCLE_BIT  0
++	#define PS_CFG_STARTCODE_WID_24_BIT 10
++	#define PS_CFG_MAX_ES_WR_CYCLE_BIT  12
++	#define PS_CFG_PFIFO_EMPTY_CNT_BIT  16
+ #define PARSER_CONTROL 0x00
+ 	#define ES_PACK_SIZE_BIT	8
+ 	#define ES_WRITE		BIT(5)
+@@ -117,19 +117,33 @@ static void add_buffer_to_list(struct vdec_core *core, struct vdec_buffer *new_b
+ 	spin_unlock_irqrestore(&core->bufs_spinlock, flags);
+ }
+ 
++/* Add a start code at the end of the buffer
++ * to trigger the esparser interrupt
++ */
++static void esparser_append_start_code(struct vb2_buffer *vb)
++{
++	u8 *vaddr = vb2_plane_vaddr(vb, 0) + vb2_get_plane_payload(vb, 0);
++
++	vaddr[0] = 0x00;
++	vaddr[1] = 0x00;
++	vaddr[2] = 0x01;
++	vaddr[3] = 0xff;
++}
++
+ int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf) {
+ 	struct vb2_buffer *vb = &vbuf->vb2_buf;
+ 	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(&vbuf->vb2_buf, 0);
++	u32 payload_size = vb2_get_plane_payload(vb, 0);
++
++	esparser_append_start_code(vb);
+ 
+ 	writel_relaxed(0, core->esparser_base + PFIFO_RD_PTR);
+ 	writel_relaxed(0, core->esparser_base + PFIFO_WR_PTR);
+-	writel_relaxed(ES_WRITE | ES_PARSER_START | ES_SEARCH | ((vb2_get_plane_payload(vb, 0) << ES_PACK_SIZE_BIT)), core->esparser_base + PARSER_CONTROL);
++	writel_relaxed(ES_WRITE | ES_PARSER_START | ES_SEARCH | (payload_size << ES_PACK_SIZE_BIT), core->esparser_base + PARSER_CONTROL);
+ 
+ 	writel_relaxed(phy, core->esparser_base + PARSER_FETCH_ADDR);
+-	writel_relaxed((7 << FETCH_ENDIAN_BIT) | vb2_get_plane_payload(vb, 0), core->esparser_base + PARSER_FETCH_CMD);
++	writel_relaxed((7 << FETCH_ENDIAN_BIT) | (payload_size + 512), core->esparser_base + PARSER_FETCH_CMD);
+ 	search_done = 0;
+-	writel_relaxed(core->fake_pattern_map, core->esparser_base + PARSER_FETCH_ADDR);
+-	writel_relaxed((7 << FETCH_ENDIAN_BIT) | SEARCH_PATTERN_LEN, core->esparser_base + PARSER_FETCH_CMD);
+ 
+ 	return wait_event_interruptible_timeout(wq, search_done != 0, HZ/5);
+ }
+@@ -179,6 +193,7 @@ int esparser_queue(void *data) {
+ 			printk("ESPARSER input parsing fatal error\n");
+ 			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+ 			writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
++			up(&core->queue_sema);
+ 		}
+ 	}
+ 
+@@ -202,7 +217,7 @@ int esparser_power_up(struct vdec_core *core) {
+ 	writel_relaxed((10 << PS_CFG_PFIFO_EMPTY_CNT_BIT) |
+ 				   (1  << PS_CFG_MAX_ES_WR_CYCLE_BIT) |
+ 				   (16 << PS_CFG_MAX_FETCH_CYCLE_BIT) |
+-				   (2  << PS_CFG_STARTCODE_WID_24),
++				   (2  << PS_CFG_STARTCODE_WID_24_BIT),
+ 				   core->esparser_base + PARSER_CONFIG);
+ 
+ 	writel_relaxed((ES_SEARCH | ES_PARSER_START), core->esparser_base + PARSER_CONTROL);
+@@ -210,6 +225,7 @@ int esparser_power_up(struct vdec_core *core) {
+ 	/* parser video */
+ 	writel_relaxed(core->vififo_paddr, core->esparser_base + PARSER_VIDEO_START_PTR);
+ 	writel_relaxed(core->vififo_paddr + core->vififo_size, core->esparser_base + PARSER_VIDEO_END_PTR);
++	writel_relaxed(readl_relaxed(core->dos_base + PARSER_ES_CONTROL) & ~1, core->dos_base + PARSER_ES_CONTROL);
+ 	writel_relaxed(1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
+ 	writel_relaxed(readl_relaxed(core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL) & ~1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
+ 	writel_relaxed(0, core->dos_base + DOS_GEN_CTRL0); // set vififo_vbuf_rp_sel=>vdec
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index d1c03db..b8e6df6 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -1,4 +1,5 @@
+ #include <linux/clk.h>
++#include <linux/io.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/mfd/syscon.h>
+@@ -20,7 +21,8 @@
+ #define MC_H264_EXT_SIZE	(4096 * 5)
+ #define MAX_DPB_BUFF_SIZE	(12*1024*1024) // Big enough for a 3840*2160 4:2:0 buffer
+ #define DEF_BUF_START_ADDR	0x1000000
+-#define V_BUF_ADDR_OFFSET	0x13e000
++//#define V_BUF_ADDR_OFFSET	0x13e000 /*  < GXTVBB */
++#define V_BUF_ADDR_OFFSET	0x1ee000 /* >= GXTVBB */
+ 
+ #define UNK1_SIZE 0x13e000
+ #define REF_SIZE  0x100000
+@@ -69,7 +71,7 @@
+ #define DOS_SW_RESET0 0xfc00
+ 
+ static int vh264_load_extended_firmware(struct vdec_core *core, const struct firmware *fw) {
+-	core->vh264_ext_fw_vaddr = dma_alloc_coherent(NULL, MC_H264_EXT_SIZE, &core->vh264_ext_fw_paddr, GFP_KERNEL);
++	core->vh264_ext_fw_vaddr = dma_alloc_coherent(core->dev, MC_H264_EXT_SIZE, &core->vh264_ext_fw_paddr, GFP_KERNEL);
+ 
+ 	if (!core->vh264_ext_fw_vaddr) {
+ 		printk("Couldn't allocate memory for H.264 extended firmware\n");
+@@ -105,7 +107,7 @@ static int vdec_load_firmware(struct vdec_core *core, const char* fwname)
+ 		return -ENOMEM;
+ 
+ 	memcpy(mc_addr, fw->data, MC_SIZE);
+-	mc_addr_map = dma_map_single(NULL, mc_addr, MC_SIZE, DMA_TO_DEVICE);
++	mc_addr_map = dma_map_single(core->dev, mc_addr, MC_SIZE, DMA_TO_DEVICE);
+ 	if (!mc_addr_map) {
+ 		dev_err(dev, "Couldn't MAP DMA addr\n");
+ 		return -EINVAL;
+@@ -129,7 +131,7 @@ static int vdec_load_firmware(struct vdec_core *core, const char* fwname)
+ 
+ 	vh264_load_extended_firmware(core, fw);
+ 
+-	dma_unmap_single(NULL, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
++	dma_unmap_single(core->dev, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
+ 	kfree(mc_addr);
+ 	release_firmware(fw);
+ 	return ret;
+@@ -216,7 +218,7 @@ static int vdec_poweron(struct vdec_core *core) {
+ 	stbuf_power_up(core);
+ 
+ 	/*TODO: power up the decoder related to the input PIXFMT */
+-	ret = vdec_load_firmware(core, "meson/m8/vh264_mc");
++	ret = vdec_load_firmware(core, "meson/gxl/gxtvbb_vh264_mc");
+ 	if (ret)
+ 		return ret;
+ 
+@@ -289,7 +291,6 @@ static void vdec_poweroff(struct vdec_core *core) {
+ 
+ void vdec_m2m_device_run(void *priv) {
+ 	struct vdec_core *core = priv;
+-	struct v4l2_m2m_buffer *buf, *n;
+ 
+ 	printk("vdec_m2m_device_run\n");
+ 	mutex_lock(&core->lock);
+@@ -396,8 +397,6 @@ static int mark_buffers_done(void *data)
+ 			vbuf->sequence = core->sequence_cap++;
+ 			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+ 
+-			//printk("Recycled buf %d ; seq = %d ; flags = %08X ; (timestamp %llu)\n", tmp->index, vbuf->sequence, vbuf->flags, vbuf->vb2_buf.timestamp);
+-
+ 			spin_lock_irqsave(&core->bufs_spinlock, flags);
+ 			list_del(&tmp->list);
+ 			spin_unlock_irqrestore(&core->bufs_spinlock, flags);
+@@ -1065,7 +1064,7 @@ static int vdec_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	r = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dmc");
+-	core->dmc_base = devm_ioremap_resource(dev, r);
++	core->dmc_base = devm_ioremap(dev, r->start, resource_size(r));
+ 	if (IS_ERR(core->dmc_base)) {
+ 		printk("Couldn't remap DMC memory\n");
+ 		return PTR_ERR(core->dmc_base);
+@@ -1095,32 +1094,21 @@ static int vdec_probe(struct platform_device *pdev)
+ 
+ 	/* TODO: do the allocations at start_stream to not hog memory */
+ 
+-	/* Allocate 64 MiB for the DPB buffers <-- Obsolete since we map the canvases to the user buffers
+-	 * TODO: Pretty sure most of that chunk can be directly mapped to user buffers? must test.
+-	*/
+-	/*core->dpb_size = 0x4000000;
+-	core->dpb_vaddr = dma_alloc_coherent(NULL, core->dpb_size, &core->dpb_paddr, GFP_KERNEL);
+-	if (!core->dpb_vaddr) {
+-		printk("Failed to request 64MiB DPB video buffer\n");
+-		return -ENOMEM;
+-	}
+-	printk("Allocated 64MiB: %08X - %08X\n", core->dpb_paddr, core->dpb_paddr + core->dpb_size);*/
+-
+ 	/* Allocate some memory for the H.264 decoder's state
+ 	 * (references motion vectors, and other things)
+ 	 * TODO: move this to a specific H.264 subdevice file
+ 	 */
+-	core->vh264_mem_size = UNK1_SIZE + REF_SIZE + UNK2_SIZE;
+-	core->vh264_mem_vaddr = dma_alloc_coherent(NULL, core->vh264_mem_size, &core->vh264_mem_paddr, GFP_KERNEL);
++	core->vh264_mem_size = 0x800000;
++	core->vh264_mem_vaddr = dma_alloc_coherent(dev, core->vh264_mem_size, &core->vh264_mem_paddr, GFP_KERNEL);
+ 	if (!core->vh264_mem_vaddr) {
+-		printk("Failed to request 5.24MiB H.264 extra memory\n");
++		printk("Failed to request 8MiB H.264 extra memory\n");
+ 		return -ENOMEM;
+ 	}
+-	printk("Allocated 5.24MiB: %08X - %08X\n", core->vh264_mem_paddr, core->vh264_mem_paddr + core->vh264_mem_size);
++	printk("Allocated 8MiB: %08X - %08X\n", core->vh264_mem_paddr, core->vh264_mem_paddr + core->vh264_mem_size);
+ 
+ 	/* Allocate 32 MiB for the VIFIFO buffer */
+ 	core->vififo_size = 0x2000000;
+-	core->vififo_vaddr = dma_alloc_coherent(NULL, core->vififo_size, &core->vififo_paddr, GFP_KERNEL);
++	core->vififo_vaddr = dma_alloc_coherent(dev, core->vififo_size, &core->vififo_paddr, GFP_KERNEL);
+ 	if (!core->vififo_vaddr) {
+ 		printk("Failed to request 32MiB VIFOFO buffer\n");
+ 		return -ENOMEM;
+@@ -1132,7 +1120,7 @@ static int vdec_probe(struct platform_device *pdev)
+ 	/* Allocate a "post canvas", purpose unknown
+ 	 * TODO: move this to a specific H.264 subdevice file
+ 	 */
+-	core->dummy_post_canvas_vaddr = dma_alloc_coherent(NULL, 0x400000, &core->dummy_post_canvas_paddr, GFP_KERNEL);
++	core->dummy_post_canvas_vaddr = dma_alloc_coherent(dev, 0x400000, &core->dummy_post_canvas_paddr, GFP_KERNEL);
+ 	if (!core->dummy_post_canvas_paddr) {
+ 		printk("Failed to request 4MiB post canvas\n");
+ 		return -ENOMEM;
+diff --git a/drivers/soc/amlogic/meson-pwrc-vdec.c b/drivers/soc/amlogic/meson-pwrc-vdec.c
+index c719248..79868e5 100644
+--- a/drivers/soc/amlogic/meson-pwrc-vdec.c
++++ b/drivers/soc/amlogic/meson-pwrc-vdec.c
+@@ -50,6 +50,7 @@ static int meson_pwrc_vdec_power_off(struct generic_pm_domain *genpd)
+ }
+ 
+ static int meson_pwrc_vdec_setup_clk(struct meson_pwrc_vdec *pd) {
++	printk("meson_pwrc_vdec_setup_clk\n");
+ 	clk_prepare_enable(pd->dos_parser_clk);
+ 	clk_prepare_enable(pd->vpu_intr_clk);
+ 	clk_prepare_enable(pd->vdec_1_clk);
+@@ -73,6 +74,7 @@ static bool meson_pwrc_vdec_get_power(struct meson_pwrc_vdec *pd)
+ {
+ 	u32 reg;
+ 	
++	printk("meson_pwrc_vdec_get_power\n");
+ 	regmap_read(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0, &reg);
+ 
+ 	return ((reg & GEN_PWR_VDEC_1) == GEN_PWR_VDEC_1);
+@@ -92,6 +94,7 @@ static int meson_pwrc_vdec_probe(struct platform_device *pdev)
+ 	bool powered_off;
+ 	int ret;
+ 
++	printk("Probe!\n");
+ 	regmap_ao = syscon_node_to_regmap(of_get_parent(pdev->dev.of_node));
+ 	if (IS_ERR(regmap_ao)) {
+ 		dev_err(&pdev->dev, "failed to get AO regmap\n");
+diff --git a/gxtvbb_vh264_mc b/gxtvbb_vh264_mc
+new file mode 100644
+index 0000000000000000000000000000000000000000..9468c657d1c88c76b7be83c6406c3c91d930a0a6
+GIT binary patch
+literal 36864
+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
+F{{gZksPF&)
+
+literal 0
+HcmV?d00001
+
+diff --git a/include/dt-bindings/clock/gxbb-clkc.h b/include/dt-bindings/clock/gxbb-clkc.h
+index 8ba99a5..3bec26e 100644
+--- a/include/dt-bindings/clock/gxbb-clkc.h
++++ b/include/dt-bindings/clock/gxbb-clkc.h
+@@ -125,5 +125,7 @@
+ #define CLKID_VAPB_1		138
+ #define CLKID_VAPB_SEL		139
+ #define CLKID_VAPB		140
++#define CLKID_VDEC_1_SEL	151
++#define CLKID_VDEC_1		153
+ 
+ #endif /* __GXBB_CLKC_H */

@@ -1,0 +1,49 @@
+From fd3a0ca8eac531dc0b6e2bef73c3f5bcb5f6c651 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 1 Apr 2018 18:52:19 +0200
+Subject: [PATCH] meson: vdec: Actually output NV12M
+
+All credits go to Nicolas Dufresne.
+
+The canvas can be configured further than we thought,
+which allows us to get true NV12.
+---
+ drivers/media/platform/meson/vdec/canvas.c | 2 +-
+ drivers/media/platform/meson/vdec/vdec.c   | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/canvas.c b/drivers/media/platform/meson/vdec/canvas.c
+index 2e396d1..92a8cf7 100644
+--- a/drivers/media/platform/meson/vdec/canvas.c
++++ b/drivers/media/platform/meson/vdec/canvas.c
+@@ -60,7 +60,7 @@ void vdec_canvas_setup(void __iomem *dmc_base,
+ 						CANVAS_WIDTH_HBIT) |
+ 		(height << CANVAS_HEIGHT_BIT) |
+ 		(wrap << 22) |
+-		(blkmode << CANVAS_BLKMODE_BIT), dmc_base + DMC_CAV_LUT_DATAH);
++		(blkmode << CANVAS_BLKMODE_BIT) | (7 << 26), dmc_base + DMC_CAV_LUT_DATAH);
+ 
+ 	writel_relaxed(CANVAS_LUT_WR_EN | canvas_index, dmc_base + DMC_CAV_LUT_ADDR);
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index c0a4ea3..66d3ba1 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -336,7 +336,7 @@ vdec_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
+ 
+ static const struct vdec_format vdec_formats[] = {
+ 	{
+-		.pixfmt = V4L2_PIX_FMT_NV21M,
++		.pixfmt = V4L2_PIX_FMT_NV12M,
+ 		.num_planes = 2,
+ 		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+ 	}, {
+@@ -410,7 +410,7 @@ vdec_try_fmt_common(struct v4l2_format *f)
+ 	fmt = find_format(pixmp->pixelformat, f->type);
+ 	if (!fmt) {
+ 		if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+-			pixmp->pixelformat = V4L2_PIX_FMT_NV21M;
++			pixmp->pixelformat = V4L2_PIX_FMT_NV12M;
+ 		else if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 			pixmp->pixelformat = V4L2_PIX_FMT_H264;
+ 		else
