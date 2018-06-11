@@ -1,0 +1,1191 @@
+From c09831e9d76a24a127723f706e1ea0023791d6b9 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Fri, 27 Apr 2018 17:57:09 +0200
+Subject: [PATCH] meson: vdec: HEVC + General updates
+
+* HEVC:
+ - Fix 2 bugs that caused corruption on select samples.
+The first one is that we used the session width/height rather
+than what the hardware tells us. But the hardware gives us aligned
+width/height which can be different.
+It's planned to check what the hardware tells us against what
+userspace told us.
+
+The second one is that we didn't output correctly the buffers
+when multiple IDR frames were back to back, which then lead to stalling
+or artifacts. The fix is in codec_hevc_update_referenced.
+
+There remains one bug to be fixed that affects frame order in certain cases..
+
+ - Start to add code to handle AML frame compression, which would also allow 10-bit support.
+ - Add GXBB specific codepath (untested)
+
+* General:
+ - Fix headers license (Thanks chewitt & narmstrong)
+ - Only allow one decoding instance at a time
+---
+ drivers/media/platform/meson/vdec/codec_h264.c    |  13 +-
+ drivers/media/platform/meson/vdec/codec_h264.h    |   5 +
+ drivers/media/platform/meson/vdec/codec_helpers.c |   5 +
+ drivers/media/platform/meson/vdec/codec_hevc.c    | 338 ++++++++++++++--------
+ drivers/media/platform/meson/vdec/codec_hevc.h    |   5 +
+ drivers/media/platform/meson/vdec/codec_mpeg12.c  |  11 +-
+ drivers/media/platform/meson/vdec/codec_mpeg12.h  |   5 +
+ drivers/media/platform/meson/vdec/codec_mpeg4.c   |  11 +-
+ drivers/media/platform/meson/vdec/codec_mpeg4.h   |   5 +
+ drivers/media/platform/meson/vdec/esparser.c      |  20 +-
+ drivers/media/platform/meson/vdec/esparser.h      |   5 +
+ drivers/media/platform/meson/vdec/hevc_regs.h     |  16 +-
+ drivers/media/platform/meson/vdec/vdec.c          |  35 ++-
+ drivers/media/platform/meson/vdec/vdec.h          |  13 +-
+ drivers/media/platform/meson/vdec/vdec_1.c        |  14 +-
+ drivers/media/platform/meson/vdec/vdec_1.h        |  11 +-
+ drivers/media/platform/meson/vdec/vdec_hevc.c     |  21 +-
+ drivers/media/platform/meson/vdec/vdec_platform.c |  11 +-
+ drivers/media/platform/meson/vdec/vdec_platform.h |  11 +-
+ 19 files changed, 295 insertions(+), 260 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index b7daea1..0cbb9e5 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -1,15 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #include <media/v4l2-mem2mem.h>
+@@ -82,7 +73,7 @@ struct codec_h264 {
+ 	void      *sei_vaddr;
+ 	dma_addr_t sei_paddr;
+ 
+-	/* Housekeeping thread for recycling buffers them into the hardware */
++	/* Housekeeping thread for recycling buffers into the hardware */
+ 	struct task_struct *buffers_thread;
+ };
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.h b/drivers/media/platform/meson/vdec/codec_h264.h
+index 19b9988..1a15913 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.h
++++ b/drivers/media/platform/meson/vdec/codec_h264.h
+@@ -1,3 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #ifndef __MESON_VDEC_CODEC_H264_H_
+ #define __MESON_VDEC_CODEC_H264_H_
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.c b/drivers/media/platform/meson/vdec/codec_helpers.c
+index 2dc3188..9906433 100644
+--- a/drivers/media/platform/meson/vdec/codec_helpers.c
++++ b/drivers/media/platform/meson/vdec/codec_helpers.c
+@@ -1,3 +1,8 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #include <media/v4l2-mem2mem.h>
+ #include <media/videobuf2-dma-contig.h>
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index a2c3e91..bf291a6 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -1,16 +1,7 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+- * Copyright (C) 2018 Maxime Jourdan
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+  * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #include <media/v4l2-mem2mem.h>
+@@ -56,19 +47,26 @@
+ #define HEVC_AUX_ADR		  HEVC_ASSIST_SCRATCH_L
+ #define HEVC_AUX_DATA_SIZE	  HEVC_ASSIST_SCRATCH_M
+ #define HEVC_DECODE_SIZE	  HEVC_ASSIST_SCRATCH_N
+-#define HEVCD_MPP_ANC2AXI_TBL_DATA (0x3464 * 4)
++
++#define HEVCD_MPP_ANC2AXI_TBL_DATA	(0x3464 * 4)
++
++#define HEVC_CM_BODY_START_ADDR	(0x3626 * 4)
++#define HEVC_CM_BODY_LENGTH	(0x3627 * 4)
++#define HEVC_CM_HEADER_LENGTH	(0x3629 * 4)
++#define HEVC_CM_HEADER_OFFSET	(0x362b * 4)
+ 
+ #define AMRISC_MAIN_REQ         0x04
+ 
+ /* HEVC Infos */
+ #define MAX_REF_PIC_NUM	24
+-#define MAX_REF_ACTIVE  16
++#define MAX_REF_ACTIVE	16
+ #define MPRED_MV_BUF_SIZE	0x120000
+ #define MAX_TILE_COL_NUM	5
+ #define MAX_TILE_ROW_NUM	5
+ #define MAX_SLICE_NUM	800
+-#define INVALID_POC 0x80000000
++#define INVALID_POC	0x80000000
+ 
++/* HEVC Workspace decomposition */
+ #define IPP_OFFSET       0x00
+ #define SAO_ABV_OFFSET   (IPP_OFFSET + 0x4000)
+ #define SAO_VB_OFFSET    (SAO_ABV_OFFSET + 0x30000)
+@@ -105,16 +103,16 @@
+ #define HEVC_SEI_DAT_DONE                    0xd
+ 
+ /* RPM misc_flag0 */
+-#define PCM_LOOP_FILTER_DISABLED_FLAG_BIT       0
+-#define PCM_ENABLE_FLAG_BIT             1
+-#define LOOP_FILER_ACROSS_TILES_ENABLED_FLAG_BIT    2
+-#define PPS_LOOP_FILTER_ACROSS_SLICES_ENABLED_FLAG_BIT  3
+-#define DEBLOCKING_FILTER_OVERRIDE_ENABLED_FLAG_BIT 4
+-#define PPS_DEBLOCKING_FILTER_DISABLED_FLAG_BIT     5
+-#define DEBLOCKING_FILTER_OVERRIDE_FLAG_BIT     6
+-#define SLICE_DEBLOCKING_FILTER_DISABLED_FLAG_BIT   7
+-#define SLICE_SAO_LUMA_FLAG_BIT             8
+-#define SLICE_SAO_CHROMA_FLAG_BIT           9
++#define PCM_LOOP_FILTER_DISABLED_FLAG_BIT		0
++#define PCM_ENABLE_FLAG_BIT				1
++#define LOOP_FILER_ACROSS_TILES_ENABLED_FLAG_BIT	2
++#define PPS_LOOP_FILTER_ACROSS_SLICES_ENABLED_FLAG_BIT	3
++#define DEBLOCKING_FILTER_OVERRIDE_ENABLED_FLAG_BIT	4
++#define PPS_DEBLOCKING_FILTER_DISABLED_FLAG_BIT		5
++#define DEBLOCKING_FILTER_OVERRIDE_FLAG_BIT		6
++#define SLICE_DEBLOCKING_FILTER_DISABLED_FLAG_BIT	7
++#define SLICE_SAO_LUMA_FLAG_BIT				8
++#define SLICE_SAO_CHROMA_FLAG_BIT			9
+ #define SLICE_LOOP_FILTER_ACROSS_SLICES_ENABLED_FLAG_BIT 10
+ 
+ /* Buffer sizes */
+@@ -122,10 +120,8 @@
+ #define SIZE_AUX (SZ_1K * 16)
+ #define SIZE_FRAME_MMU (0x1200 * 4)
+ 
+-#define RPM_BEGIN                                              0x100
+-#define modification_list_cur                                  0x140
+-#define RPM_END                                                0x180
+-#define RPS_USED_BIT        14
++#define RPM_SIZE 0x80
++#define RPS_USED_BIT 14
+ 
+ #define PARSER_CMD_SKIP_CFG_0 0x0000090b
+ #define PARSER_CMD_SKIP_CFG_1 0x1b14140f
+@@ -145,7 +141,7 @@ static const uint16_t parser_cmd[] = {
+ 
+ union rpm_param {
+ 	struct {
+-		uint16_t data[RPM_END - RPM_BEGIN];
++		uint16_t data[RPM_SIZE];
+ 	} l;
+ 	struct {
+ 		/* from ucode lmem, do not change this struct */
+@@ -357,6 +353,10 @@ struct codec_hevc {
+ 	struct list_head ref_frames_list;
+ 	u32 frames_num;
+ 
++	/* Resolution reported by the hardware */
++	u32 width;
++	u32 height;
++
+ 	/* ?? */
+ 	u32 iPrevTid0POC;
+ 	u32 iPrevPOC;
+@@ -427,24 +427,16 @@ static void codec_hevc_update_frame_refs(struct vdec_session *sess, struct hevc_
+ 	if (total_num <= 0)
+ 		goto end;
+ 
+-	if (params->p.modification_flag & 0x1) {
+-		for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
+-			int cIdx = params->p.modification_list[rIdx];
+-			frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
+-				cIdx >=
+-				num_neg ? RefPicSetStCurr1[cIdx -
+-				num_neg] :
+-				RefPicSetStCurr0[cIdx];
+-		}
+-	} else {
+-		for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
+-			int cIdx = rIdx % total_num;
+-			frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
+-				cIdx >=
+-				num_neg ? RefPicSetStCurr1[cIdx -
+-				num_neg] :
+-				RefPicSetStCurr0[cIdx];
+-		}
++	for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
++		int cIdx;
++		if (params->p.modification_flag & 0x1)
++			cIdx = params->p.modification_list[rIdx];
++		else
++			cIdx = rIdx % total_num;
++
++		frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
++			cIdx >= num_neg ? RefPicSetStCurr1[cIdx - num_neg] :
++			RefPicSetStCurr0[cIdx];
+ 	}
+ 
+ 	if (params->p.slice_type != B_SLICE)
+@@ -561,7 +553,7 @@ static void codec_hevc_update_referenced(struct codec_hevc *hevc)
+ 		int is_referenced = 0;
+ 		u32 poc_tmp;
+ 
+-		if (!frame->referenced || frame->poc == curr_poc)
++		if (!frame->referenced)
+ 			continue;
+ 
+ 		for (i = 0; i < MAX_REF_ACTIVE; i++) {
+@@ -617,34 +609,76 @@ static void codec_hevc_output_frames(struct vdec_session *sess)
+ 	}
+ }
+ 
+-static void codec_hevc_setup_buffers(struct vdec_session *sess)
++/* Configure part of the IP responsible for frame buffer decompression */
++static  void codec_hevc_setup_decode_head(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++
++	/* TODO */
++	writel_relaxed(0, core->dos_base + HEVCD_MPP_DECOMP_CTL1);
++	writel_relaxed(0, core->dos_base + HEVCD_MPP_DECOMP_CTL2);
++	writel_relaxed(0, core->dos_base + HEVC_CM_BODY_LENGTH);
++	writel_relaxed(0, core->dos_base + HEVC_CM_HEADER_OFFSET);
++	writel_relaxed(0, core->dos_base + HEVC_CM_HEADER_LENGTH);
++}
++
++static void codec_hevc_setup_buffers_gxbb(struct vdec_session *sess)
+ {
+-	int i;
+-	dma_addr_t buf_y_paddr = 0;
+-	dma_addr_t buf_uv_paddr = 0;
+-	struct v4l2_m2m_buffer *buf;
+ 	struct vdec_core *core = sess->core;
++	struct v4l2_m2m_buffer *buf;
+ 	u32 buf_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
++	dma_addr_t buf_y_paddr = 0;
++	dma_addr_t buf_uv_paddr = 0;
++	u32 idx = 0;
++	u32 val;
++	int i;
+ 
+ 	codec_hevc_setup_canvas(sess);
+ 
+-	/* >= GXL */
+-	writel_relaxed((1 << 2) | (1 << 1), core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+-	/* < GXL */
+-	//writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
++	writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+ 
+ 	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
+-		printk("buf idx: %u\n", buf->vb.vb2_buf.index);
++		idx = buf->vb.vb2_buf.index;
+ 		buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+ 		buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+ 
+-		//printk("Buf: %16X;%16X\n", buf_y_paddr, buf_uv_paddr);
++		val = buf_y_paddr | ((idx * 2) << 8) | 1;
++		writel_relaxed(val, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR);
++		val = buf_uv_paddr | ((idx * 2 + 1) << 8) | 1;
++		writel_relaxed(val, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR);
++	}
++
++	val = buf_y_paddr | ((idx * 2) << 8) | 1;
++	/* Fill the remaining unused slots with the last buffer's Y addr */
++	for (i = buf_size; i < MAX_REF_PIC_NUM; ++i)
++		writel_relaxed(val, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR);
++
++	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
++	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
++	for (i = 0; i < 32; ++i)
++		writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++}
++
++static void codec_hevc_setup_buffers_gxl(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++	struct v4l2_m2m_buffer *buf;
++	u32 buf_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
++	dma_addr_t buf_y_paddr = 0;
++	dma_addr_t buf_uv_paddr = 0;
++	int i;
++
++	writel_relaxed((1 << 2) | (1 << 1), core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
++
++	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
++		buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
++		buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+ 
+ 		writel_relaxed(buf_y_paddr  >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 		writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 	}
+ 
+-	/* Fill the remaining unused slots with the last buffer's Y/UV addr ? */
++	/* Fill the remaining unused slots with the last buffer's Y addr */
+ 	for (i = buf_size; i < MAX_REF_PIC_NUM; ++i) {
+ 		writel_relaxed(buf_y_paddr  >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 		//writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+@@ -750,8 +784,9 @@ static int codec_hevc_start(struct vdec_session *sess)
+ 	writel_relaxed(1, core->dos_base + HEVCD_IPP_TOP_CNTL);
+ 	writel_relaxed((1 << 1), core->dos_base + HEVCD_IPP_TOP_CNTL);
+ 
+-	/* Enable NV21 reference read mode for MC */
+-	writel_relaxed(1 << 31, core->dos_base + HEVCD_MPP_DECOMP_CTL1);
++	/* Enable 2-plane reference read mode for MC */
++	if (sess->fmt_cap->pixfmt == V4L2_PIX_FMT_NV12M)
++		writel_relaxed(1 << 31, core->dos_base + HEVCD_MPP_DECOMP_CTL1);
+ 
+ 	writel_relaxed(1, core->dos_base + HEVC_WAIT_FLAG);
+ 
+@@ -762,8 +797,6 @@ static int codec_hevc_start(struct vdec_session *sess)
+ 	/* disable PSCALE for hardware sharing */
+ 	writel_relaxed(0, core->dos_base + HEVC_PSCALE_CTRL);
+ 
+-	writel_relaxed(0, core->dos_base + DEBUG_REG1);
+-
+ 	/* Let the uCode do all the parsing */
+ 	writel_relaxed(0xc, core->dos_base + NAL_SEARCH_CTL);
+ 
+@@ -788,7 +821,13 @@ static int codec_hevc_start(struct vdec_session *sess)
+ 
+ 	printk("HEVC_AUX_ADR = %08X ; HEVC_AUX_DATA_SIZE * %08X\n", readl_relaxed(core->dos_base + HEVC_AUX_ADR), readl_relaxed(core->dos_base + HEVC_AUX_DATA_SIZE));
+ 
+-	codec_hevc_setup_buffers(sess);
++	if (core->platform->revision == VDEC_REVISION_GXBB)
++		codec_hevc_setup_buffers_gxbb(sess);
++	else
++		codec_hevc_setup_buffers_gxl(sess);
++
++	if (sess->fmt_cap->pixfmt != V4L2_PIX_FMT_NV12M)
++		codec_hevc_setup_decode_head(sess);
+ 
+ 	//printk("HEVC start OK!\n");
+ 
+@@ -799,6 +838,19 @@ static int codec_hevc_start(struct vdec_session *sess)
+ 	return ret;
+ }
+ 
++static void codec_hevc_flush_output(struct vdec_session *sess)
++{
++	struct codec_hevc *hevc = sess->priv;
++	struct hevc_frame *tmp, *n;
++
++	list_for_each_entry_safe(tmp, n, &hevc->ref_frames_list, list) {
++		vdec_dst_buf_done(sess, tmp->vbuf);
++		list_del(&tmp->list);
++		kfree(tmp);
++		hevc->frames_num--;
++	}
++}
++
+ static int codec_hevc_stop(struct vdec_session *sess)
+ {
+ 	struct codec_hevc *hevc = sess->priv;
+@@ -806,18 +858,25 @@ static int codec_hevc_stop(struct vdec_session *sess)
+ 
+ 	printk("codec_hevc_stop\n");
+ 
++	codec_hevc_flush_output(sess);
++
+ 	if (hevc->workspace_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_WORKSPACE, hevc->workspace_vaddr, hevc->workspace_paddr);
++		dma_free_coherent(core->dev, SIZE_WORKSPACE,
++				  hevc->workspace_vaddr,
++				  hevc->workspace_paddr);
+ 		hevc->workspace_vaddr = 0;
+ 	}
+ 
+ 	if (hevc->frame_mmu_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_FRAME_MMU, hevc->frame_mmu_vaddr, hevc->frame_mmu_paddr);
++		dma_free_coherent(core->dev, SIZE_FRAME_MMU,
++				  hevc->frame_mmu_vaddr,
++				  hevc->frame_mmu_paddr);
+ 		hevc->frame_mmu_vaddr = 0;
+ 	}
+ 
+ 	if (hevc->aux_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_AUX, hevc->aux_vaddr, hevc->aux_paddr);
++		dma_free_coherent(core->dev, SIZE_AUX,
++				  hevc->aux_vaddr, hevc->aux_paddr);
+ 		hevc->aux_vaddr = 0;
+ 	}
+ 
+@@ -832,8 +891,8 @@ static void codec_hevc_update_tiles(struct vdec_session *sess)
+ 	struct codec_hevc *hevc = sess->priv;
+ 	struct vdec_core *core = sess->core;
+ 	u32 sao_mem_unit = (hevc->lcu_size == 16 ? 9 : hevc->lcu_size == 32 ? 14 : 24) << 4;
+-	u32 pic_height_cu = (sess->height + hevc->lcu_size - 1) / hevc->lcu_size;
+-	u32 pic_width_cu = (sess->width + hevc->lcu_size - 1) / hevc->lcu_size;
++	u32 pic_height_cu = (hevc->height + hevc->lcu_size - 1) / hevc->lcu_size;
++	u32 pic_width_cu = (hevc->width + hevc->lcu_size - 1) / hevc->lcu_size;
+ 	u32 sao_vb_size = (sao_mem_unit + (2 << 4)) * pic_height_cu;
+ 	u32 tiles_flags = hevc->rpm_param.p.tiles_flags;
+ 
+@@ -922,7 +981,7 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	val = (readl_relaxed(core->dos_base + HEVC_SAO_CTRL0) & ~0xf) | ilog2(hevc->lcu_size);
+ 	writel_relaxed(val, core->dos_base + HEVC_SAO_CTRL0);
+ 
+-	writel_relaxed(sess->width | (sess->height << 16), core->dos_base + HEVC_SAO_PIC_SIZE);
++	writel_relaxed(hevc->width | (hevc->height << 16), core->dos_base + HEVC_SAO_PIC_SIZE);
+ 	writel_relaxed((hevc->lcu_x_num - 1) | (hevc->lcu_y_num - 1) << 16, core->dos_base + HEVC_SAO_PIC_SIZE_LCU);
+ 
+ 	writel_relaxed(buf_y_paddr, core->dos_base + HEVC_SAO_Y_START_ADDR);
+@@ -934,7 +993,7 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	writel_relaxed(buf_u_v_paddr, core->dos_base + HEVC_SAO_C_WPTR);
+ 
+ 	if (frame->cur_slice_idx == 0) {
+-		writel_relaxed(sess->width | (sess->height << 16), core->dos_base + HEVC_DBLK_CFG2);
++		writel_relaxed(hevc->width | (hevc->height << 16), core->dos_base + HEVC_DBLK_CFG2);
+ 
+ 		val = 0;
+ 		if ((misc_flag0 >> PCM_ENABLE_FLAG_BIT) & 0x1)
+@@ -947,9 +1006,14 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	}
+ 
+ 	val = readl_relaxed(core->dos_base + HEVC_SAO_CTRL1) & ~0x3ff3;
+-	val |=	0x1 |  /* disable cm compression ? */
+-		0xff0; /* 0xff0 mask controls "endianness", setting it to 0x880 enables 64-bit big endian.
+-			  setting it to 0xff0 allows us to get NV12 */
++	if (sess->fmt_cap->pixfmt == V4L2_PIX_FMT_NV12M)
++		val |= 0xff0 | /* Set endianness for 2-bytes swaps (nv12) */
++			0x1;   /* disable cm compression */
++	else
++		val |= 0x3000 | /* 64x32 block mode */
++			0x880 | /* 64-bit Big Endian */
++			0x2;    /* Disable double write */
++
+ 	writel_relaxed(val, core->dos_base + HEVC_SAO_CTRL1);
+ 
+ 	/* set them all 0 for H265_NV21 (no down-scale) */
+@@ -958,6 +1022,9 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 
+ 	val = readl_relaxed(core->dos_base + HEVCD_IPP_AXIIF_CONFIG) & ~0x30;
+ 	val |= 0xf;
++	if (sess->fmt_cap->pixfmt != V4L2_PIX_FMT_NV12M)
++		val |= 0x30; /* 64x32 block mode */
++
+ 	writel_relaxed(val, core->dos_base + HEVCD_IPP_AXIIF_CONFIG);
+ 
+ 	val = 0;
+@@ -975,8 +1042,7 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 			 0x1) << 8;
+ 	}*/
+ 	slice_deblocking_filter_disabled_flag = (misc_flag0 >>
+-			SLICE_DEBLOCKING_FILTER_DISABLED_FLAG_BIT) &
+-		0x1;
++			SLICE_DEBLOCKING_FILTER_DISABLED_FLAG_BIT) & 0x1;
+ 	if ((misc_flag0 & (1 << DEBLOCKING_FILTER_OVERRIDE_ENABLED_FLAG_BIT))
+ 		&& (misc_flag0 & (1 << DEBLOCKING_FILTER_OVERRIDE_FLAG_BIT))) {
+ 		val |= slice_deblocking_filter_disabled_flag << 2;
+@@ -988,8 +1054,7 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	} else {
+ 		val |=
+ 			((misc_flag0 >>
+-			  PPS_DEBLOCKING_FILTER_DISABLED_FLAG_BIT) &
+-			 0x1) << 2;
++			  PPS_DEBLOCKING_FILTER_DISABLED_FLAG_BIT) & 0x1) << 2;
+ 
+ 		if (((misc_flag0 >> PPS_DEBLOCKING_FILTER_DISABLED_FLAG_BIT) &
+ 			 0x1) == 0) {
+@@ -1020,7 +1085,6 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 			 & 0x1) << 9;
+ 	}
+ 
+-	printk("Writing %08X;%08X\n", val, val_2);
+ 	writel_relaxed(val, core->dos_base + HEVC_DBLK_CFG9);
+ 	writel_relaxed(val_2, core->dos_base + HEVC_SAO_CTRL0);
+ }
+@@ -1077,7 +1141,7 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 			  1 << 3 | // new tile
+ 			  is_next_slice_segment << 4 |
+ 			  tmvp_flag << 5 |
+-			  hevc->ldc_flag << 6 | //LDCFlag
++			  hevc->ldc_flag << 6 |
+ 			  col_from_l0_flag << 7 |
+ 			  1 << 9 |
+ 			  1 << 10 |
+@@ -1090,7 +1154,7 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 	val = max_num_merge_cand | 2 << 4 | 3 << 8 | 5 << 12 | 36 << 16;
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_CTRL1);
+ 
+-	writel_relaxed(sess->width | (sess->height << 16), core->dos_base + HEVC_MPRED_PIC_SIZE);
++	writel_relaxed(hevc->width | (hevc->height << 16), core->dos_base + HEVC_MPRED_PIC_SIZE);
+ 
+ 	val = ((hevc->lcu_x_num - 1) | (hevc->lcu_y_num - 1) << 16);
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_PIC_SIZE_LCU);
+@@ -1107,7 +1171,6 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 	writel_relaxed(hevc->col_poc, core->dos_base + HEVC_MPRED_COL_POC);
+ 
+ 	for (i = 0; i < MAX_REF_ACTIVE; ++i) {
+-		printk("Ref %u: %u;%u\n", i, ref_poc_l0[i], ref_poc_l1[i]);
+ 		writel_relaxed(ref_poc_l0[i], core->dos_base + HEVC_MPRED_L0_REF00_POC + i * 4);
+ 		writel_relaxed(ref_poc_l1[i], core->dos_base + HEVC_MPRED_L1_REF00_POC + i * 4);
+ 	}
+@@ -1123,13 +1186,12 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 	writel_relaxed(col_mv_rd_end_addr, core->dos_base + HEVC_MPRED_MV_RD_END_ADDR);
+ }
+ 
+-/*  motion compensation reference cache controller ; Only for first IDR frame for now */
++/*  motion compensation reference cache controller */
+ static void codec_hevc_set_mcrcc(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_hevc *hevc = sess->priv;
+-	unsigned int rdata32;
+-	unsigned int rdata32_2;
++	u32 val, val_2;
+ 	int l0_cnt = hevc->cur_frame->ref_num[0];
+ 	int l1_cnt = hevc->cur_frame->ref_num[1];
+ 
+@@ -1138,49 +1200,50 @@ static void codec_hevc_set_mcrcc(struct vdec_session *sess)
+ 
+ 	if (hevc->cur_frame->cur_slice_type == I_SLICE) {
+ 		/* remove reset -- disables clock */
+-		writel_relaxed(0x00, core->dos_base + HEVCD_MCRCC_CTL1);
++		writel_relaxed(0, core->dos_base + HEVCD_MCRCC_CTL1);
+ 		return;
+ 	}
+ 
+ 	if (hevc->cur_frame->cur_slice_type == P_SLICE) {
+-		writel_relaxed((1 << 1), core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
+-		rdata32 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+-		rdata32 = rdata32 & 0xffff;
+-		rdata32 = rdata32 | (rdata32 << 16);
+-		writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL2);
++		writel_relaxed(1 << 1, core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
++		val = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++		val &= 0xffff;
++		val |= (val << 16);
++		writel_relaxed(val, core->dos_base + HEVCD_MCRCC_CTL2);
+ 
+ 		if (l0_cnt == 1) {
+-			writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL3);
++			writel_relaxed(val, core->dos_base + HEVCD_MCRCC_CTL3);
+ 		} else {
+-			rdata32 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+-			rdata32 = rdata32 & 0xffff;
+-			rdata32 = rdata32 | (rdata32 << 16);
+-			writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL3);
++			val = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++			val &= 0xffff;
++			val |= (val << 16);
++			writel_relaxed(val, core->dos_base + HEVCD_MCRCC_CTL3);
+ 		}
+ 	} else { /* B_SLICE */
+ 		writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
+-		rdata32 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+-		rdata32 = rdata32 & 0xffff;
+-		rdata32 = rdata32 | (rdata32 << 16);
+-		writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL2);
++		val = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++		val &= 0xffff;
++		val |= (val << 16);
++		writel_relaxed(val, core->dos_base + HEVCD_MCRCC_CTL2);
+ 
+ 		writel_relaxed((16 << 8) | (1 << 1), core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
+-		rdata32_2 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+-		rdata32_2 = rdata32_2 & 0xffff;
+-		rdata32_2 = rdata32_2 | (rdata32_2 << 16);
+-		if (rdata32 == rdata32_2 && l1_cnt > 1) {
+-			rdata32_2 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+-			rdata32_2 = rdata32_2 & 0xffff;
+-			rdata32_2 = rdata32_2 | (rdata32_2 << 16);
++		val_2 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++		val_2 &= 0xffff;
++		val_2 |= (val_2 << 16);
++		if (val == val_2 && l1_cnt > 1) {
++			val_2 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++			val_2 &= 0xffff;
++			val_2 |= (val_2 << 16);
+ 		}
+-		writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL3);
++		writel_relaxed(val, core->dos_base + HEVCD_MCRCC_CTL3);
+ 	}
+ 
+ 	/* enable mcrcc progressive-mode */
+ 	writel_relaxed(0xff0, core->dos_base + HEVCD_MCRCC_CTL1);
+ }
+ 
+-static void codec_hevc_set_ref_list(struct vdec_session *sess, u32 ref_num, u32 *ref_poc_list)
++static void codec_hevc_set_ref_list(struct vdec_session *sess,
++				u32 ref_num, u32 *ref_poc_list)
+ {
+ 	struct codec_hevc *hevc = sess->priv;
+ 	struct hevc_frame *ref_frame;
+@@ -1234,8 +1297,10 @@ static void codec_hevc_update_col_frame(struct codec_hevc *hevc)
+ 	u32 col_ref = param->p.collocated_ref_idx;
+ 	u32 col_from_l0 = param->p.collocated_from_l0_flag;
+ 
+-	if (cur_frame->cur_slice_type == B_SLICE)
++	if (cur_frame->cur_slice_type == B_SLICE) {
+ 		list_no = 1 - col_from_l0;
++		printk("list_no = %u; col_from_l0 = %u\n", list_no, col_from_l0);
++	}
+ 
+ 	if (col_ref >= cur_frame->ref_num[list_no])
+ 		hevc->col_poc = INVALID_POC;
+@@ -1322,7 +1387,7 @@ static int codec_hevc_process_segment_header(struct vdec_session *sess)
+ 	codec_hevc_update_pocs(sess);
+ 	printk("curr_poc = %u; iPrevPOC = %u; iPrevTid0POC = %u\n", hevc->curr_poc, hevc->iPrevPOC, hevc->iPrevTid0POC);
+ 
+-	/* First slice: new frame ? */
++	/* First slice: new frame */
+ 	if (slice_segment_address == 0) {
+ 		codec_hevc_update_referenced(hevc);
+ 		codec_hevc_output_frames(sess);
+@@ -1339,27 +1404,43 @@ static int codec_hevc_process_segment_header(struct vdec_session *sess)
+ 	return 0;
+ }
+ 
+-/* The RPM raw data isn't really usable in its state.
+- * There are many hi/lo fields, others must be processed
+- * to actually get the relevant information, etc.
+- */
+-static void codec_hevc_process_rpm(struct vdec_session *sess)
++static int codec_hevc_process_rpm(struct vdec_session *sess)
+ {
+ 	struct codec_hevc *hevc = sess->priv;
+ 	union rpm_param *rpm_param = &hevc->rpm_param;
+ 	u32 lcu_x_num_div, lcu_y_num_div;
+ 
++	if (rpm_param->p.bit_depth &&
++	    sess->fmt_cap->pixfmt == V4L2_PIX_FMT_NV12M) {
++		dev_err(sess->core->dev_dec,
++		    "V4L2_PIX_FMT_NV12M is only compatible with HEVC 8-bit\n");
++		return -EINVAL;
++	}
++
++	hevc->width  = rpm_param->p.pic_width_in_luma_samples;
++	hevc->height = rpm_param->p.pic_height_in_luma_samples;
++
++	/*if (hevc->width  != sess->width ||
++	    hevc->height != sess->height) {
++		dev_err(sess->core->dev_dec,
++			"Size mismatch: bitstream %ux%u ; driver %ux%u\n",
++			hevc->width, hevc->height,
++			sess->width, sess->height);
++		return -EINVAL;
++	}*/
++
+ 	hevc->lcu_size = 1 << (rpm_param->p.log2_min_coding_block_size_minus3 +
+ 		3 + rpm_param->p.log2_diff_max_min_coding_block_size);
+ 
+-	lcu_x_num_div = (sess->width / hevc->lcu_size);
+-	lcu_y_num_div = (sess->height / hevc->lcu_size);
+-	hevc->lcu_x_num = ((sess->width % hevc->lcu_size) == 0) ? lcu_x_num_div : lcu_x_num_div + 1;
+-	hevc->lcu_y_num = ((sess->height % hevc->lcu_size) == 0) ? lcu_y_num_div : lcu_y_num_div + 1;
++	lcu_x_num_div = (hevc->width / hevc->lcu_size);
++	lcu_y_num_div = (hevc->height / hevc->lcu_size);
++	hevc->lcu_x_num = ((hevc->width % hevc->lcu_size) == 0) ? lcu_x_num_div : lcu_x_num_div + 1;
++	hevc->lcu_y_num = ((hevc->height % hevc->lcu_size) == 0) ? lcu_y_num_div : lcu_y_num_div + 1;
+ 	hevc->lcu_total = hevc->lcu_x_num * hevc->lcu_y_num;
+ 
+ 	printk("lcu_size = %u ; lcu_size_log2 = %u; lcu_x_num = %u; lcu_y_num = %u; lcu_total = %u\n", hevc->lcu_size, ilog2(hevc->lcu_size), hevc->lcu_x_num, hevc->lcu_y_num, hevc->lcu_total);
+-	printk("col_ref = %u\n", rpm_param->p.collocated_ref_idx);
++
++	return 0;
+ }
+ 
+ /* The RPM section within the workspace contains
+@@ -1371,11 +1452,9 @@ static void codec_hevc_fetch_rpm(struct vdec_session *sess)
+ 	u16 *rpm_vaddr = hevc->workspace_vaddr + RPM_OFFSET;
+ 	int i, j;
+ 
+-	for (i = 0; i < (RPM_END - RPM_BEGIN); i += 4)
++	for (i = 0; i < RPM_SIZE; i += 4)
+ 		for (j = 0; j < 4; j++)
+ 			hevc->rpm_param.l.data[i + j] = rpm_vaddr[i + 3 - j];
+-
+-	codec_hevc_process_rpm(sess);
+ }
+ 
+ static irqreturn_t codec_hevc_threaded_isr(struct vdec_session *sess)
+@@ -1384,12 +1463,18 @@ static irqreturn_t codec_hevc_threaded_isr(struct vdec_session *sess)
+ 	struct codec_hevc *hevc = sess->priv;
+ 
+ 	if (hevc->dec_status != HEVC_SLICE_SEGMENT_DONE) {
+-		dev_warn(core->dev_dec, "Unrecognized dec_status: %08X\n",
++		dev_err(core->dev_dec, "Unrecognized dec_status: %08X\n",
+ 			hevc->dec_status);
++		vdec_abort(sess);
+ 		return IRQ_HANDLED;
+ 	}
+ 
+ 	codec_hevc_fetch_rpm(sess);
++	if (codec_hevc_process_rpm(sess)) {
++		vdec_abort(sess);
++		return IRQ_HANDLED;
++	}
++
+ 	codec_hevc_process_segment_header(sess);
+ 	codec_hevc_update_frame_refs(sess, hevc->cur_frame);
+ 	codec_hevc_update_col_frame(hevc);
+@@ -1401,6 +1486,7 @@ static irqreturn_t codec_hevc_threaded_isr(struct vdec_session *sess)
+ 
+ 	writel_relaxed(readl_relaxed(core->dos_base + HEVC_WAIT_FLAG) | 2, core->dos_base + HEVC_WAIT_FLAG);
+ 	writel_relaxed(HEVC_CODED_SLICE_SEGMENT_DAT, core->dos_base + HEVC_DEC_STATUS_REG);
++	/* Interrupt the firmware's processor */
+ 	writel_relaxed(AMRISC_MAIN_REQ, core->dos_base + HEVC_MCPU_INTR_REQ);
+ 
+ 	return IRQ_HANDLED;
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.h b/drivers/media/platform/meson/vdec/codec_hevc.h
+index ff72243..1cf009b 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.h
++++ b/drivers/media/platform/meson/vdec/codec_hevc.h
+@@ -1,3 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #ifndef __MESON_VDEC_CODEC_HEVC_H_
+ #define __MESON_VDEC_CODEC_HEVC_H_
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.c b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+index 74b0ffd..0e34566 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg12.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+@@ -1,15 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #include <media/v4l2-mem2mem.h>
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.h b/drivers/media/platform/meson/vdec/codec_mpeg12.h
+index e61d3dd..7dc37ad 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg12.h
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.h
+@@ -1,3 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #ifndef __MESON_VDEC_CODEC_MPEG12_H_
+ #define __MESON_VDEC_CODEC_MPEG12_H_
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg4.c b/drivers/media/platform/meson/vdec/codec_mpeg4.c
+index b094155..f23c318 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg4.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg4.c
+@@ -1,15 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #include <media/v4l2-mem2mem.h>
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg4.h b/drivers/media/platform/meson/vdec/codec_mpeg4.h
+index 4575e71..a30ceed 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg4.h
++++ b/drivers/media/platform/meson/vdec/codec_mpeg4.h
+@@ -1,3 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #ifndef __MESON_VDEC_CODEC_MPEG4_H_
+ #define __MESON_VDEC_CODEC_MPEG4_H_
+ 
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index ad40b41..923cf07 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -1,13 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+  */
+ 
+ #include <linux/init.h>
+@@ -239,14 +232,5 @@ int esparser_init(struct platform_device *pdev, struct vdec_core *core)
+ 		return ret;
+ 	}
+ 
+-	/* Generate a fake start code to trigger the esparser IRQ later on */
+-	/*core->fake_pattern = (unsigned char *)kcalloc(1, SEARCH_PATTERN_LEN, GFP_KERNEL);
+-	core->fake_pattern[0] = 0x00;
+-	core->fake_pattern[1] = 0x00;
+-	core->fake_pattern[2] = 0x01;
+-	core->fake_pattern[3] = 0xff;
+-	core->fake_pattern_map = dma_map_single(NULL, core->fake_pattern,
+-						SEARCH_PATTERN_LEN, DMA_TO_DEVICE);*/
+-
+ 	return 0;
+ }
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/esparser.h b/drivers/media/platform/meson/vdec/esparser.h
+index 852180b..54748b4 100644
+--- a/drivers/media/platform/meson/vdec/esparser.h
++++ b/drivers/media/platform/meson/vdec/esparser.h
+@@ -1,3 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #ifndef __MESON_VDEC_ESPARSER_H_
+ #define __MESON_VDEC_ESPARSER_H_
+ 
+diff --git a/drivers/media/platform/meson/vdec/hevc_regs.h b/drivers/media/platform/meson/vdec/hevc_regs.h
+index 77f53bd..ae9b38e 100644
+--- a/drivers/media/platform/meson/vdec/hevc_regs.h
++++ b/drivers/media/platform/meson/vdec/hevc_regs.h
+@@ -1,19 +1,7 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
+ /*
+- * drivers/amlogic/amports/arch/regs/hevc_regs.h
+- *
+  * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but WITHOUT
+- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+- * more details.
+- *
+-*/
++ */
+ 
+ #ifndef HEVC_REGS_HEADERS__
+ #define HEVC_REGS_HEADERS__
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 7708e1a..24e0009 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -1,3 +1,8 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
+ #include <linux/of_device.h>
+ #include <linux/clk.h>
+ #include <linux/io.h>
+@@ -21,7 +26,7 @@
+ /* 16 MiB for parsed bitstream swap exchange */
+ #define SIZE_VIFIFO (16 * SZ_1M)
+ 
+-static void vdec_abort(struct vdec_session *sess)
++void vdec_abort(struct vdec_session *sess)
+ {
+ 	printk("Aborting decoding session!\n");
+ 	vb2_queue_error(&sess->m2m_ctx->cap_q_ctx.q);
+@@ -60,9 +65,7 @@ static int vdec_poweron(struct vdec_session *sess)
+ 
+ static void vdec_poweroff(struct vdec_session *sess) {
+ 	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+-	struct vdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+ 
+-	codec_ops->stop(sess);
+ 	vdec_ops->stop(sess);
+ 	clk_disable_unprepare(sess->core->dos_parser_clk);
+ }
+@@ -558,12 +561,21 @@ static int vdec_open(struct file *file)
+ 	struct vdec_core *core = video_drvdata(file);
+ 	const struct vdec_format *formats = core->platform->formats;
+ 	struct vdec_session *sess;
+-	
++
++	mutex_lock(&core->lock);
++	if (core->cur_sess) {
++		mutex_unlock(&core->lock);
++		return -EBUSY;
++	}
++
+ 	sess = kzalloc(sizeof(*sess), GFP_KERNEL);
+-	if (!sess)
++	if (!sess) {
++		mutex_unlock(&core->lock);
+ 		return -ENOMEM;
++	}
+ 
+-	printk("vdec_open\n");
++	core->cur_sess = sess;
++	mutex_unlock(&core->lock);
+ 
+ 	sess->core = core;
+ 	sess->fmt_cap = &formats[0];
+@@ -577,8 +589,6 @@ static int vdec_open(struct file *file)
+ 	mutex_init(&sess->lock);
+ 	mutex_init(&sess->bufs_recycle_lock);
+ 
+-	core->cur_sess = sess;
+-
+ 	sess->m2m_dev = v4l2_m2m_init(&vdec_m2m_ops);
+ 	if (IS_ERR(sess->m2m_dev)) {
+ 		printk("Fail to v4l2_m2m_init\n");
+@@ -602,6 +612,7 @@ static int vdec_open(struct file *file)
+ static int vdec_close(struct file *file)
+ {
+ 	struct vdec_session *sess = container_of(file->private_data, struct vdec_session, fh);
++	struct vdec_core *core = sess->core;
+ 
+ 	printk("vdec_close\n");
+ 	v4l2_m2m_ctx_release(sess->m2m_ctx);
+@@ -611,6 +622,7 @@ static int vdec_close(struct file *file)
+ 	mutex_destroy(&sess->lock);
+ 
+ 	kfree(sess);
++	core->cur_sess = NULL;
+ 
+ 	return 0;
+ }
+@@ -826,14 +838,16 @@ static int vdec_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++	ret = esparser_init(pdev, core);
++	if (ret)
++		return ret;
++
+ 	ret = v4l2_device_register(dev, &core->v4l2_dev);
+ 	if (ret) {
+ 		printk("Couldn't register v4l2 device\n");
+ 		return -ENOMEM;
+ 	}
+ 
+-	ret = esparser_init(pdev, core);
+-
+ 	vdev = video_device_alloc();
+ 	if (!vdev)
+ 		return -ENOMEM;
+@@ -845,6 +859,7 @@ static int vdec_probe(struct platform_device *pdev)
+ 	vdev->vfl_dir = VFL_DIR_M2M;
+ 	vdev->v4l2_dev = &core->v4l2_dev;
+ 	vdev->device_caps = V4L2_CAP_VIDEO_M2M_MPLANE | V4L2_CAP_STREAMING;
++	mutex_init(&core->lock);
+ 
+ 	ret = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+ 	if (ret) {
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index f044956..ccec4720 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -1,15 +1,6 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #ifndef __MESON_VDEC_CORE_H_
+@@ -56,6 +47,7 @@ struct vdec_core {
+ 	struct v4l2_device v4l2_dev;
+ 	
+ 	struct vdec_session *cur_sess;
++	struct mutex lock;
+ };
+ 
+ /* Describes one of the VDECS (VDEC_1, VDEC_2, VDEC_HCODEC, VDEC_HEVC) */
+@@ -143,5 +135,6 @@ void vdec_dst_buf_done_idx(struct vdec_session *sess, u32 buf_idx);
+ void vdec_dst_buf_done(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf);
+ void vdec_add_buf_reorder(struct vdec_session *sess, u64 ts);
+ void vdec_remove_buf(struct vdec_session *sess, u64 ts);
++void vdec_abort(struct vdec_session *sess);
+ 
+ #endif
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 0903f6b..5633bfc 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -1,15 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #include <linux/firmware.h>
+@@ -221,11 +212,14 @@ static int vdec_1_start(struct vdec_session *sess)
+ static int vdec_1_stop(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
++	struct vdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+ 	printk("vdec_1_stop\n");
+ 
+ 	writel_relaxed(0, core->dos_base + MPSR);
+ 	writel_relaxed(0, core->dos_base + CPSR);
+ 
++	codec_ops->stop(sess);
++
+ 	while (readl_relaxed(core->dos_base + IMEM_DMA_CTRL) & 0x8000) { }
+ 
+ 	writel_relaxed((1<<12)|(1<<11), core->dos_base + DOS_SW_RESET0);
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.h b/drivers/media/platform/meson/vdec/vdec_1.h
+index 9bebec7..b6c8b41 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.h
++++ b/drivers/media/platform/meson/vdec/vdec_1.h
+@@ -1,15 +1,6 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #ifndef __MESON_VDEC_VDEC_1_H_
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index ed29005..b5e1522 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -1,15 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+- * Copyright (C) 2018 Maxime Jourdan
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+  */
+ 
+ #include <linux/firmware.h>
+@@ -118,8 +109,16 @@ static u32 vdec_hevc_vififo_level(struct vdec_session *sess)
+ static int vdec_hevc_stop(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
++	struct vdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+ 	printk("vdec_hevc_stop\n");
+ 
++	/* Disable interrupt */
++	writel_relaxed(0, core->dos_base + HEVC_ASSIST_MBOX1_MASK);
++	/* Disable firmware processor */
++	writel_relaxed(0, core->dos_base + HEVC_MPSR);
++
++	codec_ops->stop(sess);
++
+ 	/* Enable VDEC_HEVC Isolation */
+ 	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc00, 0xc00);
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec_platform.c b/drivers/media/platform/meson/vdec/vdec_platform.c
+index 693adb34..d34d33e 100644
+--- a/drivers/media/platform/meson/vdec/vdec_platform.c
++++ b/drivers/media/platform/meson/vdec/vdec_platform.c
+@@ -1,15 +1,6 @@
++// SPDX-License-Identifier: GPL-2.0+
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #include "vdec_platform.h"
+diff --git a/drivers/media/platform/meson/vdec/vdec_platform.h b/drivers/media/platform/meson/vdec/vdec_platform.h
+index 8282b0e..d19fad3 100644
+--- a/drivers/media/platform/meson/vdec/vdec_platform.h
++++ b/drivers/media/platform/meson/vdec/vdec_platform.h
+@@ -1,15 +1,6 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
+ /*
+  * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+  */
+ 
+ #ifndef __MESON_VDEC_PLATFORM_H_

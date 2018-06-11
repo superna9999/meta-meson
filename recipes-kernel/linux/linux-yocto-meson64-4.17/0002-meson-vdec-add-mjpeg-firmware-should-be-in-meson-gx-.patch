@@ -1,0 +1,70 @@
+From 2233d16320de79f54fb5963452fe09aa2bfcf7b2 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Tue, 12 Jun 2018 10:26:20 +0200
+Subject: [PATCH] meson: vdec: add mjpeg firmware (should be in meson/gx/),
+ same for every platform
+
+---
+ vmjpeg_mc | Bin 0 -> 16384 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100644 vmjpeg_mc
+
+diff --git a/vmjpeg_mc b/vmjpeg_mc
+new file mode 100644
+index 0000000000000000000000000000000000000000..c365b0d0c0d21dbdc50c861f22c84a0d2d6cdece
+GIT binary patch
+literal 16384
+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
+
+literal 0
+HcmV?d00001
+

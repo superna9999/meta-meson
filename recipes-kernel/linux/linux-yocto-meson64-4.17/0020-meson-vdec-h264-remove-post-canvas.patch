@@ -1,0 +1,107 @@
+From 786965fa893f807c0bda5a9ca5bab62f999b4b8d Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Wed, 4 Apr 2018 16:14:16 +0200
+Subject: [PATCH] meson: vdec: h264: remove post canvas
+
+The decoder runs just fine without it, and it saves some RAM.
+---
+ drivers/media/platform/meson/vdec/codec_h264.c | 44 ++------------------------
+ 1 file changed, 3 insertions(+), 41 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index 4b2acae..256b9a6 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -6,7 +6,6 @@
+ #include "canvas.h"
+ 
+ #define SIZE_EXT_FW    (SZ_1K * 20)
+-#define SIZE_POST_CNV  ((3860 * 2160 * 3) / 2)
+ #define SIZE_WORKSPACE 0x1ee000
+ 
+ /* Offset added by the firmware which must be substracted
+@@ -53,10 +52,6 @@ struct codec_h264 {
+ 	void      *ext_fw_vaddr;
+ 	dma_addr_t ext_fw_paddr;
+ 
+-	/* The decoder requires a "post canvas", don't really know what it's for */
+-	void      *post_canvas_vaddr;
+-	dma_addr_t post_canvas_paddr;
+-
+ 	/* Buffer for the H.264 Workspace */
+ 	void      *workspace_vaddr;
+ 	dma_addr_t workspace_paddr;
+@@ -142,24 +137,14 @@ static int codec_h264_buffers_thread(void *data)
+ static int codec_h264_start(struct vdec_session *sess) {
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_h264 *h264 = sess->priv;
+-	int ret;
+-	
++
+ 	printk("codec_h264_start\n");
+-	
+-	/* Allocate a "post canvas", purpose unknown */
+-	h264->post_canvas_vaddr = dma_alloc_coherent(core->dev, SIZE_POST_CNV, &h264->post_canvas_paddr, GFP_KERNEL);
+-	if (!h264->post_canvas_paddr) {
+-		printk("Failed to request post canvas\n");
+-		return -ENOMEM;
+-	}
+-	printk("Allocated post canvas: %08X - %08X\n", h264->post_canvas_paddr, h264->post_canvas_paddr + SIZE_POST_CNV);
+-	
++
+ 	/* Allocate some memory for the H.264 decoder's state */
+ 	h264->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &h264->workspace_paddr, GFP_KERNEL);
+ 	if (!h264->workspace_vaddr) {
+ 		printk("Failed to request H.264 Workspace\n");
+-		ret = -ENOMEM;
+-		goto free_post;
++		return -ENOMEM;
+ 	}
+ 	printk("Allocated Workspace: %08X - %08X\n", h264->workspace_paddr, h264->workspace_paddr + SIZE_WORKSPACE);
+ 
+@@ -209,12 +194,6 @@ static int codec_h264_start(struct vdec_session *sess) {
+ 	h264->buffers_thread = kthread_run(codec_h264_buffers_thread, sess, "buffers_done");
+ 	
+ 	return 0;
+-	
+-free_post:
+-	dma_free_coherent(core->dev, SIZE_EXT_FW, h264->post_canvas_vaddr, h264->post_canvas_paddr);
+-	h264->post_canvas_paddr = 0;
+-	
+-	return ret;
+ }
+ 
+ static int codec_h264_stop(struct vdec_session *sess)
+@@ -231,11 +210,6 @@ static int codec_h264_stop(struct vdec_session *sess)
+ 		h264->ext_fw_vaddr = 0;
+ 	}
+ 	
+-	if (h264->post_canvas_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_POST_CNV, h264->post_canvas_vaddr, h264->post_canvas_paddr);
+-		h264->post_canvas_vaddr = 0;
+-	}
+-	
+ 	if (h264->workspace_vaddr) {
+ 		dma_free_coherent(core->dev, SIZE_WORKSPACE, h264->workspace_vaddr, h264->workspace_paddr);
+ 		h264->workspace_vaddr = 0;
+@@ -323,20 +297,8 @@ static void codec_h264_set_param(struct vdec_session *sess) {
+ 
+ 	max_reference_size++;
+ 
+-	/* I don't really know the purpose of this post canvas.
+-	 * It seems required with the write to AV_SCRATCH_3 though..
+-	 */
+-	printk("Configuring post canvas to %08X\n", h264->post_canvas_paddr);
+-	/* Setup post canvas for Y */
+-	vdec_canvas_setup(core->dmc_base, 0x00, h264->post_canvas_paddr, mb_width << 4, mb_height << 4, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-	/* Setup post canvas for U/V */
+-	vdec_canvas_setup(core->dmc_base, 0x1, h264->post_canvas_paddr + (mb_total << 8), mb_width << 4, mb_height << 3, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
+-
+ 	printk("mb_total = %d; mb_mv_byte = %d; actual_dpb_size = %d; max_dpb_size = %d\n max_reference_size = %d; mb_width = %d; mb_height = %d\n", mb_total, mb_mv_byte, actual_dpb_size, max_dpb_size, max_reference_size, mb_width, mb_height);
+ 
+-	printk("Setting POST CANVAS to %08X\n", (0x1 << 16) | (0x1 << 8) | 0x0);
+-	writel_relaxed((0x1 << 16) | (0x1 << 8) | 0x0, core->dos_base + AV_SCRATCH_3);
+-
+ 	h264->ref_size = mb_total * mb_mv_byte * max_reference_size;
+ 	h264->ref_vaddr = dma_alloc_coherent(core->dev, h264->ref_size, &h264->ref_paddr, GFP_ATOMIC);
+ 

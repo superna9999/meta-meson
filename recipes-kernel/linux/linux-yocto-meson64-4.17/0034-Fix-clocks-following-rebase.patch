@@ -1,0 +1,143 @@
+From 8b5a1a2a27d79b4bde1285df48f491c1e4232a7c Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 15 Apr 2018 05:34:48 +0200
+Subject: [PATCH] Fix clocks following rebase
+
+---
+ drivers/clk/meson/gxbb.c | 77 +++++++++++++++++++++++++-----------------------
+ 1 file changed, 40 insertions(+), 37 deletions(-)
+
+diff --git a/drivers/clk/meson/gxbb.c b/drivers/clk/meson/gxbb.c
+index 2422d06..8edd1ff 100644
+--- a/drivers/clk/meson/gxbb.c
++++ b/drivers/clk/meson/gxbb.c
+@@ -1545,89 +1545,92 @@ static struct clk_regmap gxbb_vapb = {
+ 
+ /* VDEC clocks */
+ 
+-static u32 mux_table_vdec[] = {0, 1, 2, 3};
+ static const char * const gxbb_vdec_parent_names[] = {
+ 	"fclk_div4", "fclk_div3", "fclk_div5", "fclk_div7"
+ };
+ 
+-static struct clk_mux gxbb_vdec_1_sel = {
+-	.reg = (void *)HHI_VDEC_CLK_CNTL,
+-	.mask = 0x3,
+-	.shift = 9,
+-	.lock = &meson_clk_lock,
+-	.table = mux_table_vdec,
++static struct clk_regmap gxbb_vdec_1_sel = {
++	.data = &(struct clk_regmap_mux_data){
++		.offset = HHI_VDEC_CLK_CNTL,
++		.mask = 0x3,
++		.shift = 9,
++	},
+ 	.hw.init = &(struct clk_init_data){
+ 		.name = "vdec_1_sel",
+-		.ops = &clk_mux_ops,
++		.ops = &clk_regmap_mux_ops,
+ 		.parent_names = gxbb_vdec_parent_names,
+ 		.num_parents = ARRAY_SIZE(gxbb_vdec_parent_names),
+ 		.flags = CLK_SET_RATE_NO_REPARENT,
+ 	},
+ };
+ 
+-static struct clk_divider gxbb_vdec_1_div = {
+-	.reg = (void *)HHI_VDEC_CLK_CNTL,
+-	.shift = 0,
+-	.width = 7,
+-	.lock = &meson_clk_lock,
++static struct clk_regmap gxbb_vdec_1_div = {
++	.data = &(struct clk_regmap_div_data){
++		.offset = HHI_VDEC_CLK_CNTL,
++		.shift = 0,
++		.width = 7,
++	},
+ 	.hw.init = &(struct clk_init_data){
+ 		.name = "vdec_1_div",
+-		.ops = &clk_divider_ops,
++		.ops = &clk_regmap_divider_ops,
+ 		.parent_names = (const char *[]){ "vdec_1_sel" },
+ 		.num_parents = 1,
+ 		.flags = CLK_SET_RATE_PARENT,
+ 	},
+ };
+ 
+-static struct clk_gate gxbb_vdec_1 = {
+-	.reg = (void *)HHI_VDEC_CLK_CNTL,
+-	.bit_idx = 8,
+-	.lock = &meson_clk_lock,
++static struct clk_regmap gxbb_vdec_1 = {
++	.data = &(struct clk_regmap_gate_data){
++		.offset = HHI_VDEC_CLK_CNTL,
++		.bit_idx = 8,
++	},
+ 	.hw.init = &(struct clk_init_data) {
+ 		.name = "vdec_1",
+-		.ops = &clk_gate_ops,
++		.ops = &clk_regmap_gate_ops,
+ 		.parent_names = (const char *[]){ "vdec_1_div" },
+ 		.num_parents = 1,
+ 		.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
+ 	},
+ };
+ 
+-static struct clk_mux gxbb_vdec_hevc_sel = {
+-	.reg = (void *)HHI_VDEC2_CLK_CNTL,
+-	.mask = 0x3,
+-	.shift = 25,
+-	.lock = &meson_clk_lock,
+-	.table = mux_table_vdec,
++static struct clk_regmap gxbb_vdec_hevc_sel = {
++	.data = &(struct clk_regmap_mux_data){
++		.offset = HHI_VDEC2_CLK_CNTL,
++		.mask = 0x3,
++		.shift = 25,
++	},
+ 	.hw.init = &(struct clk_init_data){
+ 		.name = "vdec_hevc_sel",
+-		.ops = &clk_mux_ops,
++		.ops = &clk_regmap_mux_ops,
+ 		.parent_names = gxbb_vdec_parent_names,
+ 		.num_parents = ARRAY_SIZE(gxbb_vdec_parent_names),
+ 		.flags = CLK_SET_RATE_NO_REPARENT,
+ 	},
+ };
+ 
+-static struct clk_divider gxbb_vdec_hevc_div = {
+-	.reg = (void *)HHI_VDEC2_CLK_CNTL,
+-	.shift = 16,
+-	.width = 7,
+-	.lock = &meson_clk_lock,
++static struct clk_regmap gxbb_vdec_hevc_div = {
++	.data = &(struct clk_regmap_div_data){
++		.offset = HHI_VDEC2_CLK_CNTL,
++		.shift = 16,
++		.width = 7,
++	},
+ 	.hw.init = &(struct clk_init_data){
+ 		.name = "vdec_hevc_div",
+-		.ops = &clk_divider_ops,
++		.ops = &clk_regmap_divider_ops,
+ 		.parent_names = (const char *[]){ "vdec_hevc_sel" },
+ 		.num_parents = 1,
+ 		.flags = CLK_SET_RATE_PARENT,
+ 	},
+ };
+ 
+-static struct clk_gate gxbb_vdec_hevc = {
+-	.reg = (void *)HHI_VDEC2_CLK_CNTL,
+-	.bit_idx = 24,
+-	.lock = &meson_clk_lock,
++static struct clk_regmap gxbb_vdec_hevc = {
++	.data = &(struct clk_regmap_gate_data){
++		.offset = HHI_VDEC2_CLK_CNTL,
++		.bit_idx = 24,
++	},
+ 	.hw.init = &(struct clk_init_data) {
+ 		.name = "vdec_hevc",
+-		.ops = &clk_gate_ops,
++		.ops = &clk_regmap_gate_ops,
+ 		.parent_names = (const char *[]){ "vdec_hevc_div" },
+ 		.num_parents = 1,
+ 		.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,

@@ -1,0 +1,42 @@
+From b6174a7034fe844b4275402c8644d9ef527f58b8 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <raptorteak@gmail.com>
+Date: Sat, 17 Mar 2018 18:06:35 +0100
+Subject: [PATCH] media: meson-vdec: Change capture pixfmt to
+ V4L2_PIX_FMT_NV21M
+
+Turns out FFmpeg won't recognize V4L2_PIX_FMT_NV21, which is why it was set to V4L2_PIX_FMT_NV12 previously.
+---
+ drivers/media/platform/meson/vdec/vdec.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index dfb11ed..c7c00f8 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -341,7 +341,7 @@ static int vdec_try_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ 	memset(pixmp->reserved, 0, sizeof(pixmp->reserved));
+ 
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+-		pixmp->pixelformat = V4L2_PIX_FMT_NV12;
++		pixmp->pixelformat = V4L2_PIX_FMT_NV21M;
+ 	else if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		pixmp->pixelformat = V4L2_PIX_FMT_H264;
+ 	else
+@@ -378,7 +378,7 @@ static int vdec_g_fmt(struct file *file, void *fh, struct v4l2_format *f)
+ 	memset(pixmp->reserved, 0, sizeof(pixmp->reserved));
+ 
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+-		pixmp->pixelformat = V4L2_PIX_FMT_NV12;
++		pixmp->pixelformat = V4L2_PIX_FMT_NV21M;
+ 	else if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		pixmp->pixelformat = V4L2_PIX_FMT_H264;
+ 	else
+@@ -433,7 +433,7 @@ static int vdec_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *f)
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		f->pixelformat = V4L2_PIX_FMT_H264;
+ 	else if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+-		f->pixelformat = V4L2_PIX_FMT_NV12;
++		f->pixelformat = V4L2_PIX_FMT_NV21M;
+ 	else
+ 		return -EINVAL;
+ 

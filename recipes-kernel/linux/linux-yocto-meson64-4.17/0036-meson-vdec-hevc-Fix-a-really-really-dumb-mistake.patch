@@ -1,0 +1,23 @@
+From a736dc7f89e1ec34e183cf5a32aa159aed6f3d31 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Wed, 18 Apr 2018 05:44:01 +0200
+Subject: [PATCH] meson: vdec: hevc: Fix a really, really dumb mistake
+
+We can now receive more than one HEVC_SLICE_SEGMENT_DONE interrupt...
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 77b541b..3a9dab8 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -854,7 +854,7 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	u32 slice_deblocking_filter_disabled_flag;
+ 	u32 val, val_2;
+ 
+-	val = (readl_relaxed(core->dos_base + HEVC_SAO_CTRL0) & 0xf) | ilog2(hevc->lcu_size);
++	val = (readl_relaxed(core->dos_base + HEVC_SAO_CTRL0) & ~0xf) | ilog2(hevc->lcu_size);
+ 	writel_relaxed(val, core->dos_base + HEVC_SAO_CTRL0);
+ 
+ 	writel_relaxed(sess->width | (sess->height << 16), core->dos_base + HEVC_SAO_PIC_SIZE);

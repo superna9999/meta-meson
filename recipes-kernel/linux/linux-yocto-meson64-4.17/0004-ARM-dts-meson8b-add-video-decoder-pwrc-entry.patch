@@ -1,0 +1,99 @@
+From 66831da3d9891e4feb04598f91e277d5353afdfd Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <raptorteak@gmail.com>
+Date: Thu, 15 Mar 2018 13:50:56 +0100
+Subject: [PATCH] ARM: dts: meson8b: add video decoder/pwrc entry
+
+---
+ arch/arm/boot/dts/meson.dtsi   | 26 ++++++++++++++++++++++++++
+ arch/arm/boot/dts/meson8b.dtsi | 27 +++++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+)
+
+diff --git a/arch/arm/boot/dts/meson.dtsi b/arch/arm/boot/dts/meson.dtsi
+index 0d9faf1..2d78a23 100644
+--- a/arch/arm/boot/dts/meson.dtsi
++++ b/arch/arm/boot/dts/meson.dtsi
+@@ -211,6 +211,17 @@
+ 			#size-cells = <1>;
+ 			ranges = <0x0 0xc8100000 0x100000>;
+ 
++			sysctrl_ao: sys-ctrl@0 {
++				compatible = "syscon", "simple-mfd";
++				reg = <0x0 0x100>;
++
++				pwrc_vdec: power-controller-vdec@0 {
++					//reg = <0x0 0x80 0x0 0x80>;
++					compatible = "amlogic,meson-pwrc-vdec";
++					#power-domain-cells = <0>;
++				};
++			};
++
+ 			ir_receiver: ir-receiver@480 {
+ 				compatible= "amlogic,meson6-ir";
+ 				reg = <0x480 0x20>;
+@@ -268,6 +279,21 @@
+ 			status = "disabled";
+ 		};
+ 
++		vdec: video-decoder@0xd0050000 {
++			compatible = "amlogic,meson8b-vdec";
++			reg = <0xd0050000 0x10000
++				   0xc110a580 0xe4
++				   0xc8006000 0x60>;
++			reg-names = "dos", "esparser", "dmc";
++
++			interrupts = <GIC_SPI 44 IRQ_TYPE_EDGE_RISING
++						  GIC_SPI 32 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "vdecirq", "esparserirq";
++
++			amlogic,ao-sysctrl = <&sysctrl_ao>;
++			status = "okay";
++		};
++
+ 		ahb_sram: sram@d9000000 {
+ 			compatible = "mmio-sram";
+ 			reg = <0xd9000000 0x20000>;
+diff --git a/arch/arm/boot/dts/meson8b.dtsi b/arch/arm/boot/dts/meson8b.dtsi
+index 553b821..2897f8a 100644
+--- a/arch/arm/boot/dts/meson8b.dtsi
++++ b/arch/arm/boot/dts/meson8b.dtsi
+@@ -102,6 +102,15 @@
+ 			reg = <0x0 0x200000>;
+ 			no-map;
+ 		};
++
++		/* 128 MiB for DMA requests (mostly VDEC) */
++		linux,cma {
++			compatible = "shared-dma-pool";
++			reusable;
++			size = <0x8000000>;
++			alignment = <0x400000>;
++			linux,cma-default;
++		};
+ 	};
+ 
+ 	scu@c4300000 {
+@@ -350,6 +359,24 @@
+ 	resets = <&reset RESET_USB_OTG>;
+ };
+ 
++&vdec {
++	power-domains = <&pwrc_vdec>;
++};
++
++&pwrc_vdec {
++	clocks = <&clkc CLKID_VPU_INTR>, <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>;
++	clock-names = "vpu_intr", "dos_parser", "vdec_1";
++
++	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
++					  <&clkc CLKID_VDEC_1>;
++
++	assigned-clock-parents = <&clkc CLKID_FCLK_DIV7>,
++							 <0>;
++
++	assigned-clock-rates = <0>,
++						   <200000000>;
++};
++
+ &wdt {
+ 	compatible = "amlogic,meson8b-wdt";
+ };

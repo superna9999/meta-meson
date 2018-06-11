@@ -1,0 +1,131 @@
+From 3d8ffe934741d152791458dd5ad8219f472ffc91 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Thu, 5 Apr 2018 16:47:17 +0200
+Subject: [PATCH] meson: vdec: h264: Fix SEI data handling
+
+Bitstreams that feature SEI data will trigger the uCode
+to write it to yet another buffer.
+
+Add support by handling it in the ISR, and allocating a buffer
+so that the SEI doesn't get written to random memory.
+
+This doesn't seem necessary on older SoC/uCode (m8b for instance..)
+---
+ drivers/media/platform/meson/vdec/codec_h264.c | 42 +++++++++++++++++++++++---
+ 1 file changed, 37 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index 256b9a6..b15c47c 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -5,8 +5,9 @@
+ #include "codec_helpers.h"
+ #include "canvas.h"
+ 
+-#define SIZE_EXT_FW    (SZ_1K * 20)
+-#define SIZE_WORKSPACE 0x1ee000
++#define SIZE_EXT_FW	(SZ_1K * 20)
++#define SIZE_WORKSPACE	0x1ee000
++#define SIZE_SEI	(SZ_1K * 8)
+ 
+ /* Offset added by the firmware which must be substracted
+  * from the workspace paddr
+@@ -40,6 +41,9 @@
+ #define AV_SCRATCH_F  0x273c
+ #define AV_SCRATCH_G  0x2740
+ #define AV_SCRATCH_H  0x2744
++#define AV_SCRATCH_I  0x2748
++#define AV_SCRATCH_J  0x274c
++	#define SEI_DATA_READY BIT(15)
+ 
+ #define POWER_CTL_VLD 0x3020
+ 
+@@ -61,6 +65,10 @@ struct codec_h264 {
+ 	dma_addr_t ref_paddr;
+ 	u32	   ref_size;
+ 
++	/* Buffer for parsed SEI data ; > M8 ? */
++	void      *sei_vaddr;
++	dma_addr_t sei_paddr;
++
+ 	/* Housekeeping thread for marking buffers to DONE
+ 	 * and recycling them into the hardware
+ 	 */
+@@ -135,6 +143,7 @@ static int codec_h264_buffers_thread(void *data)
+ }
+ 
+ static int codec_h264_start(struct vdec_session *sess) {
++	u32 workspace_offset;
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_h264 *h264 = sess->priv;
+ 
+@@ -148,6 +157,14 @@ static int codec_h264_start(struct vdec_session *sess) {
+ 	}
+ 	printk("Allocated Workspace: %08X - %08X\n", h264->workspace_paddr, h264->workspace_paddr + SIZE_WORKSPACE);
+ 
++	/* Allocate some memory for the H.264 SEI dump */
++	h264->sei_vaddr = dma_alloc_coherent(core->dev, SIZE_SEI, &h264->sei_paddr, GFP_KERNEL);
++	if (!h264->sei_vaddr) {
++		printk("Failed to request H.264 SEI\n");
++		return -ENOMEM;
++	}
++	printk("Allocated SEI: %08X - %08X\n", h264->sei_paddr, h264->sei_paddr + SIZE_SEI);
++
+ 	while (readl_relaxed(core->dos_base + DCAC_DMA_CTRL) & 0x8000) { }
+ 	while (readl_relaxed(core->dos_base + LMEM_DMA_CTRL) & 0x8000) { }
+ 
+@@ -167,8 +184,12 @@ static int codec_h264_start(struct vdec_session *sess) {
+ 	writel_relaxed(0, core->dos_base + PSCALE_CTRL);
+ 
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-	writel_relaxed(h264->workspace_paddr - DEF_BUF_START_ADDR, core->dos_base + AV_SCRATCH_1);
++
++	workspace_offset = h264->workspace_paddr - DEF_BUF_START_ADDR;
++	writel_relaxed(workspace_offset, core->dos_base + AV_SCRATCH_1);
+ 	writel_relaxed(h264->ext_fw_paddr, core->dos_base + AV_SCRATCH_G);
++	writel_relaxed(h264->sei_paddr - workspace_offset, core->dos_base + AV_SCRATCH_I);
++
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_7);
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_8);
+ 	writel_relaxed(0, core->dos_base + AV_SCRATCH_9);
+@@ -220,6 +241,11 @@ static int codec_h264_stop(struct vdec_session *sess)
+ 		h264->ref_vaddr = 0;
+ 	}
+ 	
++	if (h264->sei_vaddr) {
++		dma_free_coherent(core->dev, SIZE_SEI, h264->sei_vaddr, h264->sei_paddr);
++		h264->sei_vaddr = 0;
++	}
++
+ 	kfree(h264);
+ 	sess->priv = 0;
+ 	
+@@ -346,8 +372,10 @@ static irqreturn_t codec_h264_isr(struct vdec_session *sess)
+ 		int error_count, error, num_frame, status, eos = 0;
+ 		error_count = readl_relaxed(core->dos_base + AV_SCRATCH_D);
+ 		num_frame = (cpu_cmd >> 8) & 0xff;
+-		if (error_count)
++		if (error_count) {
+ 			printk("decoder error(s) happened, count %d\n", error_count);
++			writel_relaxed(0, core->dos_base + AV_SCRATCH_D);
++		}
+ 
+ 		//printk("Decoded %d frames\n", num_frame);
+ 
+@@ -383,11 +411,15 @@ static irqreturn_t codec_h264_isr(struct vdec_session *sess)
+ 		}
+ 
+ 		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+-	} else {
++	} else if ((cpu_cmd & 0xff) != 0) {
+ 		printk("Unexpected cpu_cmd: %08X\n", cpu_cmd);
+ 		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+ 	}
+ 
++	/* Decoder has some SEI data for us ; ignore */
++	if (readl_relaxed(core->dos_base + AV_SCRATCH_J) & SEI_DATA_READY)
++		writel_relaxed(0, core->dos_base + AV_SCRATCH_J);
++
+ 	return IRQ_HANDLED;
+ }
+ 

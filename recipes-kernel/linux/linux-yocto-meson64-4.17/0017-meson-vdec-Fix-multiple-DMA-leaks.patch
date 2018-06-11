@@ -1,0 +1,69 @@
+From f8e5a03d261284c4ee2a35aa3d3cd9f83023aaee Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 1 Apr 2018 22:08:12 +0200
+Subject: [PATCH] meson: vdec: Fix multiple DMA leaks
+
+---
+ drivers/media/platform/meson/vdec/h264.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/h264.c b/drivers/media/platform/meson/vdec/h264.c
+index 7dae4db9..060db55 100644
+--- a/drivers/media/platform/meson/vdec/h264.c
++++ b/drivers/media/platform/meson/vdec/h264.c
+@@ -62,6 +62,7 @@ struct vdec_h264 {
+ 	/* Buffer for the H.264 references MV */
+ 	void      *ref_vaddr;
+ 	dma_addr_t ref_paddr;
++	u32	   ref_size;
+ 	
+ 	/* Housekeeping thread for marking buffers to DONE
+ 	 * and recycling them into the hardware
+@@ -231,17 +232,17 @@ static int vdec_h264_stop(struct vdec_session *sess)
+ 	}
+ 	
+ 	if (h264->post_canvas_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_EXT_FW, h264->post_canvas_vaddr, h264->post_canvas_paddr);
++		dma_free_coherent(core->dev, SIZE_POST_CNV, h264->post_canvas_vaddr, h264->post_canvas_paddr);
+ 		h264->post_canvas_vaddr = 0;
+ 	}
+ 	
+ 	if (h264->workspace_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_EXT_FW, h264->workspace_vaddr, h264->workspace_paddr);
++		dma_free_coherent(core->dev, SIZE_WORKSPACE, h264->workspace_vaddr, h264->workspace_paddr);
+ 		h264->workspace_vaddr = 0;
+ 	}
+ 	
+ 	if (h264->ref_vaddr) {
+-		dma_free_coherent(core->dev, SIZE_EXT_FW, h264->ref_vaddr, h264->ref_paddr);
++		dma_free_coherent(core->dev, h264->ref_size, h264->ref_vaddr, h264->ref_paddr);
+ 		h264->ref_vaddr = 0;
+ 	}
+ 	
+@@ -287,7 +288,6 @@ static void vdec_h264_set_param(struct vdec_session *sess) {
+ 	u32 mb_mv_byte;
+ 	u32 actual_dpb_size = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
+ 	u32 max_dpb_size = 4;
+-	u32 ref_buf_size;
+ 	struct v4l2_m2m_buffer *buf;
+ 	struct vdec_core *core = sess->core;
+ 	struct vdec_h264 *h264 = sess->priv;
+@@ -360,15 +360,15 @@ static void vdec_h264_set_param(struct vdec_session *sess) {
+ 	printk("Setting POST CANVAS to %08X\n", (0x1 << 16) | (0x1 << 8) | 0x0);
+ 	writel_relaxed((0x1 << 16) | (0x1 << 8) | 0x0, core->dos_base + AV_SCRATCH_3);
+ 
+-	ref_buf_size = mb_total * mb_mv_byte * max_reference_size;
+-	h264->ref_vaddr = dma_alloc_coherent(core->dev, ref_buf_size, &h264->ref_paddr, GFP_ATOMIC);
++	h264->ref_size = mb_total * mb_mv_byte * max_reference_size;
++	h264->ref_vaddr = dma_alloc_coherent(core->dev, h264->ref_size, &h264->ref_paddr, GFP_ATOMIC);
+ 
+ 	/* Address to store the references' MVs ? */
+ 	writel_relaxed(h264->ref_paddr, core->dos_base + AV_SCRATCH_1);
+ 	printk("Max references buffer size: %d\n", mb_total * mb_mv_byte * max_reference_size);
+ 
+ 	/* End of ref MV */
+-	writel_relaxed(h264->ref_paddr + ref_buf_size, core->dos_base + AV_SCRATCH_4);
++	writel_relaxed(h264->ref_paddr + h264->ref_size, core->dos_base + AV_SCRATCH_4);
+ 
+ 	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (max_dpb_size << 8), core->dos_base + AV_SCRATCH_0);
+ }

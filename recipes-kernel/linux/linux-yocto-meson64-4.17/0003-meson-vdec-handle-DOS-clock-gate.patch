@@ -1,0 +1,103 @@
+From 8d1c5ef3ffa46976f899a2da57ba080a055ba6b3 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Wed, 13 Jun 2018 10:56:34 +0200
+Subject: [PATCH] meson: vdec: handle DOS clock gate
+
+Turns out it's not always enabled by default.
+
+Also, whether it is or not, this code should have been there anyway.
+---
+ arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi |  4 ++--
+ arch/arm64/boot/dts/amlogic/meson-gxl.dtsi  |  4 ++--
+ drivers/media/platform/meson/vdec/vdec.c    | 20 +++++++++++++++++++-
+ drivers/media/platform/meson/vdec/vdec.h    |  1 +
+ 4 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+index 316852b..c17e146 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+@@ -798,6 +798,6 @@
+ 
+ &vdec {
+ 	compatible = "amlogic,meson-gxbb-vdec";
+-	clocks = <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
+-	clock-names = "dos_parser", "vdec_1", "vdec_hevc";
++	clocks = <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_DOS>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
++	clock-names = "dos_parser", "dos", "vdec_1", "vdec_hevc";
+ };
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+index 6cf114c..c1221ea 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+@@ -808,6 +808,6 @@
+ 
+ &vdec {
+ 	compatible = "amlogic,meson-gxl-vdec";
+-	clocks = <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
+-	clock-names = "dos_parser", "vdec_1", "vdec_hevc";
++	clocks = <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_DOS>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
++	clock-names = "dos_parser", "dos", "vdec_1", "vdec_hevc";
+ };
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index c745fdd..104f55a 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -54,19 +54,31 @@ static int vdec_poweron(struct vdec_session *sess)
+ 	if (ret)
+ 		return ret;
+ 
++	ret = clk_prepare_enable(sess->core->dos_clk);
++	if (ret)
++		goto disable_dos_parser;
++
+ 	ret = vdec_ops->start(sess);
+ 	if (ret)
+-		return ret;
++		goto disable_dos;
+ 
+ 	esparser_power_up(sess);
+ 
+ 	return 0;
++
++disable_dos:
++	clk_disable_unprepare(sess->core->dos_clk);
++disable_dos_parser:
++	clk_disable_unprepare(sess->core->dos_parser_clk);
++
++	return ret;
+ }
+ 
+ static void vdec_poweroff(struct vdec_session *sess) {
+ 	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 
+ 	vdec_ops->stop(sess);
++	clk_disable_unprepare(sess->core->dos_clk);
+ 	clk_disable_unprepare(sess->core->dos_parser_clk);
+ }
+ 
+@@ -870,6 +882,12 @@ static int vdec_probe(struct platform_device *pdev)
+ 		return PTR_ERR(core->dos_parser_clk);
+ 	}
+ 
++	core->dos_clk = devm_clk_get(dev, "dos");
++	if (IS_ERR(core->dos_clk)) {
++		dev_err(dev, "dos clock request failed\n");
++		return PTR_ERR(core->dos_clk);
++	}
++
+ 	core->vdec_1_clk = devm_clk_get(dev, "vdec_1");
+ 	if (IS_ERR(core->vdec_1_clk)) {
+ 		dev_err(dev, "vdec_1 clock request failed\n");
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 1782cbcc..09edf8c 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -40,6 +40,7 @@ struct vdec_core {
+ 	const struct vdec_platform *platform;
+ 
+ 	struct clk *dos_parser_clk;
++	struct clk *dos_clk;
+ 	struct clk *vdec_1_clk;
+ 	struct clk *vdec_hevc_clk;
+ 

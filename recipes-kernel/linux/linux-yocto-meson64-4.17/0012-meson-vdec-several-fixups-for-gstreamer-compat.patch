@@ -1,0 +1,331 @@
+From 8f3256d5aac11e31815bf3c7e3c44dec04393764 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Fri, 30 Mar 2018 18:24:07 +0200
+Subject: [PATCH] meson: vdec: several fixups for gstreamer compat
+
+The biggest 2 fixes are supporting more than one input buffer
+and correctly filling the bytesused buffer property.
+
+This commit also disables managing the vpu_intr clock
+as it kill the VPU (DRM). It's unsure whether this clock
+is actually needed for the vdec.
+
+The following gstreamer pipeline now works on S905X:
+
+gst-launch-1.0 filesrc location=/foo/bar ! parsebin ! v4l2video0dec ! videoconvert n-threads=4 ! kmssink driver-name=meson force-modesetting=true connector-id=31
+---
+ drivers/media/platform/meson/vdec/esparser.c | 59 ++++++++++++++--------------
+ drivers/media/platform/meson/vdec/vdec.c     | 57 +++++++++++++++------------
+ drivers/media/platform/meson/vdec/vdec.h     |  2 +-
+ drivers/soc/amlogic/meson-pwrc-vdec.c        |  4 +-
+ 4 files changed, 64 insertions(+), 58 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 2262e17..29db7a4 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -150,50 +150,51 @@ int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf) {
+ 
+ int esparser_queue(void *data) {
+ 	struct vdec_core *core = data;
+-	struct vb2_v4l2_buffer *vbuf;
++	struct v4l2_m2m_buffer *buf, *n;
+ 	struct vdec_buffer *new_buf;
+ 	int ret;
+ 
+ 	for (;;) {
+-		ret = wait_event_interruptible(core->input_buf_wq, core->input_buf_ready == 1  || kthread_should_stop());
++		ret = wait_event_interruptible(core->input_buf_wq, core->input_bufs_ready  == 1  || kthread_should_stop());
+ 		if (kthread_should_stop())
+ 			break;
+ 
+ 		if (ret == -EINTR)
+ 			continue;
+ 
+-		core->input_buf_ready = 0;
++		core->input_bufs_ready = 0;
+ 
+-		vbuf = v4l2_m2m_src_buf_remove(core->m2m_ctx);
+-		if (!vbuf)
+-			break;
++		v4l2_m2m_for_each_src_buf_safe(core->m2m_ctx, buf, n) {
++			struct vb2_v4l2_buffer *vbuf = &buf->vb;
++			v4l2_m2m_src_buf_remove_by_buf(core->m2m_ctx, vbuf);
+ 
+-		while (down_timeout(&core->queue_sema, HZ) < 0) {
+-			if (kthread_should_stop()) {
+-				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+-				goto end;
++			while (down_timeout(&core->queue_sema, HZ) < 0) {
++				if (kthread_should_stop()) {
++					v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
++					goto end;
++				}
++
++				printk("Timed out waiting for an input slot. Trying again..\n");
+ 			}
+ 
+-			printk("Timed out waiting for an input slot. Trying again..\n");
+-		}
++			ret = esparser_process_buf(core, vbuf);
+ 
+-		ret = esparser_process_buf(core, vbuf);
+-
+-		if (ret > 0) {
+-			struct vb2_buffer *vb = &vbuf->vb2_buf;
+-			new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
+-			new_buf->timestamp = vb->timestamp;
+-			new_buf->index = -1;
+-			add_buffer_to_list(core, new_buf);
+-
+-			vbuf->flags = 0;
+-			vbuf->field = V4L2_FIELD_NONE;
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-		} else if (ret <= 0) {
+-			printk("ESPARSER input parsing fatal error\n");
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+-			writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
+-			up(&core->queue_sema);
++			if (ret > 0) {
++				struct vb2_buffer *vb = &vbuf->vb2_buf;
++				new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
++				new_buf->timestamp = vb->timestamp;
++				new_buf->index = -1;
++				add_buffer_to_list(core, new_buf);
++
++				vbuf->flags = 0;
++				vbuf->field = V4L2_FIELD_NONE;
++				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++			} else if (ret <= 0) {
++				printk("ESPARSER input parsing fatal error\n");
++				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
++				writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
++				up(&core->queue_sema);
++			}
+ 		}
+ 	}
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index b8e6df6..aedaf82 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -24,9 +24,8 @@
+ //#define V_BUF_ADDR_OFFSET	0x13e000 /*  < GXTVBB */
+ #define V_BUF_ADDR_OFFSET	0x1ee000 /* >= GXTVBB */
+ 
+-#define UNK1_SIZE 0x13e000
+-#define REF_SIZE  0x100000
+-#define UNK2_SIZE 0x300000
++/* AO registers */
++#define AO_RTI_GEN_PWR_ISO0 0xec
+ 
+ /* DOS registers */
+ #define ASSIST_MBOX1_CLR_REG 0x01d4
+@@ -35,7 +34,10 @@
+ #define MPSR 0x0c04
+ #define CPSR 0x0c84
+ 
+-#define LMEM_DMA_CTRL 0x0d40
++#define IMEM_DMA_CTRL  0x0d00
++#define IMEM_DMA_ADR   0x0d04
++#define IMEM_DMA_COUNT 0x0d08
++#define LMEM_DMA_CTRL  0x0d40
+ 
+ #define MC_STATUS0  0x2424
+ #define MC_CTRL1    0x242c
+@@ -44,6 +46,7 @@
+ #define DBLK_CTRL   0x2544
+ #define DBLK_STATUS 0x254c
+ 
++#define GCLK_EN            0x260c
+ #define MDEC_PIC_DC_CTRL   0x2638
+ #define MDEC_PIC_DC_STATUS 0x263c
+ #define ANC0_CANVAS_ADDR   0x2640
+@@ -55,7 +58,6 @@
+ #define AV_SCRATCH_3  0x270c
+ #define AV_SCRATCH_4  0x2710
+ #define AV_SCRATCH_5  0x2714
+-
+ #define AV_SCRATCH_6  0x2718
+ #define AV_SCRATCH_7  0x271c
+ #define AV_SCRATCH_8  0x2720
+@@ -68,7 +70,10 @@
+ 
+ #define DCAC_DMA_CTRL 0x3848
+ 
+-#define DOS_SW_RESET0 0xfc00
++#define DOS_SW_RESET0             0xfc00
++#define DOS_GCLK_EN0              0xfc04
++#define DOS_MEM_PD_VDEC           0xfcc0
++#define DOS_VDEC_MCRCC_STALL_CTRL 0xfd00
+ 
+ static int vh264_load_extended_firmware(struct vdec_core *core, const struct firmware *fw) {
+ 	core->vh264_ext_fw_vaddr = dma_alloc_coherent(core->dev, MC_H264_EXT_SIZE, &core->vh264_ext_fw_paddr, GFP_KERNEL);
+@@ -117,11 +122,11 @@ static int vdec_load_firmware(struct vdec_core *core, const char* fwname)
+ 	writel_relaxed(0, core->dos_base + CPSR);
+ 
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) & ~(1<<31), core->dos_base + MDEC_PIC_DC_CTRL);
+-	writel_relaxed(mc_addr_map, core->dos_base + 0xd04); // IMEM_DMA_ADR
+-	writel_relaxed(MC_SIZE, core->dos_base + 0xd08); // IMEM_DMA_COUNT
+-	writel_relaxed((0x8000 | (7 << 16)), core->dos_base + 0xd00); // IMEM_DMA_CTRL ; Magic value from AML code
++	writel_relaxed(mc_addr_map, core->dos_base + IMEM_DMA_ADR);
++	writel_relaxed(MC_SIZE, core->dos_base + IMEM_DMA_COUNT);
++	writel_relaxed((0x8000 | (7 << 16)), core->dos_base + IMEM_DMA_CTRL);
+ 
+-	while (--i && readl(core->dos_base + 0xd00) & 0x8000) { }
++	while (--i && readl(core->dos_base + IMEM_DMA_CTRL) & 0x8000) { }
+ 
+ 	if (i == 0) {
+ 		printk("Firmware load fail (DMA hang?)\n");
+@@ -179,8 +184,7 @@ static void vh264_power_up(struct vdec_core *core) {
+ 	/* Enable NV21 */
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
+ 
+-	//writel_relaxed(readl_relaxed(core->dos_base + AV_SCRATCH_F) | (1 << 6), core->dos_base + AV_SCRATCH_F);
+-
++	/* ?? */
+ 	writel_relaxed(0x404038aa, core->dos_base + MDEC_PIC_DC_THRESH);
+ }
+ 
+@@ -201,18 +205,18 @@ static int vdec_poweron(struct vdec_core *core) {
+ 	writel_relaxed(0xfffffffc, core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET0);
+ 
+-	writel_relaxed(0x3ff, core->dos_base + 0xfc04); // DOS_GCLK_EN0
++	writel_relaxed(0x3ff, core->dos_base + DOS_GCLK_EN0);
+ 
+ 	/* VDEC Memories */
+-	writel_relaxed(0x00000000, core->dos_base + 0xfcc0);
++	writel_relaxed(0x00000000, core->dos_base + DOS_MEM_PD_VDEC);
+ 
+ 	/* Remove VDEC1 Isolation */
+-	regmap_write(core->regmap_ao, 0xec, 0x00000000);
++	regmap_write(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0x00000000);
+ 
+ 	/* Reset DOS top registers */
+-	writel_relaxed(0x00000000, core->dos_base + 0xfd00);
++	writel_relaxed(0x00000000, core->dos_base + DOS_VDEC_MCRCC_STALL_CTRL);
+ 
+-	writel_relaxed(0x3ff, core->dos_base + 0x260c); // GCLK_EN
++	writel_relaxed(0x3ff, core->dos_base + GCLK_EN);
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) & ~(1<<31), core->dos_base + MDEC_PIC_DC_CTRL);
+ 
+ 	stbuf_power_up(core);
+@@ -235,7 +239,7 @@ static int vdec_poweron(struct vdec_core *core) {
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 
+-	/* Enable VDEC? */
++	/* Enable firmware processor */
+ 	writel_relaxed(1, core->dos_base + MPSR);
+ 
+ 	esparser_power_up(core);
+@@ -249,7 +253,7 @@ static void vdec_poweroff(struct vdec_core *core) {
+ 	writel_relaxed(0, core->dos_base + MPSR);
+ 	writel_relaxed(0, core->dos_base + CPSR);
+ 
+-	while (readl_relaxed(core->dos_base + 0xd00) & 0x8000) { }
++	while (readl_relaxed(core->dos_base + IMEM_DMA_CTRL) & 0x8000) { }
+ 
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+@@ -282,9 +286,9 @@ static void vdec_poweroff(struct vdec_core *core) {
+ 	while (readl_relaxed(core->dos_base + DCAC_DMA_CTRL) & 0x8000) { }
+ 
+ 	/* enable vdec1 isolation */
+-	regmap_write(core->regmap_ao, 0xec, 0xc0);
++	regmap_write(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc0);
+ 	/* power off vdec1 memories */
+-	writel(0xffffffffUL, core->dos_base + 0xfcc0);
++	writel(0xffffffffUL, core->dos_base + DOS_MEM_PD_VDEC);
+ 
+ 	printk("vdec_poweroff end\n");
+ }
+@@ -295,7 +299,7 @@ void vdec_m2m_device_run(void *priv) {
+ 	printk("vdec_m2m_device_run\n");
+ 	mutex_lock(&core->lock);
+ 
+-	core->input_buf_ready = 1;
++	core->input_bufs_ready = 1;
+ 	wake_up_interruptible(&core->input_buf_wq);
+ 
+ 	mutex_unlock(&core->lock);
+@@ -323,7 +327,7 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 	switch (q->type) {
+ 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+ 		sizes[0] = vdec_get_output_size(core);
+-		*num_buffers = 1;
++		*num_buffers = 2;
+ 		*num_planes = 1;
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+@@ -363,7 +367,7 @@ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ 		goto unlock;
+ 	
+ 	if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+-		core->input_buf_ready = 1;
++		core->input_bufs_ready = 1;
+ 		wake_up_interruptible(&core->input_buf_wq);
+ 	}
+ 	else
+@@ -393,6 +397,8 @@ static int mark_buffers_done(void *data)
+ 				break;
+ 			}
+ 
++			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(core);
++			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(core) / 2;
+ 			vbuf->vb2_buf.timestamp = tmp->timestamp;
+ 			vbuf->sequence = core->sequence_cap++;
+ 			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+@@ -489,7 +495,7 @@ void vdec_stop_streaming(struct vb2_queue *q)
+ 		INIT_LIST_HEAD(&core->bufs);
+ 		INIT_LIST_HEAD(&core->bufs_recycle);
+ 		sema_init(&core->queue_sema, 24);
+-		core->input_buf_ready = 0;
++		core->input_bufs_ready = 0;
+ 	}
+ 
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+@@ -950,7 +956,6 @@ static void vdec_set_param(struct vdec_core *core) {
+ 	writel_relaxed(addr, core->dos_base + AV_SCRATCH_4);
+ 	printk("Remaining buffer size: %d\n", core->vh264_mem_paddr + core->vh264_mem_size - addr);
+ 
+-	/* Hardcode max_dpb_size to 4 because I'm not sure what it is */
+ 	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (max_dpb_size << 8), core->dos_base + AV_SCRATCH_0);
+ }
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 25c6487..04f03dc 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -110,7 +110,7 @@ struct vdec_core {
+ 	/* */
+ 	struct task_struct *esparser_queue_thread;
+ 	struct semaphore queue_sema;
+-	u32 input_buf_ready;
++	u32 input_bufs_ready;
+ 	wait_queue_head_t input_buf_wq;
+ };
+ 
+diff --git a/drivers/soc/amlogic/meson-pwrc-vdec.c b/drivers/soc/amlogic/meson-pwrc-vdec.c
+index 79868e5..752ebb9 100644
+--- a/drivers/soc/amlogic/meson-pwrc-vdec.c
++++ b/drivers/soc/amlogic/meson-pwrc-vdec.c
+@@ -42,7 +42,7 @@ static int meson_pwrc_vdec_power_off(struct generic_pm_domain *genpd)
+ 			GEN_PWR_VDEC_1, GEN_PWR_VDEC_1);
+ 	udelay(20);
+ 
+-	clk_disable_unprepare(pd->vpu_intr_clk);
++	//clk_disable_unprepare(pd->vpu_intr_clk);
+ 	clk_disable_unprepare(pd->dos_parser_clk);
+ 	clk_disable_unprepare(pd->vdec_1_clk);
+ 
+@@ -52,7 +52,7 @@ static int meson_pwrc_vdec_power_off(struct generic_pm_domain *genpd)
+ static int meson_pwrc_vdec_setup_clk(struct meson_pwrc_vdec *pd) {
+ 	printk("meson_pwrc_vdec_setup_clk\n");
+ 	clk_prepare_enable(pd->dos_parser_clk);
+-	clk_prepare_enable(pd->vpu_intr_clk);
++	//clk_prepare_enable(pd->vpu_intr_clk);
+ 	clk_prepare_enable(pd->vdec_1_clk);
+ 
+ 	return 0;

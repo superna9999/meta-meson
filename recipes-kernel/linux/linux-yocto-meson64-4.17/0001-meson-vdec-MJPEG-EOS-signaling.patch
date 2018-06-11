@@ -1,0 +1,764 @@
+From 628559c62896ffe1630a8534c6ef3aebcb459de4 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Fri, 8 Jun 2018 04:40:53 +0200
+Subject: [PATCH] meson: vdec: MJPEG + EOS signaling
+
+* MJPEG decoding (untested!)
+* v4l2 CMD_STOP and AML specific EndOfStream signaling
+---
+ drivers/media/platform/meson/vdec/Makefile        |   2 +-
+ drivers/media/platform/meson/vdec/codec_h264.c    |  19 +-
+ drivers/media/platform/meson/vdec/codec_hevc.c    |   2 +-
+ drivers/media/platform/meson/vdec/codec_mjpeg.c   | 206 ++++++++++++++++++++++
+ drivers/media/platform/meson/vdec/codec_mjpeg.h   |  13 ++
+ drivers/media/platform/meson/vdec/esparser.c      | 103 +++++++++--
+ drivers/media/platform/meson/vdec/esparser.h      |   1 +
+ drivers/media/platform/meson/vdec/vdec.c          |  56 +++++-
+ drivers/media/platform/meson/vdec/vdec.h          |   5 +
+ drivers/media/platform/meson/vdec/vdec_1.c        |  32 ++--
+ drivers/media/platform/meson/vdec/vdec_hevc.c     |   3 +-
+ drivers/media/platform/meson/vdec/vdec_platform.c |  28 +++
+ 12 files changed, 416 insertions(+), 54 deletions(-)
+ create mode 100644 drivers/media/platform/meson/vdec/codec_mjpeg.c
+ create mode 100644 drivers/media/platform/meson/vdec/codec_mjpeg.h
+
+diff --git a/drivers/media/platform/meson/vdec/Makefile b/drivers/media/platform/meson/vdec/Makefile
+index 418f22c..9f506bc 100644
+--- a/drivers/media/platform/meson/vdec/Makefile
++++ b/drivers/media/platform/meson/vdec/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Makefile for AMLogic meson video decoder driver
+ 
+-meson-vdec-objs += vdec.o vdec_1.o vdec_hevc.o esparser.o canvas.o codec_helpers.o codec_mpeg12.o codec_h264.o codec_hevc.o vdec_platform.o codec_mpeg4.o
++meson-vdec-objs += vdec.o vdec_1.o vdec_hevc.o esparser.o canvas.o codec_helpers.o codec_mpeg12.o codec_h264.o codec_hevc.o vdec_platform.o codec_mpeg4.o codec_mjpeg.o
+ 
+ obj-$(CONFIG_VIDEO_AML_MESON_VDEC) += meson-vdec.o
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index 0cbb9e5..2119a4b 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -138,7 +138,6 @@ static int codec_h264_start(struct vdec_session *sess) {
+ 	while (readl_relaxed(core->dos_base + DCAC_DMA_CTRL) & 0x8000) { }
+ 	while (readl_relaxed(core->dos_base + LMEM_DMA_CTRL) & 0x8000) { }
+ 
+-	/* Taken from old AMLogic code. No idea. */
+ 	writel_relaxed((1<<7) | (1<<6) | (1<<4), core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
+ 	readl_relaxed(core->dos_base + DOS_SW_RESET0);
+@@ -171,7 +170,7 @@ static int codec_h264_start(struct vdec_session *sess) {
+ 	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
+ 	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_MASK);
+ 
+-	/* Enable NV21 */
++	/* Enable 2-plane output */
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
+ 
+ 	/* ?? */
+@@ -196,25 +195,17 @@ static int codec_h264_stop(struct vdec_session *sess)
+ 
+ 	kthread_stop(h264->buffers_thread);
+ 
+-	if (h264->ext_fw_vaddr) {
++	if (h264->ext_fw_vaddr)
+ 		dma_free_coherent(core->dev, SIZE_EXT_FW, h264->ext_fw_vaddr, h264->ext_fw_paddr);
+-		h264->ext_fw_vaddr = 0;
+-	}
+ 	
+-	if (h264->workspace_vaddr) {
++	if (h264->workspace_vaddr)
+ 		dma_free_coherent(core->dev, SIZE_WORKSPACE, h264->workspace_vaddr, h264->workspace_paddr);
+-		h264->workspace_vaddr = 0;
+-	}
+ 	
+-	if (h264->ref_vaddr) {
++	if (h264->ref_vaddr)
+ 		dma_free_coherent(core->dev, h264->ref_size, h264->ref_vaddr, h264->ref_paddr);
+-		h264->ref_vaddr = 0;
+-	}
+ 	
+-	if (h264->sei_vaddr) {
++	if (h264->sei_vaddr)
+ 		dma_free_coherent(core->dev, SIZE_SEI, h264->sei_vaddr, h264->sei_paddr);
+-		h264->sei_vaddr = 0;
+-	}
+ 
+ 	kfree(h264);
+ 	sess->priv = 0;
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index c96cadb..91b4e63 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -402,7 +402,7 @@ static void codec_hevc_update_frame_refs(struct vdec_session *sess, struct hevc_
+ 	}
+ 
+ 	for (i = 0; i < 16; i++) {
+-		u32 cur_rps = params->p.CUR_RPS[i];
++		u16 cur_rps = params->p.CUR_RPS[i];
+ 		int delt = cur_rps & ((1 << (RPS_USED_BIT - 1)) - 1);
+ 
+ 		if (cur_rps & 0x8000)
+diff --git a/drivers/media/platform/meson/vdec/codec_mjpeg.c b/drivers/media/platform/meson/vdec/codec_mjpeg.c
+new file mode 100644
+index 0000000..bec629d
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_mjpeg.c
+@@ -0,0 +1,206 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "codec_mjpeg.h"
++#include "codec_helpers.h"
++
++/* DOS registers */
++#define VDEC_ASSIST_AMR1_INT8	0x00b4
++
++#define ASSIST_MBOX1_CLR_REG	0x01d4
++#define ASSIST_MBOX1_MASK	0x01d8
++
++#define MCPU_INTR_MSK		0x0c10
++
++#define PSCALE_RST		0x2440
++#define PSCALE_CTRL		0x2444
++#define PSCALE_BMEM_ADDR	0x247c
++#define PSCALE_BMEM_DAT		0x2480
++
++#define MDEC_PIC_DC_CTRL	0x2638
++
++#define AV_SCRATCH_0		0x2700
++#define AV_SCRATCH_1		0x2704
++#define MREG_DECODE_PARAM	0x2708
++#define AV_SCRATCH_4		0x2710
++#define MREG_TO_AMRISC		0x2720
++#define MREG_FROM_AMRISC	0x2724
++
++#define DOS_SW_RESET0		0xfc00
++
++struct codec_mjpeg {
++	/* Housekeeping thread for marking buffers to DONE
++	 * and recycling them into the hardware
++	 */
++	struct task_struct *buffers_thread;
++};
++
++static int codec_mjpeg_buffers_thread(void *data)
++{
++	struct vdec_buffer *tmp;
++	struct vdec_session *sess = data;
++	struct vdec_core *core = sess->core;;
++
++	while (!kthread_should_stop()) {
++		mutex_lock(&sess->bufs_recycle_lock);
++		while (!list_empty(&sess->bufs_recycle) &&
++		       !readl_relaxed(core->dos_base + MREG_TO_AMRISC))
++		{
++			tmp = list_first_entry(&sess->bufs_recycle, struct vdec_buffer, list);
++
++			/* Tell the decoder he can recycle this buffer */
++			writel_relaxed(tmp->index + 1, core->dos_base + MREG_TO_AMRISC);
++
++			printk("Buffer %d recycled\n", tmp->index);
++
++			list_del(&tmp->list);
++			kfree(tmp);
++		}
++		mutex_unlock(&sess->bufs_recycle_lock);
++
++		usleep_range(5000, 10000);
++	}
++
++	return 0;
++}
++
++/* 4 point triangle */
++static const uint32_t filt_coef[] = {
++	0x20402000, 0x20402000, 0x1f3f2101, 0x1f3f2101,
++	0x1e3e2202, 0x1e3e2202, 0x1d3d2303, 0x1d3d2303,
++	0x1c3c2404, 0x1c3c2404, 0x1b3b2505, 0x1b3b2505,
++	0x1a3a2606, 0x1a3a2606, 0x19392707, 0x19392707,
++	0x18382808, 0x18382808, 0x17372909, 0x17372909,
++	0x16362a0a, 0x16362a0a, 0x15352b0b, 0x15352b0b,
++	0x14342c0c, 0x14342c0c, 0x13332d0d, 0x13332d0d,
++	0x12322e0e, 0x12322e0e, 0x11312f0f, 0x11312f0f,
++	0x10303010
++};
++
++static void codec_mjpeg_init_scaler(struct vdec_core *core)
++{
++	int i;
++
++	/* PSCALE cbus bmem enable */
++	writel_relaxed(0xc000, core->dos_base + PSCALE_CTRL);
++
++	writel_relaxed(0, core->dos_base + PSCALE_BMEM_ADDR);
++	for (i = 0; i < ARRAY_SIZE(filt_coef); ++i) {
++		writel_relaxed(0, core->dos_base + PSCALE_BMEM_DAT);
++		writel_relaxed(filt_coef[i], core->dos_base + PSCALE_BMEM_DAT);
++	}
++
++	writel_relaxed(74, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x0008, core->dos_base + PSCALE_BMEM_DAT);
++	writel_relaxed(0x60000000, core->dos_base + PSCALE_BMEM_DAT);
++
++	writel_relaxed(82, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x0008, core->dos_base + PSCALE_BMEM_DAT);
++	writel_relaxed(0x60000000, core->dos_base + PSCALE_BMEM_DAT);
++
++	writel_relaxed(78, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x0008, core->dos_base + PSCALE_BMEM_DAT);
++	writel_relaxed(0x60000000, core->dos_base + PSCALE_BMEM_DAT);
++
++	writel_relaxed(86, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x0008, core->dos_base + PSCALE_BMEM_DAT);
++	writel_relaxed(0x60000000, core->dos_base + PSCALE_BMEM_DAT);
++
++	writel_relaxed(73, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x10000, core->dos_base + PSCALE_BMEM_DAT);
++	writel_relaxed(81, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x10000, core->dos_base + PSCALE_BMEM_DAT);
++
++	writel_relaxed(77, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x10000, core->dos_base + PSCALE_BMEM_DAT);
++	writel_relaxed(85, core->dos_base + PSCALE_BMEM_ADDR);
++	writel_relaxed(0x10000, core->dos_base + PSCALE_BMEM_DAT);
++
++	writel_relaxed((1 << 10), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++
++	writel_relaxed(0x7, core->dos_base + PSCALE_RST);
++	writel_relaxed(0, core->dos_base + PSCALE_RST);
++}
++
++static int codec_mjpeg_start(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++	struct codec_mjpeg *mjpeg = sess->priv;
++
++	printk("codec_mjpeg_start\n");
++
++	mjpeg = kzalloc(sizeof(*mjpeg), GFP_KERNEL);
++	if (!mjpeg)
++		return -ENOMEM;
++
++	sess->priv = mjpeg;
++
++	writel_relaxed((1 << 7) | (1 << 6), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++
++	writel_relaxed(12, core->dos_base + AV_SCRATCH_0);
++	writel_relaxed(0x031a, core->dos_base + AV_SCRATCH_1);
++
++	codec_helper_set_canvases(sess, core->dos_base + AV_SCRATCH_4);
++	codec_mjpeg_init_scaler(core);
++
++	writel_relaxed(0, core->dos_base + MREG_TO_AMRISC);
++	writel_relaxed(0, core->dos_base + MREG_FROM_AMRISC);
++	writel_relaxed(0xffff, core->dos_base + MCPU_INTR_MSK);
++	writel_relaxed((sess->height << 4) | 0x8000, core->dos_base + MREG_DECODE_PARAM);
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_MASK);
++	writel_relaxed(8, core->dos_base + VDEC_ASSIST_AMR1_INT8);
++
++	/* Enable 2-plane output */
++	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
++
++	mjpeg->buffers_thread = kthread_run(codec_mjpeg_buffers_thread, sess, "buffers_done");
++
++	return 0;
++}
++
++static int codec_mjpeg_stop(struct vdec_session *sess)
++{
++	struct codec_mjpeg *mjpeg = sess->priv;
++
++	printk("codec_mjpeg_stop\n");
++
++	kthread_stop(mjpeg->buffers_thread);
++
++	kfree(mjpeg);
++	sess->priv = 0;
++
++	return 0;
++}
++
++static irqreturn_t codec_mjpeg_isr(struct vdec_session *sess)
++{
++	u32 reg;
++	u32 buffer_index;
++	struct vdec_core *core = sess->core;
++
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++
++	reg = readl_relaxed(core->dos_base + MREG_FROM_AMRISC);
++	if (!(reg & 0x7))
++		return IRQ_HANDLED;
++
++	buffer_index = ((reg & 0x7) - 1) & 3;
++	vdec_dst_buf_done_idx(sess, buffer_index);
++
++	writel_relaxed(0, core->dos_base + MREG_FROM_AMRISC);
++	return IRQ_HANDLED;
++}
++
++struct vdec_codec_ops codec_mjpeg_ops = {
++	.start = codec_mjpeg_start,
++	.stop = codec_mjpeg_stop,
++	.isr = codec_mjpeg_isr,
++};
+diff --git a/drivers/media/platform/meson/vdec/codec_mjpeg.h b/drivers/media/platform/meson/vdec/codec_mjpeg.h
+new file mode 100644
+index 0000000..1164c61
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_mjpeg.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ */
++
++#ifndef __MESON_VDEC_CODEC_MJPEG_H_
++#define __MESON_VDEC_CODEC_MJPEG_H_
++
++#include "vdec.h"
++
++extern struct vdec_codec_ops codec_mjpeg_ops;
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 923cf07..8080fc5 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -52,6 +52,51 @@
+ static DECLARE_WAIT_QUEUE_HEAD(wq);
+ static int search_done;
+ 
++/* Buffer to send to the ESPARSER to signal End Of Stream.
++ * Credits to Endless Mobile.
++ */
++#define EOS_TAIL_BUF_SIZE 1024
++static const u8 eos_tail_data[] = {
++	0x00, 0x00, 0x00, 0x01, 0x06, 0x05, 0xff, 0xe4, 0xdc, 0x45, 0xe9, 0xbd, 0xe6, 0xd9, 0x48, 0xb7,
++	0x96, 0x2c, 0xd8, 0x20, 0xd9, 0x23, 0xee, 0xef, 0x78, 0x32, 0x36, 0x34, 0x20, 0x2d, 0x20, 0x63,
++	0x6f, 0x72, 0x65, 0x20, 0x36, 0x37, 0x20, 0x72, 0x31, 0x31, 0x33, 0x30, 0x20, 0x38, 0x34, 0x37,
++	0x35, 0x39, 0x37, 0x37, 0x20, 0x2d, 0x20, 0x48, 0x2e, 0x32, 0x36, 0x34, 0x2f, 0x4d, 0x50, 0x45,
++	0x47, 0x2d, 0x34, 0x20, 0x41, 0x56, 0x43, 0x20, 0x63, 0x6f, 0x64, 0x65, 0x63, 0x20, 0x2d, 0x20,
++	0x43, 0x6f, 0x70, 0x79, 0x6c, 0x65, 0x66, 0x74, 0x20, 0x32, 0x30, 0x30, 0x33, 0x2d, 0x32, 0x30,
++	0x30, 0x39, 0x20, 0x2d, 0x20, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x77, 0x77, 0x77, 0x2e,
++	0x76, 0x69, 0x64, 0x65, 0x6f, 0x6c, 0x61, 0x6e, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x78, 0x32, 0x36,
++	0x34, 0x2e, 0x68, 0x74, 0x6d, 0x6c, 0x20, 0x2d, 0x20, 0x6f, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x73,
++	0x3a, 0x20, 0x63, 0x61, 0x62, 0x61, 0x63, 0x3d, 0x31, 0x20, 0x72, 0x65, 0x66, 0x3d, 0x31, 0x20,
++	0x64, 0x65, 0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x3d, 0x31, 0x3a, 0x30, 0x3a, 0x30, 0x20, 0x61, 0x6e,
++	0x61, 0x6c, 0x79, 0x73, 0x65, 0x3d, 0x30, 0x78, 0x31, 0x3a, 0x30, 0x78, 0x31, 0x31, 0x31, 0x20,
++	0x6d, 0x65, 0x3d, 0x68, 0x65, 0x78, 0x20, 0x73, 0x75, 0x62, 0x6d, 0x65, 0x3d, 0x36, 0x20, 0x70,
++	0x73, 0x79, 0x5f, 0x72, 0x64, 0x3d, 0x31, 0x2e, 0x30, 0x3a, 0x30, 0x2e, 0x30, 0x20, 0x6d, 0x69,
++	0x78, 0x65, 0x64, 0x5f, 0x72, 0x65, 0x66, 0x3d, 0x30, 0x20, 0x6d, 0x65, 0x5f, 0x72, 0x61, 0x6e,
++	0x67, 0x65, 0x3d, 0x31, 0x36, 0x20, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x5f, 0x6d, 0x65, 0x3d,
++	0x31, 0x20, 0x74, 0x72, 0x65, 0x6c, 0x6c, 0x69, 0x73, 0x3d, 0x30, 0x20, 0x38, 0x78, 0x38, 0x64,
++	0x63, 0x74, 0x3d, 0x30, 0x20, 0x63, 0x71, 0x6d, 0x3d, 0x30, 0x20, 0x64, 0x65, 0x61, 0x64, 0x7a,
++	0x6f, 0x6e, 0x65, 0x3d, 0x32, 0x31, 0x2c, 0x31, 0x31, 0x20, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61,
++	0x5f, 0x71, 0x70, 0x5f, 0x6f, 0x66, 0x66, 0x73, 0x65, 0x74, 0x3d, 0x2d, 0x32, 0x20, 0x74, 0x68,
++	0x72, 0x65, 0x61, 0x64, 0x73, 0x3d, 0x31, 0x20, 0x6e, 0x72, 0x3d, 0x30, 0x20, 0x64, 0x65, 0x63,
++	0x69, 0x6d, 0x61, 0x74, 0x65, 0x3d, 0x31, 0x20, 0x6d, 0x62, 0x61, 0x66, 0x66, 0x3d, 0x30, 0x20,
++	0x62, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x73, 0x3d, 0x30, 0x20, 0x6b, 0x65, 0x79, 0x69, 0x6e, 0x74,
++	0x3d, 0x32, 0x35, 0x30, 0x20, 0x6b, 0x65, 0x79, 0x69, 0x6e, 0x74, 0x5f, 0x6d, 0x69, 0x6e, 0x3d,
++	0x32, 0x35, 0x20, 0x73, 0x63, 0x65, 0x6e, 0x65, 0x63, 0x75, 0x74, 0x3d, 0x34, 0x30, 0x20, 0x72,
++	0x63, 0x3d, 0x61, 0x62, 0x72, 0x20, 0x62, 0x69, 0x74, 0x72, 0x61, 0x74, 0x65, 0x3d, 0x31, 0x30,
++	0x20, 0x72, 0x61, 0x74, 0x65, 0x74, 0x6f, 0x6c, 0x3d, 0x31, 0x2e, 0x30, 0x20, 0x71, 0x63, 0x6f,
++	0x6d, 0x70, 0x3d, 0x30, 0x2e, 0x36, 0x30, 0x20, 0x71, 0x70, 0x6d, 0x69, 0x6e, 0x3d, 0x31, 0x30,
++	0x20, 0x71, 0x70, 0x6d, 0x61, 0x78, 0x3d, 0x35, 0x31, 0x20, 0x71, 0x70, 0x73, 0x74, 0x65, 0x70,
++	0x3d, 0x34, 0x20, 0x69, 0x70, 0x5f, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x3d, 0x31, 0x2e, 0x34, 0x30,
++	0x20, 0x61, 0x71, 0x3d, 0x31, 0x3a, 0x31, 0x2e, 0x30, 0x30, 0x00, 0x80, 0x00, 0x00, 0x00, 0x01,
++	0x67, 0x4d, 0x40, 0x0a, 0x9a, 0x74, 0xf4, 0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x06,
++	0x51, 0xe2, 0x44, 0xd4, 0x00, 0x00, 0x00, 0x01, 0x68, 0xee, 0x32, 0xc8, 0x00, 0x00, 0x00, 0x01,
++	0x65, 0x88, 0x80, 0x20, 0x00, 0x08, 0x7f, 0xea, 0x6a, 0xe2, 0x99, 0xb6, 0x57, 0xae, 0x49, 0x30,
++	0xf5, 0xfe, 0x5e, 0x46, 0x0b, 0x72, 0x44, 0xc4, 0xe1, 0xfc, 0x62, 0xda, 0xf1, 0xfb, 0xa2, 0xdb,
++	0xd6, 0xbe, 0x5c, 0xd7, 0x24, 0xa3, 0xf5, 0xb9, 0x2f, 0x57, 0x16, 0x49, 0x75, 0x47, 0x77, 0x09,
++	0x5c, 0xa1, 0xb4, 0xc3, 0x4f, 0x60, 0x2b, 0xb0, 0x0c, 0xc8, 0xd6, 0x66, 0xba, 0x9b, 0x82, 0x29,
++	0x33, 0x92, 0x26, 0x99, 0x31, 0x1c, 0x7f, 0x9b
++};
++
+ static irqreturn_t esparser_isr(int irq, void *dev)
+ {
+ 	int int_status;
+@@ -85,31 +130,21 @@ static void esparser_append_start_code(struct vb2_buffer *vb)
+ 	vaddr[3] = 0xff;
+ }
+ 
+-static int esparser_process_buf(struct vdec_core *core, struct vb2_buffer *vb)
++static int
++esparser_write_data(struct vdec_core *core, dma_addr_t addr, u32 size)
+ {
+-	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(vb, 0);
+-	u32 payload_size = vb2_get_plane_payload(vb, 0);
+-
+-	esparser_append_start_code(vb);
+-
+-	/* Throwing in buffers too quickly (100+ fps) will unfortunately result
+-	 * in random decode errors. There doesn't seem to be any way
+-	 * to predict this.
+-	 * This delay still permits ~100fps decoding
+-	 */
+-	//usleep_range(5000, 10000);
+ 	writel_relaxed(0, core->esparser_base + PFIFO_RD_PTR);
+ 	writel_relaxed(0, core->esparser_base + PFIFO_WR_PTR);
+-	writel_relaxed(ES_WRITE | ES_PARSER_START | ES_SEARCH | (payload_size << ES_PACK_SIZE_BIT), core->esparser_base + PARSER_CONTROL);
++	writel_relaxed(ES_WRITE | ES_PARSER_START | ES_SEARCH | (size << ES_PACK_SIZE_BIT), core->esparser_base + PARSER_CONTROL);
+ 
+-	writel_relaxed(phy, core->esparser_base + PARSER_FETCH_ADDR);
+-	writel_relaxed((7 << FETCH_ENDIAN_BIT) | (payload_size + 512), core->esparser_base + PARSER_FETCH_CMD);
++	writel_relaxed(addr, core->esparser_base + PARSER_FETCH_ADDR);
++	writel_relaxed((7 << FETCH_ENDIAN_BIT) | (size + 512), core->esparser_base + PARSER_FETCH_CMD);
+ 	search_done = 0;
+ 
+ 	return wait_event_interruptible_timeout(wq, search_done != 0, HZ/5);
+ }
+ 
+-static u32 esparser_vififo_free_space(struct vdec_session *sess)
++static u32 esparser_vififo_get_free_space(struct vdec_session *sess)
+ {
+ 	u32 vififo_usage;
+ 	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+@@ -129,21 +164,50 @@ static u32 esparser_vififo_free_space(struct vdec_session *sess)
+ 	return sess->vififo_size - vififo_usage;
+ }
+ 
++int esparser_queue_eos(struct vdec_session *sess)
++{
++	struct device *dev = sess->core->dev;
++	struct vdec_core *core = sess->core;
++	void *eos_vaddr;
++	dma_addr_t eos_paddr;
++	int ret;
++
++	eos_vaddr = dma_alloc_coherent(dev, sizeof(eos_tail_data) + 512, &eos_paddr, GFP_KERNEL);
++	if (!eos_vaddr)
++		return -ENOMEM;
++
++	sess->should_stop = 1;
++
++	memcpy(eos_vaddr, eos_tail_data, sizeof(eos_tail_data));
++	ret = esparser_write_data(core, eos_paddr, sizeof(eos_tail_data));
++	dma_free_coherent(dev, sizeof(eos_tail_data) + 512,
++			  eos_vaddr, eos_paddr);
++
++	return ret;
++}
++
+ static int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ {
+ 	int ret;
+ 	struct vb2_buffer *vb = &vbuf->vb2_buf;
+ 	struct vdec_core *core = sess->core;
+ 	u32 payload_size = vb2_get_plane_payload(vb, 0);
++	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(vb, 0);
+ 
+-	if (esparser_vififo_free_space(sess) < payload_size ||
++	if (!payload_size) {
++		esparser_queue_eos(sess);
++		return 0;
++	}
++
++	if (esparser_vififo_get_free_space(sess) < payload_size ||
+ 	    atomic_read(&sess->esparser_queued_bufs) >= 17)
+ 		return -EAGAIN;
+ 
+ 	v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
+ 	vdec_add_buf_reorder(sess, vb->timestamp);
+ 
+-	ret = esparser_process_buf(core, vb);
++	esparser_append_start_code(vb);
++	ret = esparser_write_data(core, phy, payload_size);
+ 
+ 	if (ret > 0) {
+ 		vbuf->flags = 0;
+@@ -156,6 +220,9 @@ static int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbu
+ 		writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
+ 	}
+ 
++	if (vbuf->flags & V4L2_BUF_FLAG_LAST)
++		esparser_queue_eos(sess);
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/media/platform/meson/vdec/esparser.h b/drivers/media/platform/meson/vdec/esparser.h
+index 54748b4..f9c8b31 100644
+--- a/drivers/media/platform/meson/vdec/esparser.h
++++ b/drivers/media/platform/meson/vdec/esparser.h
+@@ -10,6 +10,7 @@
+ 
+ int esparser_init(struct platform_device *pdev, struct vdec_core *core);
+ int esparser_power_up(struct vdec_session *sess);
++int esparser_queue_eos(struct vdec_session *sess);
+ void esparser_queue_all_src(struct work_struct *work);
+ 
+ #endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 700963d..c745fdd 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -179,6 +179,7 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 		goto bufs_done;
+ 	}
+ 
++	sess->should_stop = 0;
+ 	ret = vdec_poweron(sess);
+ 	if (ret)
+ 		goto vififo_free;
+@@ -494,6 +495,47 @@ static int vdec_enum_framesizes(struct file *file, void *fh,
+ 	return 0;
+ }
+ 
++static int
++vdec_try_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cmd)
++{
++	printk("vidioc_try_decoder_cmd: %u\n", cmd->cmd);
++	switch (cmd->cmd) {
++	case V4L2_DEC_CMD_STOP:
++		if (cmd->flags & V4L2_DEC_CMD_STOP_TO_BLACK)
++			return -EINVAL;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int
++vdec_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cmd)
++{
++	struct vdec_session *sess =
++		container_of(file->private_data, struct vdec_session, fh);
++	int ret;
++
++	printk("vdec_decoder_cmd: %u\n", cmd->cmd);
++
++	ret = vdec_try_decoder_cmd(file, fh, cmd);
++	if (ret)
++		return ret;
++
++	mutex_lock(&sess->lock);
++
++	if (!(sess->streamon_out & sess->streamon_cap))
++		goto unlock;
++
++	esparser_queue_eos(sess);
++
++unlock:
++	mutex_unlock(&sess->lock);
++	return ret;
++}
++
+ static const struct v4l2_ioctl_ops vdec_ioctl_ops = {
+ 	.vidioc_querycap = vdec_querycap,
+ 	.vidioc_enum_fmt_vid_cap_mplane = vdec_enum_fmt,
+@@ -518,8 +560,8 @@ static const struct v4l2_ioctl_ops vdec_ioctl_ops = {
+ 	.vidioc_enum_framesizes = vdec_enum_framesizes,
+ 	//.vidioc_subscribe_event = vdec_subscribe_event,
+ 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
+-	//.vidioc_try_decoder_cmd = vdec_try_decoder_cmd,
+-	//.vidioc_decoder_cmd = vdec_decoder_cmd,
++	.vidioc_try_decoder_cmd = vdec_try_decoder_cmd,
++	.vidioc_decoder_cmd = vdec_decoder_cmd,
+ };
+ 
+ static int m2m_queue_init(void *priv, struct vb2_queue *src_vq,
+@@ -642,6 +684,8 @@ void vdec_dst_buf_done(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ 	if (list_empty(&sess->bufs)) {
+ 		dev_err(dev, "Buffer %u done but list is empty\n",
+ 			vbuf->vb2_buf.index);
++
++		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+ 		vdec_abort(sess);
+ 		goto unlock;
+ 	}
+@@ -653,10 +697,14 @@ void vdec_dst_buf_done(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ 	vbuf->vb2_buf.timestamp = tmp->timestamp;
+ 	vbuf->sequence = sess->sequence_cap++;
+ 
+-	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+ 	list_del(&tmp->list);
+ 	kfree(tmp);
+ 
++	if (sess->should_stop && list_empty(&sess->bufs))
++		vbuf->flags |= V4L2_BUF_FLAG_LAST;
++
++	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++
+ unlock:
+ 	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+ 
+@@ -864,7 +912,6 @@ static int vdec_probe(struct platform_device *pdev)
+ 	vdev->vfl_dir = VFL_DIR_M2M;
+ 	vdev->v4l2_dev = &core->v4l2_dev;
+ 	vdev->device_caps = V4L2_CAP_VIDEO_M2M_MPLANE | V4L2_CAP_STREAMING;
+-	mutex_init(&core->lock);
+ 
+ 	ret = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+ 	if (ret) {
+@@ -876,6 +923,7 @@ static int vdec_probe(struct platform_device *pdev)
+ 	core->platform = of_id->data;
+ 	core->vdev_dec = vdev;
+ 	core->dev_dec = dev;
++	mutex_init(&core->lock);
+ 
+ 	video_set_drvdata(vdev, core);
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index ccec4720..1782cbcc 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -113,6 +113,11 @@ struct vdec_session {
+ 	/* Capture sequence counter */
+ 	unsigned int sequence_cap;
+ 
++	/* Whether userspace signaled EOS via command, empty buffer or
++	 * V4L2_BUF_FLAG_LAST
++	 */
++	unsigned int should_stop;
++
+ 	/* Big contiguous area for the VIFIFO */
+ 	void *vififo_vaddr;
+ 	dma_addr_t vififo_paddr;
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 5633bfc..6b08a5c 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -74,21 +74,24 @@ static int vdec_1_load_firmware(struct vdec_session *sess, const char* fwname)
+ 	u32 i = 1000;
+ 
+ 	ret = request_firmware(&fw, fwname, dev);
+-	if (ret < 0)  {
+-		dev_err(dev, "Unable to request firmware %s\n", fwname);
++	if (ret < 0)
+ 		return -EINVAL;
++
++	if (fw->size < MC_SIZE) {
++		dev_err(dev, "Firmware size %zu is too small. Expected %u.\n",
++			fw->size, MC_SIZE);
++		ret = -EINVAL;
++		goto release_firmware;
+ 	}
+ 
+-	mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+-	if (!mc_addr)
+-		return -ENOMEM;
++	mc_addr = dma_alloc_coherent(core->dev, MC_SIZE, &mc_addr_map, GFP_KERNEL);
++	if (!mc_addr) {
++		dev_err(dev, "Failed allocating memory for firmware loading\n");
++		ret = -ENOMEM;
++		goto release_firmware;
++	 }
+ 
+ 	memcpy(mc_addr, fw->data, MC_SIZE);
+-	mc_addr_map = dma_map_single(core->dev, mc_addr, MC_SIZE, DMA_TO_DEVICE);
+-	if (!mc_addr_map) {
+-		dev_err(dev, "Couldn't MAP DMA addr\n");
+-		return -EINVAL;
+-	}
+ 
+ 	writel_relaxed(0, core->dos_base + MPSR);
+ 	writel_relaxed(0, core->dos_base + CPSR);
+@@ -104,14 +107,15 @@ static int vdec_1_load_firmware(struct vdec_session *sess, const char* fwname)
+ 	if (i == 0) {
+ 		printk("Firmware load fail (DMA hang?)\n");
+ 		ret = -EINVAL;
+-	} else
+-		printk("Firmware load success\n");
++		goto free_mc;
++	}
+ 
+ 	if (codec_ops->load_extended_firmware)
+ 		codec_ops->load_extended_firmware(sess, fw->data + MC_SIZE, fw->size - MC_SIZE);
+ 
+-	dma_unmap_single(core->dev, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
+-	kfree(mc_addr);
++free_mc:
++	dma_free_coherent(core->dev, MC_SIZE, mc_addr, mc_addr_map);
++release_firmware:
+ 	release_firmware(fw);
+ 	return ret;
+ }
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index b5e1522..95e27fd 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -102,8 +102,7 @@ static void vdec_hevc_conf_esparser(struct vdec_session *sess)
+ 
+ static u32 vdec_hevc_vififo_level(struct vdec_session *sess)
+ {
+-	/* TODO */
+-	return 0;
++	return readl_relaxed(sess->core->dos_base + HEVC_STREAM_LEVEL);
+ }
+ 
+ static int vdec_hevc_stop(struct vdec_session *sess)
+diff --git a/drivers/media/platform/meson/vdec/vdec_platform.c b/drivers/media/platform/meson/vdec/vdec_platform.c
+index d34d33e..92b7e45 100644
+--- a/drivers/media/platform/meson/vdec/vdec_platform.c
++++ b/drivers/media/platform/meson/vdec/vdec_platform.c
+@@ -10,6 +10,7 @@
+ #include "vdec_hevc.h"
+ #include "codec_mpeg12.h"
+ #include "codec_mpeg4.h"
++#include "codec_mjpeg.h"
+ #include "codec_h264.h"
+ #include "codec_hevc.h"
+ 
+@@ -81,6 +82,15 @@ static const struct vdec_format vdec_formats_gxbb[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_mpeg4_ops,
+ 		.firmware_path = "meson/gx/vmpeg4_mc_5",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_MJPEG,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 4,
++		.max_buffers = 4,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mjpeg_ops,
++		.firmware_path = "meson/gx/vmjpeg_mc",
+ 	},
+ };
+ 
+@@ -152,6 +162,15 @@ static const struct vdec_format vdec_formats_gxl[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_mpeg4_ops,
+ 		.firmware_path = "meson/gx/vmpeg4_mc_5",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_MJPEG,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 4,
++		.max_buffers = 4,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mjpeg_ops,
++		.firmware_path = "meson/gx/vmjpeg_mc",
+ 	},
+ };
+ 
+@@ -223,6 +242,15 @@ static const struct vdec_format vdec_formats_gxm[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_mpeg4_ops,
+ 		.firmware_path = "meson/gx/vmpeg4_mc_5",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_MJPEG,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 4,
++		.max_buffers = 4,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mjpeg_ops,
++		.firmware_path = "meson/gx/vmjpeg_mc",
+ 	},
+ };
+ 
