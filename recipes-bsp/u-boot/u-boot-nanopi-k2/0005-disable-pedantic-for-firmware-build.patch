@@ -1,0 +1,92 @@
+From d575f46c5393f6c5a40f81ecf57baf194770e588 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Mon, 11 Jun 2018 15:08:36 +0000
+Subject: [PATCH] disable pedantic for firmware build
+
+---
+ arch/arm/cpu/armv8/gxb/firmware/acs/Makefile     | 2 +-
+ arch/arm/cpu/armv8/gxb/firmware/bl21/Makefile    | 2 +-
+ arch/arm/cpu/armv8/gxl/firmware/acs/Makefile     | 2 +-
+ arch/arm/cpu/armv8/gxl/firmware/bl21/Makefile    | 2 +-
+ arch/arm/cpu/armv8/gxtvbb/firmware/acs/Makefile  | 2 +-
+ arch/arm/cpu/armv8/gxtvbb/firmware/bl21/Makefile | 2 +-
+ 6 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/cpu/armv8/gxb/firmware/acs/Makefile b/arch/arm/cpu/armv8/gxb/firmware/acs/Makefile
+index 647f161..1441676 100644
+--- a/arch/arm/cpu/armv8/gxb/firmware/acs/Makefile
++++ b/arch/arm/cpu/armv8/gxb/firmware/acs/Makefile
+@@ -179,7 +179,7 @@ vpath %.c $(VPATH_LIST)
+ ASFLAGS			+= 	-nostdinc -ffreestanding -Wa,--fatal-warnings	\
+ 				-mgeneral-regs-only -D__ASSEMBLY__		\
+ 				${DEFINES} ${INCLUDES}
+-CFLAGS			+= 	-nostdinc -pedantic -ffreestanding -Wall	\
++CFLAGS			+= 	-nostdinc -ffreestanding -Wall	\
+ 				-Werror -mgeneral-regs-only -std=c99 -c -Os	\
+ 				${DEFINES} ${INCLUDES} $(VPATH_LIST:%=-I%)
+ CFLAGS			+=	-ffunction-sections -fdata-sections
+diff --git a/arch/arm/cpu/armv8/gxb/firmware/bl21/Makefile b/arch/arm/cpu/armv8/gxb/firmware/bl21/Makefile
+index 4dfe462..4ea4f59 100644
+--- a/arch/arm/cpu/armv8/gxb/firmware/bl21/Makefile
++++ b/arch/arm/cpu/armv8/gxb/firmware/bl21/Makefile
+@@ -181,7 +181,7 @@ vpath %.c $(VPATH_LIST)
+ ASFLAGS			+= 	-nostdinc -ffreestanding -Wa,--fatal-warnings	\
+ 				-mgeneral-regs-only -D__ASSEMBLY__		\
+ 				${DEFINES} ${INCLUDES}
+-CFLAGS			+= 	-nostdinc -pedantic -ffreestanding -Wall	\
++CFLAGS			+= 	-nostdinc -ffreestanding -Wall	\
+ 				-Werror -mgeneral-regs-only -std=c99 -c -Os	\
+ 				${DEFINES} ${INCLUDES} $(VPATH_LIST:%=-I%)
+ CFLAGS			+=	-ffunction-sections -fdata-sections
+diff --git a/arch/arm/cpu/armv8/gxl/firmware/acs/Makefile b/arch/arm/cpu/armv8/gxl/firmware/acs/Makefile
+index 647f161..1441676 100644
+--- a/arch/arm/cpu/armv8/gxl/firmware/acs/Makefile
++++ b/arch/arm/cpu/armv8/gxl/firmware/acs/Makefile
+@@ -179,7 +179,7 @@ vpath %.c $(VPATH_LIST)
+ ASFLAGS			+= 	-nostdinc -ffreestanding -Wa,--fatal-warnings	\
+ 				-mgeneral-regs-only -D__ASSEMBLY__		\
+ 				${DEFINES} ${INCLUDES}
+-CFLAGS			+= 	-nostdinc -pedantic -ffreestanding -Wall	\
++CFLAGS			+= 	-nostdinc -ffreestanding -Wall	\
+ 				-Werror -mgeneral-regs-only -std=c99 -c -Os	\
+ 				${DEFINES} ${INCLUDES} $(VPATH_LIST:%=-I%)
+ CFLAGS			+=	-ffunction-sections -fdata-sections
+diff --git a/arch/arm/cpu/armv8/gxl/firmware/bl21/Makefile b/arch/arm/cpu/armv8/gxl/firmware/bl21/Makefile
+index 4dfe462..4ea4f59 100644
+--- a/arch/arm/cpu/armv8/gxl/firmware/bl21/Makefile
++++ b/arch/arm/cpu/armv8/gxl/firmware/bl21/Makefile
+@@ -181,7 +181,7 @@ vpath %.c $(VPATH_LIST)
+ ASFLAGS			+= 	-nostdinc -ffreestanding -Wa,--fatal-warnings	\
+ 				-mgeneral-regs-only -D__ASSEMBLY__		\
+ 				${DEFINES} ${INCLUDES}
+-CFLAGS			+= 	-nostdinc -pedantic -ffreestanding -Wall	\
++CFLAGS			+= 	-nostdinc -ffreestanding -Wall	\
+ 				-Werror -mgeneral-regs-only -std=c99 -c -Os	\
+ 				${DEFINES} ${INCLUDES} $(VPATH_LIST:%=-I%)
+ CFLAGS			+=	-ffunction-sections -fdata-sections
+diff --git a/arch/arm/cpu/armv8/gxtvbb/firmware/acs/Makefile b/arch/arm/cpu/armv8/gxtvbb/firmware/acs/Makefile
+index 647f161..1441676 100644
+--- a/arch/arm/cpu/armv8/gxtvbb/firmware/acs/Makefile
++++ b/arch/arm/cpu/armv8/gxtvbb/firmware/acs/Makefile
+@@ -179,7 +179,7 @@ vpath %.c $(VPATH_LIST)
+ ASFLAGS			+= 	-nostdinc -ffreestanding -Wa,--fatal-warnings	\
+ 				-mgeneral-regs-only -D__ASSEMBLY__		\
+ 				${DEFINES} ${INCLUDES}
+-CFLAGS			+= 	-nostdinc -pedantic -ffreestanding -Wall	\
++CFLAGS			+= 	-nostdinc -ffreestanding -Wall	\
+ 				-Werror -mgeneral-regs-only -std=c99 -c -Os	\
+ 				${DEFINES} ${INCLUDES} $(VPATH_LIST:%=-I%)
+ CFLAGS			+=	-ffunction-sections -fdata-sections
+diff --git a/arch/arm/cpu/armv8/gxtvbb/firmware/bl21/Makefile b/arch/arm/cpu/armv8/gxtvbb/firmware/bl21/Makefile
+index 4dfe462..4ea4f59 100644
+--- a/arch/arm/cpu/armv8/gxtvbb/firmware/bl21/Makefile
++++ b/arch/arm/cpu/armv8/gxtvbb/firmware/bl21/Makefile
+@@ -181,7 +181,7 @@ vpath %.c $(VPATH_LIST)
+ ASFLAGS			+= 	-nostdinc -ffreestanding -Wa,--fatal-warnings	\
+ 				-mgeneral-regs-only -D__ASSEMBLY__		\
+ 				${DEFINES} ${INCLUDES}
+-CFLAGS			+= 	-nostdinc -pedantic -ffreestanding -Wall	\
++CFLAGS			+= 	-nostdinc -ffreestanding -Wall	\
+ 				-Werror -mgeneral-regs-only -std=c99 -c -Os	\
+ 				${DEFINES} ${INCLUDES} $(VPATH_LIST:%=-I%)
+ CFLAGS			+=	-ffunction-sections -fdata-sections
