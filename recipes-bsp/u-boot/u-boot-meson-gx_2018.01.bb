@@ -5,6 +5,49 @@ DEPENDS += "bc-native dtc-native python-native amlogic-fip"
 
 PROVIDES = "u-boot"
 
+do_deploy_append_meson-gxbb () {
+    FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
+    DESTDIR="${B}/fip"
+
+    mkdir -p ${DESTDIR}
+
+    cp ${FIPDIR}/bl31.img ${DESTDIR}/bl31.img
+    cp ${B}/u-boot.bin ${DESTDIR}/bl33.bin
+
+    ${FIPDIR}/blx_fix.sh ${FIPDIR}/bl30.bin \
+			 ${DESTDIR}/zero_tmp \
+			 ${DESTDIR}/bl30_zero.bin \
+			 ${FIPDIR}/bl301.bin \
+			 ${DESTDIR}/bl301_zero.bin \
+			 ${DESTDIR}/bl30_new.bin bl30
+
+    ${FIPDIR}/fip_create --bl30 ${DESTDIR}/bl30_new.bin \
+			 --bl31 ${FIPDIR}/bl31.img \
+			 --bl33 ${DESTDIR}/bl33.bin \
+			 ${DESTDIR}/fip.bin
+
+    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+				  ${DESTDIR}/bl2_acs.bin \
+				  ${FIPDIR}/acs.bin 0
+
+    ${FIPDIR}/blx_fix.sh ${DESTDIR}/bl2_acs.bin \
+			 ${DESTDIR}/zero_tmp \
+			 ${DESTDIR}/bl2_zero.bin \
+			 ${FIPDIR}/bl21.bin \
+			 ${DESTDIR}/bl21_zero.bin \
+			 ${DESTDIR}/bl2_new.bin bl2
+
+    cat ${DESTDIR}/bl2_new.bin ${DESTDIR}/fip.bin > ${DESTDIR}/boot_new.bin
+
+    ${FIPDIR}/aml_encrypt_gxb --bootsig --input ${DESTDIR}/boot_new.bin \
+			      --output ${DESTDIR}/u-boot.bin
+
+    # SDCard
+    install ${DESTDIR}/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
+    # eMMC
+    install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
+}
+
 do_deploy_append_meson-gxl () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
     DESTDIR="${B}/fip"
