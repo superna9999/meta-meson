@@ -1,0 +1,21 @@
+From 4740cf2f18c1b65e145598999ecc97611ceec568 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Mon, 11 Jun 2018 15:06:49 +0000
+Subject: [PATCH] fix s3c udc otg build
+
+---
+ drivers/usb/gadget/s3c_udc_otg.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/drivers/usb/gadget/s3c_udc_otg.c b/drivers/usb/gadget/s3c_udc_otg.c
+index 04b2641..dcfb63d 100644
+--- a/drivers/usb/gadget/s3c_udc_otg.c
++++ b/drivers/usb/gadget/s3c_udc_otg.c
+@@ -68,7 +68,6 @@ static char *state_names[] = {
+ struct s3c_udc	*the_controller;
+ 
+ static const char driver_name[] = "s3c-udc";
+-static const char driver_desc[] = DRIVER_DESC;
+ static const char ep0name[] = "ep0-control";
+ 
+ /* Max packet size*/
