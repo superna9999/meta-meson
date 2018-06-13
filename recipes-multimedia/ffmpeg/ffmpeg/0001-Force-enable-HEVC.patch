@@ -1,0 +1,37 @@
+From 1494b941245d13a412b0555a15ba0e4b22fef6b0 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Tue, 12 Jun 2018 12:51:54 +0000
+Subject: [PATCH] Force enable HEVC
+
+Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
+---
+ configure             | 2 +-
+ libavcodec/v4l2_fmt.c | 2 ++
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/configure b/configure
+index b7fb1a1..e47e444 100755
+--- a/configure
++++ b/configure
+@@ -6152,7 +6152,7 @@ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_VC1_ANNEX_G;" && enable vc
+ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_MPEG1;" && enable mpeg1_v4l2_m2m
+ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_MPEG2;" && enable mpeg2_v4l2_m2m
+ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_MPEG4;" && enable mpeg4_v4l2_m2m
+-check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_HEVC;" && enable hevc_v4l2_m2m
++check_code cc linux/videodev2.h "int i = 1;" && enable hevc_v4l2_m2m
+ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_H263;" && enable h263_v4l2_m2m
+ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_H264;" && enable h264_v4l2_m2m
+ check_code cc linux/videodev2.h "int i = V4L2_PIX_FMT_VP8;" && enable vp8_v4l2_m2m
+diff --git a/libavcodec/v4l2_fmt.c b/libavcodec/v4l2_fmt.c
+index 6df47e3..86853cb 100644
+--- a/libavcodec/v4l2_fmt.c
++++ b/libavcodec/v4l2_fmt.c
+@@ -25,6 +25,8 @@
+ #include <search.h>
+ #include "v4l2_fmt.h"
+ 
++#define V4L2_PIX_FMT_HEVC     v4l2_fourcc('H', 'E', 'V', 'C')
++
+ #define V4L2_FMT(x) V4L2_PIX_FMT_##x
+ #define AV_CODEC(x) AV_CODEC_ID_##x
+ #define AV_FMT(x)   AV_PIX_FMT_##x
