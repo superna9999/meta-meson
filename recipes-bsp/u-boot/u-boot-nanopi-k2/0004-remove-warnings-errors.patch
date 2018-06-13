@@ -1,0 +1,22 @@
+From 7a6f9914423725a31ede143d5d703b688c7ddc71 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Mon, 11 Jun 2018 15:07:36 +0000
+Subject: [PATCH] remove warnings errors
+
+---
+ Makefile | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index 1aab616..942ea3c 100644
+--- a/Makefile
++++ b/Makefile
+@@ -566,6 +566,8 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-stack-usage.sh $(CC)),y)
+ endif
+ 
+ KBUILD_CFLAGS += $(call cc-option,-Wno-format-nonliteral)
++KBUILD_CFLAGS += $(call cc-option,-Wno-misleading-indentation)
++KBUILD_CFLAGS += $(call cc-option,-Wno-tautological-compare)
+ 
+ # turn jbsr into jsr for m68k
+ ifeq ($(ARCH),m68k)

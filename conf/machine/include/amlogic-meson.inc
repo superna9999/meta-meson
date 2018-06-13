@@ -11,5 +11,5 @@ UBOOT_ENTRYSYMBOL = "0x1080000"
 IMAGE_BOOT_FILES ?= "uImage"
 
 IMAGE_FSTYPES += "tar.bz2 wic"
-WKS_FILE = "sdimage-bootpart.wks"
+WKS_FILE ?= "sdimage-bootpart-meson.wks"
 do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
