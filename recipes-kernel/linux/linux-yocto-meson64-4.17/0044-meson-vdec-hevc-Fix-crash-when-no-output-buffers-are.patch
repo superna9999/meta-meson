@@ -1,0 +1,31 @@
+From f0c89fa834253615eb9feac9ef754a37e802eee5 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Mon, 11 Jun 2018 10:08:41 +0200
+Subject: [PATCH] meson: vdec: hevc: Fix crash when no output buffers are
+ available
+
+This is not a proper fix. While it won't crash the kernel anymore,
+having no output buffer available will freeze the decoding process
+(even if userspace gives back some buffers later on).
+
+TODO: resume the decoding properly once userspace has given back
+output buffers.
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index bf291a6..c96cadb 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -1475,7 +1475,9 @@ static irqreturn_t codec_hevc_threaded_isr(struct vdec_session *sess)
+ 		return IRQ_HANDLED;
+ 	}
+ 
+-	codec_hevc_process_segment_header(sess);
++	if (codec_hevc_process_segment_header(sess) == -1)
++		return IRQ_HANDLED;
++
+ 	codec_hevc_update_frame_refs(sess, hevc->cur_frame);
+ 	codec_hevc_update_col_frame(hevc);
+ 	codec_hevc_update_ldc_flag(hevc);

@@ -1,0 +1,62 @@
+From 7822e3496c2ea9c4227e1e736eaefb1c0b124934 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 8 Apr 2018 20:58:59 +0200
+Subject: [PATCH] meson: vdec: Limit input buffers to 17
+
+16 is often the max. number of consecutive bframes available in a bitstream,
+so there's really no point in queuing more data.
+---
+ drivers/media/platform/meson/vdec/esparser.c | 5 ++++-
+ drivers/media/platform/meson/vdec/vdec.c     | 1 +
+ drivers/media/platform/meson/vdec/vdec.h     | 3 +++
+ 3 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 39bde90..ad40b41 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -143,7 +143,8 @@ static int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbu
+ 	struct vdec_core *core = sess->core;
+ 	u32 payload_size = vb2_get_plane_payload(vb, 0);
+ 
+-	if (esparser_vififo_free_space(sess) < payload_size)
++	if (esparser_vififo_free_space(sess) < payload_size ||
++	    atomic_read(&sess->esparser_queued_bufs) >= 17)
+ 		return -EAGAIN;
+ 
+ 	v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
+@@ -174,6 +175,8 @@ void esparser_queue_all_src(struct work_struct *work)
+ 	v4l2_m2m_for_each_src_buf_safe(sess->m2m_ctx, buf, n) {
+ 		if (esparser_queue(sess, &buf->vb) < 0)
+ 			break;
++
++		atomic_inc(&sess->esparser_queued_bufs);
+ 	}
+ }
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index f8c77cf..dfa840f 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -708,6 +708,7 @@ void vdec_dst_buf_done(struct vdec_session *sess, u32 buf_idx)
+ 	vbuf->vb2_buf.timestamp = tmp->timestamp;
+ 	vbuf->sequence = sess->sequence_cap++;
+ 
++	atomic_dec(&sess->esparser_queued_bufs);
+ 	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+ 	list_del(&tmp->list);
+ 	kfree(tmp);
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 0b6b7a8..2c0fc50 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -100,6 +100,9 @@ struct vdec_session {
+ 	u32 num_input_bufs;
+ 	u32 num_output_bufs;
+ 
++	/* Number of buffers currently queued into ESPARSER */
++	atomic_t esparser_queued_bufs;
++
+ 	/* Work for the ESPARSER to process src buffers */
+ 	struct work_struct esparser_queue_work;
+ 

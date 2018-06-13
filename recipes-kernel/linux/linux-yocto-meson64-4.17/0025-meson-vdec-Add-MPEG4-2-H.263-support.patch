@@ -1,0 +1,974 @@
+From 7e525cb6883274eb270f75a80dbdb4c9f755cef1 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sat, 7 Apr 2018 17:37:55 +0200
+Subject: [PATCH] meson: vdec: Add MPEG4-2/H.263 support
+
+Was only tested with a few Xvid videos, proper playback of any
+MPEG4-2/H263 material is not guaranteed.
+
+Also, you better make sure the input file has correct timestamps (PTS)
+as we don't parse them in the driver.
+
+This commit also cleans up some more things, more common code in the helpers, etc.
+---
+ drivers/media/platform/meson/vdec/Makefile        |   2 +-
+ drivers/media/platform/meson/vdec/codec_h264.c    |  17 +-
+ drivers/media/platform/meson/vdec/codec_helpers.c |  24 ++-
+ drivers/media/platform/meson/vdec/codec_helpers.h |   1 +
+ drivers/media/platform/meson/vdec/codec_hevc.c    |  24 +--
+ drivers/media/platform/meson/vdec/codec_mpeg12.c  |  21 +-
+ drivers/media/platform/meson/vdec/codec_mpeg4.c   | 246 ++++++++++++++++++++++
+ drivers/media/platform/meson/vdec/codec_mpeg4.h   |   8 +
+ drivers/media/platform/meson/vdec/esparser.c      |  32 ++-
+ drivers/media/platform/meson/vdec/vdec.c          |  42 +++-
+ drivers/media/platform/meson/vdec/vdec.h          |   3 +
+ drivers/media/platform/meson/vdec/vdec_1.c        |  16 +-
+ drivers/media/platform/meson/vdec/vdec_hevc.c     |   6 +-
+ h263_mc                                           | Bin 0 -> 16384 bytes
+ vmpeg4_mc_5                                       | Bin 0 -> 16384 bytes
+ 15 files changed, 371 insertions(+), 71 deletions(-)
+ create mode 100644 drivers/media/platform/meson/vdec/codec_mpeg4.c
+ create mode 100644 drivers/media/platform/meson/vdec/codec_mpeg4.h
+ create mode 100644 h263_mc
+ create mode 100644 vmpeg4_mc_5
+
+diff --git a/drivers/media/platform/meson/vdec/Makefile b/drivers/media/platform/meson/vdec/Makefile
+index 5847d2f..6d5dee1 100644
+--- a/drivers/media/platform/meson/vdec/Makefile
++++ b/drivers/media/platform/meson/vdec/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Makefile for Qualcomm Venus driver
+ 
+-meson-vdec-objs += vdec.o vdec_1.o vdec_hevc.o esparser.o canvas.o codec_helpers.o codec_mpeg12.o codec_h264.o codec_hevc.o
++meson-vdec-objs += vdec.o vdec_1.o vdec_hevc.o esparser.o canvas.o codec_helpers.o codec_mpeg12.o codec_h264.o codec_hevc.o codec_mpeg4.o
+ 
+ obj-$(CONFIG_VIDEO_AML_MESON_VDEC) += meson-vdec.o
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index b15c47c..af9002c 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -338,21 +338,6 @@ static void codec_h264_set_param(struct vdec_session *sess) {
+ 	writel_relaxed((max_reference_size << 24) | (actual_dpb_size << 16) | (max_dpb_size << 8), core->dos_base + AV_SCRATCH_0);
+ }
+ 
+-/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+-static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->index == -1) {
+-			tmp->index = buffer_index;
+-			break;
+-		}
+-	}
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+ static irqreturn_t codec_h264_isr(struct vdec_session *sess)
+ {
+ 	unsigned int cpu_cmd;
+@@ -407,7 +392,7 @@ static irqreturn_t codec_h264_isr(struct vdec_session *sess)
+ 				continue;
+ 			}
+ 
+-			fill_buffer_index(sess, buffer_index);
++			codec_helper_fill_buf_idx(sess, buffer_index);
+ 		}
+ 
+ 		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.c b/drivers/media/platform/meson/vdec/codec_helpers.c
+index 8d8ff4e..0b53f0b 100644
+--- a/drivers/media/platform/meson/vdec/codec_helpers.c
++++ b/drivers/media/platform/meson/vdec/codec_helpers.c
+@@ -4,7 +4,8 @@
+ #include "codec_helpers.h"
+ #include "canvas.h"
+ 
+-void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base) {
++void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base)
++{
+ 	struct vdec_core *core = sess->core;
+ 	u32 width = ALIGN(sess->width, 64);
+ 	u32 height = ALIGN(sess->height, 64);
+@@ -30,4 +31,23 @@ void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base) {
+ 			       ((cnv_uv_idx) << 8)  |
+ 				(cnv_y_idx), reg_base + buf_idx*4);
+ 	}
+-}
+\ No newline at end of file
++}
++
++/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
++void codec_helper_fill_buf_idx(struct vdec_session *sess, u32 buffer_index)
++{
++	struct vdec_buffer *tmp;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (tmp->index == -1) {
++			tmp->index = buffer_index;
++			goto unlock;
++		}
++	}
++
++	printk("Couldn't fill buffer idx %d\n", buffer_index);
++unlock:
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.h b/drivers/media/platform/meson/vdec/codec_helpers.h
+index 0a778ba..9e1e1d1 100644
+--- a/drivers/media/platform/meson/vdec/codec_helpers.h
++++ b/drivers/media/platform/meson/vdec/codec_helpers.h
+@@ -4,5 +4,6 @@
+ #include "vdec.h"
+ 
+ void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base);
++void codec_helper_fill_buf_idx(struct vdec_session *sess, u32 buffer_index);
+ 
+ #endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 32f8bd1..b804aa6 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -198,7 +198,8 @@ static int codec_hevc_buffers_thread(void *data)
+ 	return 0;
+ }
+ 
+-static void codec_hevc_setup_buffers(struct vdec_session *sess) {
++static void codec_hevc_setup_buffers(struct vdec_session *sess)
++{
+ 	int i;
+ 	dma_addr_t buf_y_paddr = 0;
+ 	dma_addr_t buf_uv_paddr;
+@@ -233,7 +234,8 @@ static void codec_hevc_setup_buffers(struct vdec_session *sess) {
+ 		writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
+ }
+ 
+-static int codec_hevc_setup_workspace(struct vdec_session *sess) {
++static int codec_hevc_setup_workspace(struct vdec_session *sess)
++{
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_hevc *hevc = sess->priv;
+ 
+@@ -273,7 +275,8 @@ static int codec_hevc_setup_workspace(struct vdec_session *sess) {
+ 	return 0;
+ }
+ 
+-static int codec_hevc_start(struct vdec_session *sess) {
++static int codec_hevc_start(struct vdec_session *sess)
++{
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_hevc *hevc;
+ 	int ret;
+@@ -391,21 +394,6 @@ static int codec_hevc_stop(struct vdec_session *sess)
+ 	return 0;
+ }
+ 
+-/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+-static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->index == -1) {
+-			tmp->index = buffer_index;
+-			break;
+-		}
+-	}
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+ static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
+ {
+ 	u32 dec_status;
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.c b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+index 7ad3870..8c1d474 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg12.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+@@ -41,6 +41,8 @@ struct codec_mpeg12 {
+ 	void      *workspace_vaddr;
+ 	dma_addr_t workspace_paddr;
+ 
++	u32 last_buf_idx;
++
+ 	/* Housekeeping thread for marking buffers to DONE
+ 	 * and recycling them into the hardware
+ 	 */
+@@ -154,6 +156,7 @@ static int codec_mpeg12_start(struct vdec_session *sess) {
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
+ 
+ 	mpeg12->buffers_thread = kthread_run(codec_mpeg12_buffers_thread, sess, "buffers_done");
++	mpeg12->last_buf_idx = 7;
+ 
+ 	return 0;
+ 
+@@ -182,26 +185,12 @@ static int codec_mpeg12_stop(struct vdec_session *sess)
+ 	return 0;
+ }
+ 
+-/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+-static void fill_buffer_index(struct vdec_session *sess, u32 buffer_index) {
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->index == -1) {
+-			tmp->index = buffer_index;
+-			break;
+-		}
+-	}
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+ static irqreturn_t codec_mpeg12_isr(struct vdec_session *sess)
+ {
+ 	u32 reg;
+ 	u32 buffer_index;
+ 	struct vdec_core *core = sess->core;
++	struct codec_mpeg12 *mpeg12 = sess->priv;
+ 
+ 	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
+ 
+@@ -218,7 +207,7 @@ static irqreturn_t codec_mpeg12_isr(struct vdec_session *sess)
+ 		goto end;
+ 
+ 	buffer_index = ((reg & 0xf) - 1) & 7;
+-	fill_buffer_index(sess, buffer_index);
++	codec_helper_fill_buf_idx(sess, buffer_index);
+ 
+ end:
+ 	writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg4.c b/drivers/media/platform/meson/vdec/codec_mpeg4.c
+new file mode 100644
+index 0000000..626b637
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_mpeg4.c
+@@ -0,0 +1,246 @@
++#include <media/v4l2-mem2mem.h>
++#include <media/videobuf2-dma-contig.h>
++
++#include "codec_mpeg4.h"
++#include "codec_helpers.h"
++#include "canvas.h"
++
++#define SIZE_WORKSPACE		(1 * SZ_1M)
++#define DCAC_BUFF_START_IP	0x02b00000
++
++/* DOS registers */
++#define ASSIST_MBOX1_CLR_REG 0x01d4
++#define ASSIST_MBOX1_MASK    0x01d8
++
++#define PSCALE_CTRL 0x2444
++
++#define MDEC_PIC_DC_CTRL   0x2638
++#define MDEC_PIC_DC_THRESH 0x26e0
++
++#define AV_SCRATCH_0        0x2700
++#define MP4_PIC_RATIO       0x2714
++#define MP4_RATE            0x270c
++#define AV_SCRATCH_4        0x2710
++#define MP4_ERR_COUNT       0x2718
++#define MP4_PIC_WH          0x271c
++#define MREG_BUFFERIN       0x2720
++#define MREG_BUFFEROUT      0x2724
++#define MP4_NOT_CODED_CNT   0x2728
++#define MP4_VOP_TIME_INC    0x272c
++#define MP4_OFFSET_REG      0x2730
++#define MP4_SYS_RATE        0x2738
++#define MEM_OFFSET_REG      0x273c
++#define AV_SCRATCH_G        0x2740
++#define MREG_FATAL_ERROR    0x2754
++
++#define DOS_SW_RESET0 0xfc00
++
++struct codec_mpeg4 {
++	/* Buffer for the MPEG1/2 Workspace */
++	void      *workspace_vaddr;
++	dma_addr_t workspace_paddr;
++
++	u32 last_buf_idx;
++
++	/* Housekeeping thread for marking buffers to DONE
++	 * and recycling them into the hardware
++	 */
++	struct task_struct *buffers_thread;
++};
++
++static int codec_mpeg4_buffers_thread(void *data)
++{
++	struct vdec_buffer *tmp;
++	struct vb2_v4l2_buffer *vbuf;
++	unsigned long flags;
++	struct vdec_session *sess = data;
++	struct vdec_core *core = sess->core;;
++
++	while (!kthread_should_stop()) {
++		spin_lock_irqsave(&sess->bufs_spinlock, flags);
++		while (!list_empty(&sess->bufs))
++		{
++			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
++			if (tmp->index == -1)
++				break;
++
++			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
++			if (!vbuf) {
++				printk("HW buffer %d ready but we don't have the vb2 buffer !!!\n", tmp->index);
++				break;
++			}
++
++			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
++			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
++			vbuf->vb2_buf.timestamp = tmp->timestamp;
++			vbuf->sequence = sess->sequence_cap++;
++			if (!(vbuf->sequence % 100))
++				printk("%d\n", vbuf->sequence);
++
++			printk("Buffer %d done\n", tmp->index);
++			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++			list_del(&tmp->list);
++			kfree(tmp);
++		}
++		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++
++		mutex_lock(&sess->bufs_recycle_lock);
++		while (!list_empty(&sess->bufs_recycle) &&
++		       !readl_relaxed(core->dos_base + MREG_BUFFERIN))
++		{
++			tmp = list_first_entry(&sess->bufs_recycle, struct vdec_buffer, list);
++
++			/* Tell the decoder he can recycle this buffer */
++			writel_relaxed(~(1 << tmp->index), core->dos_base + MREG_BUFFERIN);
++
++			printk("Buffer %d recycled\n", tmp->index);
++
++			list_del(&tmp->list);
++			kfree(tmp);
++
++			up(&sess->queue_sema);
++		}
++		mutex_unlock(&sess->bufs_recycle_lock);
++
++		usleep_range(5000, 10000);
++	}
++
++	return 0;
++}
++
++/* The MPEG4 canvas regs are not contiguous,
++ * handle it specifically instead of using the helper
++ * AV_SCRATCH_0 - AV_SCRATCH_3  ;  AV_SCRATCH_G - AV_SCRATCH_J
++ */
++void codec_mpeg4_set_canvases(struct vdec_session *sess) {
++	struct v4l2_m2m_buffer *buf;
++	struct vdec_core *core = sess->core;
++	void *current_reg = core->dos_base + AV_SCRATCH_0;
++	u32 width = ALIGN(sess->width, 64);
++	u32 height = ALIGN(sess->height, 64);
++
++	/* Setup NV12 canvases for Decoded Picture Buffer (dpb)
++	 * Map them to the user buffers' planes
++	 */
++	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
++		u32 buf_idx    = buf->vb.vb2_buf.index;
++		u32 cnv_y_idx  = 128 + buf_idx * 2;
++		u32 cnv_uv_idx = 128 + buf_idx * 2 + 1;
++		dma_addr_t buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
++		dma_addr_t buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
++
++		/* Y plane */
++		vdec_canvas_setup(core->dmc_base, cnv_y_idx, buf_y_paddr, width, height, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++		/* U/V plane */
++		vdec_canvas_setup(core->dmc_base, cnv_uv_idx, buf_uv_paddr, width, height / 2, MESON_CANVAS_WRAP_NONE, MESON_CANVAS_BLKMODE_LINEAR);
++
++		writel_relaxed(((cnv_uv_idx) << 16) |
++			       ((cnv_uv_idx) << 8)  |
++				(cnv_y_idx), current_reg);
++
++		current_reg += 4;
++		if (current_reg == core->dos_base + AV_SCRATCH_4)
++			current_reg = core->dos_base + AV_SCRATCH_G;
++	}
++}
++
++static int codec_mpeg4_start(struct vdec_session *sess) {
++	struct vdec_core *core = sess->core;
++	struct codec_mpeg4 *mpeg4 = sess->priv;
++	int ret;
++
++	printk("codec_mpeg4_start\n");
++
++	mpeg4 = kzalloc(sizeof(*mpeg4), GFP_KERNEL);
++	if (!mpeg4)
++		return -ENOMEM;
++
++	sess->priv = mpeg4;
++
++	/* Allocate some memory for the MPEG1/2 decoder's state */
++	mpeg4->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &mpeg4->workspace_paddr, GFP_KERNEL);
++	if (!mpeg4->workspace_vaddr) {
++		printk("Failed to request MPEG 4 Workspace\n");
++		ret = -ENOMEM;
++		goto free_mpeg4;
++	}
++	printk("Allocated Workspace: %08X - %08X\n", mpeg4->workspace_paddr, mpeg4->workspace_paddr + SIZE_WORKSPACE);
++
++	writel_relaxed((1<<7) | (1<<6), core->dos_base + DOS_SW_RESET0);
++	writel_relaxed(0, core->dos_base + DOS_SW_RESET0);
++	readl_relaxed(core->dos_base + DOS_SW_RESET0);
++
++	codec_mpeg4_set_canvases(sess);
++
++	writel_relaxed(mpeg4->workspace_paddr - DCAC_BUFF_START_IP, core->dos_base + MEM_OFFSET_REG);
++	writel_relaxed(0, core->dos_base + PSCALE_CTRL);
++	writel_relaxed(0, core->dos_base + MP4_NOT_CODED_CNT);
++	writel_relaxed(0, core->dos_base + MREG_BUFFERIN);
++	writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
++	writel_relaxed(0, core->dos_base + MREG_FATAL_ERROR);
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_MASK);
++	writel_relaxed(0x404038aa, core->dos_base + MDEC_PIC_DC_THRESH);
++
++	/* Enable NV21 */
++	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
++
++	mpeg4->buffers_thread = kthread_run(codec_mpeg4_buffers_thread, sess, "buffers_done");
++	mpeg4->last_buf_idx = 7;
++
++	return 0;
++
++free_mpeg4:
++	kfree(mpeg4);
++	return ret;
++}
++
++static int codec_mpeg4_stop(struct vdec_session *sess)
++{
++	struct codec_mpeg4 *mpeg4 = sess->priv;
++	struct vdec_core *core = sess->core;
++
++	printk("codec_mpeg4_stop\n");
++
++	kthread_stop(mpeg4->buffers_thread);
++
++	if (mpeg4->workspace_vaddr) {
++		dma_free_coherent(core->dev, SIZE_WORKSPACE, mpeg4->workspace_vaddr, mpeg4->workspace_paddr);
++		mpeg4->workspace_vaddr = 0;
++	}
++
++	kfree(mpeg4);
++	sess->priv = 0;
++
++	return 0;
++}
++
++static irqreturn_t codec_mpeg4_isr(struct vdec_session *sess)
++{
++	u32 reg;
++	u32 buffer_index;
++	struct vdec_core *core = sess->core;
++
++	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
++
++	reg = readl_relaxed(core->dos_base + MREG_FATAL_ERROR);
++	if (reg == 1)
++		printk("mpeg4 fatal error\n");
++
++	reg = readl_relaxed(core->dos_base + MREG_BUFFEROUT);
++	if (reg) {
++		buffer_index = reg & 0x7;
++		codec_helper_fill_buf_idx(sess, buffer_index);
++		writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
++	}
++
++	return IRQ_HANDLED;
++}
++
++struct vdec_codec_ops codec_mpeg4_ops = {
++	.start = codec_mpeg4_start,
++	.stop = codec_mpeg4_stop,
++	.isr = codec_mpeg4_isr,
++};
++
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg4.h b/drivers/media/platform/meson/vdec/codec_mpeg4.h
+new file mode 100644
+index 0000000..4575e71
+--- /dev/null
++++ b/drivers/media/platform/meson/vdec/codec_mpeg4.h
+@@ -0,0 +1,8 @@
++#ifndef __MESON_VDEC_CODEC_MPEG4_H_
++#define __MESON_VDEC_CODEC_MPEG4_H_
++
++#include "vdec.h"
++
++extern struct vdec_codec_ops codec_mpeg4_ops;
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 9b5e37e..39aec6a 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -102,6 +102,25 @@ static void add_buffer_to_list(struct vdec_session *sess, struct vdec_buffer *ne
+ 	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+ }
+ 
++static void remove_buffer_from_list(struct vdec_session *sess, u64 ts)
++{
++	struct vdec_buffer *tmp;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (tmp->timestamp == ts) {
++			list_del(&tmp->list);
++			kfree(tmp);
++			goto unlock;
++		}
++	}
++	printk("Couldn't remove buffer with timestamp %llu from list\n", ts);
++
++unlock:
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
++
+ /* Add a start code at the end of the buffer
+  * to trigger the esparser interrupt
+  */
+@@ -152,6 +171,7 @@ int esparser_queue(void *data) {
+ 
+ 		v4l2_m2m_for_each_src_buf_safe(sess->m2m_ctx, buf, n) {
+ 			struct vb2_v4l2_buffer *vbuf = &buf->vb;
++			struct vb2_buffer *vb = &vbuf->vb2_buf;
+ 			v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
+ 
+ 			while (down_timeout(&sess->queue_sema, HZ) < 0) {
+@@ -163,20 +183,20 @@ int esparser_queue(void *data) {
+ 				printk("Timed out waiting for an input slot. Trying again..\n");
+ 			}
+ 
++			new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
++			new_buf->timestamp = vb->timestamp;
++			new_buf->index = -1;
++			add_buffer_to_list(sess, new_buf);
++
+ 			ret = esparser_process_buf(core, vbuf);
+ 
+ 			if (ret > 0) {
+-				struct vb2_buffer *vb = &vbuf->vb2_buf;
+-				new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
+-				new_buf->timestamp = vb->timestamp;
+-				new_buf->index = -1;
+-				add_buffer_to_list(sess, new_buf);
+-
+ 				vbuf->flags = 0;
+ 				vbuf->field = V4L2_FIELD_NONE;
+ 				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+ 			} else if (ret <= 0) {
+ 				printk("ESPARSER input parsing fatal error\n");
++				remove_buffer_from_list(sess, vb->timestamp);
+ 				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+ 				writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
+ 				up(&sess->queue_sema);
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 5b893e9..c2a3b03 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -20,6 +20,7 @@
+ #include "vdec_hevc.h"
+ 
+ #include "codec_mpeg12.h"
++#include "codec_mpeg4.h"
+ #include "codec_h264.h"
+ #include "codec_hevc.h"
+ 
+@@ -98,13 +99,14 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 	switch (q->type) {
+ 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+ 		sizes[0] = vdec_get_output_size(sess);
+-		//*num_buffers = 2;
++		sess->num_input_bufs = *num_buffers;
+ 		*num_planes = fmt_out->num_planes;
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+ 		sizes[0] = vdec_get_output_size(sess);
+ 		sizes[1] = vdec_get_output_size(sess) / 2;
+ 		*num_buffers = min(max(*num_buffers, fmt_out->min_buffers), fmt_out->max_buffers);
++		sess->num_output_bufs = *num_buffers;
+ 		*num_planes = fmt_cap->num_planes;
+ 		break;
+ 	default:
+@@ -295,6 +297,33 @@ static const struct vdec_format vdec_formats[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_mpeg12_ops,
+ 		.firmware_path = "meson/gxl/vmpeg12_mc",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_MPEG4,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 8,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mpeg4_ops,
++		.firmware_path = "meson/gxl/vmpeg4_mc_5",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_H263,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 8,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mpeg4_ops,
++		.firmware_path = "meson/gxl/h263_mc",
++	}, {
++		.pixfmt = V4L2_PIX_FMT_XVID,
++		.num_planes = 1,
++		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
++		.min_buffers = 8,
++		.max_buffers = 8,
++		.vdec_ops = &vdec_1_ops,
++		.codec_ops = &codec_mpeg4_ops,
++		.firmware_path = "meson/gxl/vmpeg4_mc_5",
+ 	},
+ };
+ 
+@@ -372,6 +401,7 @@ vdec_try_fmt_common(struct v4l2_format *f)
+ 	pixmp->flags = 0;
+ 
+ 	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
++		memset(pfmt[1].reserved, 0, sizeof(pfmt[1].reserved));
+ 		pfmt[0].sizeimage = get_output_size(pixmp->width, pixmp->height);
+ 		pfmt[0].bytesperline = ALIGN(pixmp->width, 64);
+ 
+@@ -606,9 +636,12 @@ static int vdec_open(struct file *file)
+ 		return -ENOMEM;
+ 
+ 	printk("vdec_open\n");
+-	
++
+ 	sess->core = core;
+-	core->cur_sess = sess;
++	sess->fmt_cap = &vdec_formats[0];
++	sess->fmt_out = &vdec_formats[1];
++	sess->width = 1280;
++	sess->height = 720;
+ 	INIT_LIST_HEAD(&sess->bufs);
+ 	INIT_LIST_HEAD(&sess->bufs_recycle);
+ 	init_waitqueue_head(&sess->input_buf_wq);
+@@ -617,8 +650,7 @@ static int vdec_open(struct file *file)
+ 	mutex_init(&sess->bufs_recycle_lock);
+ 	sema_init(&sess->queue_sema, 24);
+ 
+-	sess->fmt_cap = &vdec_formats[0];
+-	sess->fmt_out = &vdec_formats[1];
++	core->cur_sess = sess;
+ 
+ 	sess->m2m_dev = v4l2_m2m_init(&vdec_m2m_ops);
+ 	if (IS_ERR(sess->m2m_dev)) {
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 3e62c58..fcb487d 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -96,6 +96,9 @@ struct vdec_session {
+ 	u8 quantization;
+ 	u8 xfer_func;
+ 
++	u32 num_input_bufs;
++	u32 num_output_bufs;
++
+ 	/* Whether capture/output streaming are on */
+ 	unsigned int streamon_cap, streamon_out;
+ 	
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 2c6139c..3dad221 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -140,6 +140,16 @@ irqreturn_t vdec_1_isr(int irq, void *data)
+ 	return sess->fmt_out->codec_ops->isr(sess);
+ }
+ 
++static void vdec_1_conf_esparser(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++
++	/* VDEC_1 specific ESPARSER stuff */
++	writel_relaxed(0, core->dos_base + DOS_GEN_CTRL0); // set vififo_vbuf_rp_sel=>vdec
++	writel_relaxed(1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
++	writel_relaxed(readl_relaxed(core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL) & ~1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
++}
++
+ static int vdec_1_start(struct vdec_session *sess)
+ {
+ 	int ret;
+@@ -176,11 +186,6 @@ static int vdec_1_start(struct vdec_session *sess)
+ 	/* Enable firmware processor */
+ 	writel_relaxed(1, core->dos_base + MPSR);
+ 
+-	/* VDEC_1 specific ESPARSER stuff */
+-	writel_relaxed(0, core->dos_base + DOS_GEN_CTRL0); // set vififo_vbuf_rp_sel=>vdec
+-	writel_relaxed(1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
+-	writel_relaxed(readl_relaxed(core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL) & ~1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
+-
+ 	return 0;
+ }
+ 
+@@ -227,4 +232,5 @@ static int vdec_1_stop(struct vdec_session *sess)
+ struct vdec_ops vdec_1_ops = {
+ 	.start = vdec_1_start,
+ 	.stop = vdec_1_stop,
++	.conf_esparser = vdec_1_conf_esparser,
+ };
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index ef880b2..db9e71e 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -65,7 +65,8 @@ static int vdec_hevc_load_firmware(struct vdec_session *sess, const char* fwname
+ 	return ret;
+ }
+ 
+-static void vdec_hevc_stbuf_init(struct vdec_session *sess) {
++static void vdec_hevc_stbuf_init(struct vdec_session *sess)
++{
+ 	struct vdec_core *core = sess->core;
+ 
+ 	printk("vdec_hevc_stbuf_init\n");
+@@ -79,7 +80,8 @@ static void vdec_hevc_stbuf_init(struct vdec_session *sess) {
+ 	printk("vdec_hevc_stbuf_init end\n");
+ }
+ 
+-static void vdec_hevc_conf_esparser(struct vdec_session *sess) {
++static void vdec_hevc_conf_esparser(struct vdec_session *sess)
++{
+ 	struct vdec_core *core = sess->core;
+ 
+ 	printk("vdec_hevc_conf_esparser\n");
+diff --git a/h263_mc b/h263_mc
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd6de0fd9519e4b3e225897f4326a3e5b4555972
+GIT binary patch
+literal 16384
+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
+Y1R4l55NIIKK%jv@1Aztt|DO@~PsEH(fdBvi
+
+literal 0
+HcmV?d00001
+
+diff --git a/vmpeg4_mc_5 b/vmpeg4_mc_5
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c1023eb3e607b4dbb5978b8eead85ba5ce064a8
+GIT binary patch
+literal 16384
+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
+V%u`^V0`nA@r@%Y~{y$RSKLGj@!jJ#}
+
+literal 0
+HcmV?d00001
+

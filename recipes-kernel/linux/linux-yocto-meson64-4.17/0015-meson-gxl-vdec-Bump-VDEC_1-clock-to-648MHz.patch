@@ -1,0 +1,33 @@
+From 679c2e7a0b9ba79973860d98f42a6dcff1be8e2a Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 1 Apr 2018 17:11:59 +0200
+Subject: [PATCH] meson: gxl: vdec: Bump VDEC_1 clock to 648MHz
+
+Seems to be the max. allowed.
+
+A big TODO is clock management in the vdec driver
+so that we can adapt the clock depending on the
+input framesize/framerate.
+---
+ arch/arm64/boot/dts/amlogic/meson-gxl.dtsi | 10 ++--------
+ 1 file changed, 2 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+index 2f7bad2..0ea9508 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+@@ -814,12 +814,6 @@
+ 	clocks = <&clkc CLKID_VPU_INTR>, <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>;
+ 	clock-names = "vpu_intr", "dos_parser", "vdec_1";
+ 
+-	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
+-			  <&clkc CLKID_VDEC_1>;
+-
+-	assigned-clock-parents = <&clkc CLKID_FCLK_DIV4>,
+-				 <0>;
+-
+-	assigned-clock-rates = <0>,
+-			       <318750000>;
++	assigned-clocks = <&clkc CLKID_VDEC_1>;
++	assigned-clock-rates = <648000000>;
+ };

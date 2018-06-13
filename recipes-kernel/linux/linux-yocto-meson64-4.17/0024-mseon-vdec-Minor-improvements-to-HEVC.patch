@@ -1,0 +1,591 @@
+From 8064b34e02779a193259881f3cf2189d722c13d0 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sat, 7 Apr 2018 02:07:19 +0200
+Subject: [PATCH] mseon: vdec: Minor improvements to HEVC
+
+The esparsing/fetching is now working and we are able to
+trigger our first HEVC ISR: HEVC_SLICE_SEGMENT_DONE !
+
+I had to switch to the MMU firmware on GXL because I couldn't get
+the non-MMU version to work.
+
+Now, the good news: the MMU is handled by the firmware. From a driver
+point of view, we still pass phy addrs to the registers.
+
+The bad news: The firmware does a lot less towards decoding than the H.264 decoder.
+For HEVC, the driver is actually responsible for the decoding steps.
+So we have to handle slices/tiles/references, SAO, P/B frames, etc etc.
+Which, of course, is a major PITA.
+
+To be continued ..
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c   | 100 ++++++++++++++++++-----
+ drivers/media/platform/meson/vdec/codec_mpeg12.c |   4 +-
+ drivers/media/platform/meson/vdec/esparser.c     |   4 +
+ drivers/media/platform/meson/vdec/esparser.h     |   1 -
+ drivers/media/platform/meson/vdec/vdec.c         |   2 +-
+ drivers/media/platform/meson/vdec/vdec.h         |   1 +
+ drivers/media/platform/meson/vdec/vdec_hevc.c    |  29 ++++---
+ vh265_mc_mmu                                     | Bin 0 -> 16384 bytes
+ 8 files changed, 103 insertions(+), 38 deletions(-)
+ create mode 100644 vh265_mc_mmu
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 4bed8ea..32f8bd1 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -11,9 +11,6 @@
+ 
+ #define DOS_SW_RESET3        0xfcd0
+ 
+-/* DMC Registers */
+-#define DMC_REQ_CTRL	0x00
+-
+ /* HEVC reg mapping */
+ #define HEVC_DEC_STATUS_REG       HEVC_ASSIST_SCRATCH_0
+ 	#define HEVC_ACTION_DONE	0xff
+@@ -24,6 +21,7 @@
+ #define HEVC_PPS_BUFFER           HEVC_ASSIST_SCRATCH_5
+ #define HEVC_SAO_UP               HEVC_ASSIST_SCRATCH_6
+ #define HEVC_STREAM_SWAP_BUFFER   HEVC_ASSIST_SCRATCH_7
++#define H265_MMU_MAP_BUFFER       HEVC_ASSIST_SCRATCH_7
+ #define HEVC_STREAM_SWAP_BUFFER2  HEVC_ASSIST_SCRATCH_8
+ #define HEVC_sao_mem_unit         HEVC_ASSIST_SCRATCH_9
+ #define HEVC_SAO_ABV              HEVC_ASSIST_SCRATCH_A
+@@ -33,6 +31,8 @@
+ #define HEVC_WAIT_FLAG            HEVC_ASSIST_SCRATCH_E
+ #define RPM_CMD_REG               HEVC_ASSIST_SCRATCH_F
+ #define LMEM_DUMP_ADR             HEVC_ASSIST_SCRATCH_F
++#define DEBUG_REG1		  HEVC_ASSIST_SCRATCH_G
++#define HEVC_DECODE_MODE2	  HEVC_ASSIST_SCRATCH_H
+ #define NAL_SEARCH_CTL            HEVC_ASSIST_SCRATCH_I
+ #define HEVC_DECODE_MODE	  HEVC_ASSIST_SCRATCH_J
+ 	#define DECODE_MODE_SINGLE 0
+@@ -65,12 +65,32 @@
+ #define RPM_OFFSET       (MPRED_MV_OFFSET + 0x120000 * MAX_REF_PIC_NUM)
+ #define LMEM_OFFSET      (RPM_OFFSET + 0x100)
+ 
++/* ISR decode status */
++#define HEVC_DEC_IDLE                        0x0
++#define HEVC_NAL_UNIT_VPS                    0x1
++#define HEVC_NAL_UNIT_SPS                    0x2
++#define HEVC_NAL_UNIT_PPS                    0x3
++#define HEVC_NAL_UNIT_CODED_SLICE_SEGMENT    0x4
++#define HEVC_CODED_SLICE_SEGMENT_DAT         0x5
++#define HEVC_SLICE_DECODING                  0x6
++#define HEVC_NAL_UNIT_SEI                    0x7
++#define HEVC_SLICE_SEGMENT_DONE              0x8
++#define HEVC_NAL_SEARCH_DONE                 0x9
++#define HEVC_DECPIC_DATA_DONE                0xa
++#define HEVC_DECPIC_DATA_ERROR               0xb
++#define HEVC_SEI_DAT                         0xc
++#define HEVC_SEI_DAT_DONE                    0xd
++
+ #define SIZE_WORKSPACE ALIGN(LMEM_OFFSET + 0xA00, 64 * SZ_1K)
++#define SIZE_AUX (SZ_1K * 32)
++#define SIZE_FRAME_MMU (0x1200 * 4)
+ 
+ #define PARSER_CMD_SKIP_CFG_0 0x0000090b
+ #define PARSER_CMD_SKIP_CFG_1 0x1b14140f
+ #define PARSER_CMD_SKIP_CFG_2 0x001b1910
+ 
++#define AMRISC_MAIN_REQ         0x04
++
+ static const u16 parser_cmd[] = {
+ 	0x0401,
+ 	0x8401,
+@@ -116,6 +136,14 @@ struct codec_hevc {
+ 	void      *workspace_vaddr;
+ 	dma_addr_t workspace_paddr;
+ 
++	/* AUX buffer */
++	void      *aux_vaddr;
++	dma_addr_t aux_paddr;
++
++	/* Frame MMU buffer (>= GXL) */
++	void      *frame_mmu_vaddr;
++	dma_addr_t frame_mmu_paddr;
++
+ 	/* Housekeeping thread for marking buffers to DONE
+ 	 * and recycling them into the hardware
+ 	 */
+@@ -131,7 +159,8 @@ static int codec_hevc_buffers_thread(void *data)
+ 	struct vdec_core *core = sess->core;
+ 
+ 	while (!kthread_should_stop()) {
+-		//printk("status: %08X\n", readl_relaxed(core->dos_base + HEVC_PARSER_INT_STATUS));
++		printk("status: %08X ; level = %d ; d_si = %08X ; d_st = %08X; d_sc = %08X ; sfc = %08X\n", readl_relaxed(core->dos_base + HEVC_PARSER_INT_STATUS), readl_relaxed(core->dos_base + HEVC_STREAM_LEVEL), readl_relaxed(core->dos_base + HEVC_DECODE_SIZE), readl_relaxed(core->dos_base + DECODE_STOP_POS), readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL), readl_relaxed(core->dos_base + HEVC_STREAM_FIFO_CTL));
++
+ 		/* The DONE part should probably be in a common thread */
+ 		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+ 		while (!list_empty(&sess->bufs))
+@@ -163,7 +192,7 @@ static int codec_hevc_buffers_thread(void *data)
+ 		}
+ 		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+ 
+-		usleep_range(5000, 10000);
++		msleep(100);
+ 	}
+ 
+ 	return 0;
+@@ -179,19 +208,23 @@ static void codec_hevc_setup_buffers(struct vdec_session *sess) {
+ 
+ 	/* >= GXL */
+ 	writel_relaxed((1 << 2) | (1 << 1), core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
++	/* < GXL */
++	//writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+ 
+ 	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
+ 		buf_y_paddr  = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+ 		buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+ 
+-		writel_relaxed(buf_y_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		writel_relaxed(buf_y_paddr  >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		writel_relaxed(buf_y_paddr  >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 		/* Double write mode ?? */
+-		writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		//writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 	}
+ 
+ 	/* Fill the remaining unused slots with the last buffer's Y addr ? */
+ 	for (i = buf_size; i < MAX_REF_PIC_NUM; ++i) {
+-		writel_relaxed(buf_y_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		writel_relaxed(buf_y_paddr  >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		//writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 	}
+ 
+ 	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+@@ -212,6 +245,14 @@ static int codec_hevc_setup_workspace(struct vdec_session *sess) {
+ 	}
+ 	printk("Allocated Workspace: %08X - %08X\n", hevc->workspace_paddr, hevc->workspace_paddr + SIZE_WORKSPACE);
+ 
++	hevc->frame_mmu_vaddr = dma_alloc_coherent(core->dev, SIZE_FRAME_MMU, &hevc->frame_mmu_paddr, GFP_KERNEL);
++	if (!hevc->frame_mmu_vaddr) {
++		printk("Failed to request HEVC frame_mmu\n");
++		return -ENOMEM;
++	}
++	memset(hevc->frame_mmu_vaddr, 0, SIZE_FRAME_MMU);
++	printk("Allocated frame_mmu: %08X - %08X\n", hevc->frame_mmu_paddr, hevc->frame_mmu_paddr + SIZE_FRAME_MMU);
++
+ 	/* Setup Workspace */
+ 	writel_relaxed(hevc->workspace_paddr + IPP_OFFSET, core->dos_base + HEVCD_IPP_LINEBUFF_BASE);
+ 	writel_relaxed(hevc->workspace_paddr + SH_TM_RPS_OFFSET, core->dos_base + HEVC_SHORT_TERM_RPS);
+@@ -219,7 +260,10 @@ static int codec_hevc_setup_workspace(struct vdec_session *sess) {
+ 	writel_relaxed(hevc->workspace_paddr + SPS_OFFSET, core->dos_base + HEVC_SPS_BUFFER);
+ 	writel_relaxed(hevc->workspace_paddr + PPS_OFFSET, core->dos_base + HEVC_PPS_BUFFER);
+ 	writel_relaxed(hevc->workspace_paddr + SAO_UP_OFFSET, core->dos_base + HEVC_SAO_UP);
+-	writel_relaxed(hevc->workspace_paddr + SWAP_BUF_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER);
++	/* MMU */
++	writel_relaxed(hevc->frame_mmu_paddr, core->dos_base + H265_MMU_MAP_BUFFER);
++	/* No MMU */
++	//writel_relaxed(hevc->workspace_paddr + SWAP_BUF_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER);
+ 	writel_relaxed(hevc->workspace_paddr + SWAP_BUF2_OFFSET, core->dos_base + HEVC_STREAM_SWAP_BUFFER2);
+ 	writel_relaxed(hevc->workspace_paddr + SCALELUT_OFFSET, core->dos_base + HEVC_SCALELUT);
+ 	writel_relaxed(hevc->workspace_paddr + DBLK_PARA_OFFSET, core->dos_base + HEVC_DBLK_CFG4);
+@@ -243,8 +287,6 @@ static int codec_hevc_start(struct vdec_session *sess) {
+ 
+ 	sess->priv = hevc;
+ 
+-	writel_relaxed(readl_relaxed(core->dmc_base + DMC_REQ_CTRL) | (1 << 4), core->dmc_base + DMC_REQ_CTRL);
+-
+ 	codec_hevc_setup_workspace(sess);
+ 
+ 	writel_relaxed(0x5a5a55aa, core->dos_base + HEVC_PARSER_VERSION);
+@@ -269,6 +311,7 @@ static int codec_hevc_start(struct vdec_session *sess) {
+ 		writel_relaxed(0, core->dos_base + HEVC_IQIT_SCALELUT_DATA);
+ 
+ 	writel_relaxed(0, core->dos_base + HEVC_DECODE_SIZE);
++
+ 	writel_relaxed((1 << 16), core->dos_base + HEVC_PARSER_CMD_WRITE);
+ 	for (i = 0; i < ARRAY_SIZE(parser_cmd); ++i)
+ 		writel_relaxed(parser_cmd[i], core->dos_base + HEVC_PARSER_CMD_WRITE);
+@@ -293,7 +336,7 @@ static int codec_hevc_start(struct vdec_session *sess) {
+ 	/* disable PSCALE for hardware sharing */
+ 	writel_relaxed(0, core->dos_base + HEVC_PSCALE_CTRL);
+ 	/* Let the uCode do all the parsing */
+-	writel_relaxed(8, core->dos_base + NAL_SEARCH_CTL);
++	writel_relaxed((1 << 17) | 0xc, core->dos_base + NAL_SEARCH_CTL);
+ 
+ 	/*WRITE_VREG(NAL_SEARCH_CTL,
+ 	READ_VREG(NAL_SEARCH_CTL)
+@@ -301,19 +344,20 @@ static int codec_hevc_start(struct vdec_session *sess) {
+ 
+ 	writel_relaxed(0, core->dos_base + DECODE_STOP_POS);
+ 	writel_relaxed(DECODE_MODE_SINGLE, core->dos_base + HEVC_DECODE_MODE);
++	writel_relaxed(0, core->dos_base + HEVC_DECODE_MODE2);
+ 
+-	/*WRITE_VREG(HEVC_AUX_ADR, hevc->aux_phy_addr);
+-	WRITE_VREG(HEVC_AUX_DATA_SIZE,
+-	((hevc->prefix_aux_size >> 4) << 16) |
+-	(hevc->suffix_aux_size >> 4)
+-	);*/
+-
+-	codec_hevc_setup_buffers(sess);
++	/* AUX buffers */
++	hevc->aux_vaddr = dma_alloc_coherent(core->dev, SIZE_AUX, &hevc->aux_paddr, GFP_KERNEL);
++	if (!hevc->aux_vaddr) {
++		printk("Failed to request HEVC AUX\n");
++		return -ENOMEM;
++	}
++	printk("Allocated AUX: %08X - %08X\n", hevc->aux_paddr, hevc->aux_paddr + SIZE_AUX);
+ 
+-	writel_relaxed(HEVC_ACTION_DONE, core->dos_base + HEVC_DEC_STATUS_REG);
+-	writel_relaxed(1, core->dos_base + HEVC_ASSIST_MBOX1_IRQ_REG);
++	writel_relaxed(hevc->aux_paddr, core->dos_base + HEVC_AUX_ADR);
++	writel_relaxed((((SIZE_AUX / 2) >> 4) << 16) | ((SIZE_AUX / 2) >> 4), core->dos_base + HEVC_AUX_DATA_SIZE);
+ 
+-	//writel_relaxed(HEVC_ACTION_DONE, core->dos_base + HEVC_DECODE_SIZE);
++	codec_hevc_setup_buffers(sess);
+ 
+ 	hevc->buffers_thread = kthread_run(codec_hevc_buffers_thread, sess, "buffers_done");
+ 
+@@ -336,6 +380,11 @@ static int codec_hevc_stop(struct vdec_session *sess)
+ 		hevc->workspace_vaddr = 0;
+ 	}
+ 
++	if (hevc->frame_mmu_vaddr) {
++		dma_free_coherent(core->dev, SIZE_FRAME_MMU, hevc->frame_mmu_vaddr, hevc->frame_mmu_paddr);
++		hevc->frame_mmu_vaddr = 0;
++	}
++
+ 	kfree(hevc);
+ 	sess->priv = 0;
+ 
+@@ -364,6 +413,13 @@ static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
+ 
+ 	dec_status = readl_relaxed(core->dos_base + HEVC_DEC_STATUS_REG);
+ 	printk("codec_hevc_isr: %08X\n", dec_status);
++
++	if (dec_status == HEVC_SLICE_SEGMENT_DONE) {
++		writel_relaxed(readl_relaxed(core->dos_base + HEVC_WAIT_FLAG) | 2, core->dos_base + HEVC_WAIT_FLAG);
++		writel_relaxed(HEVC_CODED_SLICE_SEGMENT_DAT, core->dos_base + HEVC_DEC_STATUS_REG);
++		writel_relaxed(AMRISC_MAIN_REQ, core->dos_base + HEVC_MCPU_INTR_REQ);
++	}
++
+ 	return IRQ_HANDLED;
+ }
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.c b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+index 3be5b47..7ad3870 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg12.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+@@ -14,7 +14,6 @@
+ #define PSCALE_CTRL 0x2444
+ 
+ #define MDEC_PIC_DC_CTRL   0x2638
+-#define MDEC_PIC_DC_THRESH 0x26e0
+ 
+ #define AV_SCRATCH_0		0x2700
+ #define MREG_SEQ_INFO		0x2710
+@@ -78,7 +77,6 @@ static int codec_mpeg12_buffers_thread(void *data)
+ 				printk("%d\n", vbuf->sequence);
+ 
+ 			printk("Buffer %d done\n", tmp->index);
+-
+ 			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+ 			list_del(&tmp->list);
+ 			kfree(tmp);
+@@ -125,7 +123,7 @@ static int codec_mpeg12_start(struct vdec_session *sess) {
+ 	/* Allocate some memory for the MPEG1/2 decoder's state */
+ 	mpeg12->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &mpeg12->workspace_paddr, GFP_KERNEL);
+ 	if (!mpeg12->workspace_vaddr) {
+-		printk("Failed to request H.264 Workspace\n");
++		printk("Failed to request MPEG 1/2 Workspace\n");
+ 		ret = -ENOMEM;
+ 		goto free_mpeg12;
+ 	}
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 3a04f52..9b5e37e 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -190,6 +190,7 @@ int esparser_queue(void *data) {
+ 
+ int esparser_power_up(struct vdec_session *sess) {
+ 	struct vdec_core *core = sess->core;
++	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 
+ 	// WRITE_MPEG_REG(FEC_INPUT_CONTROL, 0);
+ 	writel_relaxed((10 << PS_CFG_PFIFO_EMPTY_CNT_BIT) |
+@@ -216,6 +217,9 @@ int esparser_power_up(struct vdec_session *sess) {
+ 	writel_relaxed(sess->vififo_paddr + sess->vififo_size - 8, core->esparser_base + PARSER_VIDEO_END_PTR);
+ 	writel_relaxed(readl_relaxed(core->esparser_base + PARSER_ES_CONTROL) & ~1, core->esparser_base + PARSER_ES_CONTROL);
+ 	
++	if (vdec_ops->conf_esparser)
++		vdec_ops->conf_esparser(sess);
++
+ 	writel_relaxed(0xffff, core->esparser_base + PARSER_INT_STATUS);
+ 	writel_relaxed(1 << PARSER_INT_HOST_EN_BIT, core->esparser_base + PARSER_INT_ENABLE);
+ 
+diff --git a/drivers/media/platform/meson/vdec/esparser.h b/drivers/media/platform/meson/vdec/esparser.h
+index b8e8e8c..b008924 100644
+--- a/drivers/media/platform/meson/vdec/esparser.h
++++ b/drivers/media/platform/meson/vdec/esparser.h
+@@ -5,7 +5,6 @@
+ 
+ int esparser_init(struct platform_device *pdev, struct vdec_core *core);
+ int esparser_power_up(struct vdec_session *sess);
+-int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf);
+ int stbuf_power_up(struct vdec_session *sess);
+ int esparser_queue(void *data);
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index c0eec7e..5b893e9 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -276,7 +276,7 @@ static const struct vdec_format vdec_formats[] = {
+ 		.max_buffers = 32,
+ 		.vdec_ops = &vdec_hevc_ops,
+ 		.codec_ops = &codec_hevc_ops,
+-		.firmware_path = "meson/gxl/vh265_mc",
++		.firmware_path = "meson/gxl/vh265_mc_mmu",
+ 	}, {
+ 		.pixfmt = V4L2_PIX_FMT_MPEG1,
+ 		.num_planes = 1,
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 0cbb112..3e62c58 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -53,6 +53,7 @@ struct vdec_core {
+ struct vdec_ops {
+ 	int (*start)(struct vdec_session *sess);
+ 	int (*stop)(struct vdec_session *sess);
++	void (*conf_esparser)(struct vdec_session *sess);
+ };
+ 
+ /* Describes one of the compression standard supported (H.264, HEVC..) */
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index 4d21138..ef880b2 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -79,6 +79,17 @@ static void vdec_hevc_stbuf_init(struct vdec_session *sess) {
+ 	printk("vdec_hevc_stbuf_init end\n");
+ }
+ 
++static void vdec_hevc_conf_esparser(struct vdec_session *sess) {
++	struct vdec_core *core = sess->core;
++
++	printk("vdec_hevc_conf_esparser\n");
++	/* VDEC_HEVC specific ESPARSER stuff */
++	writel_relaxed(3 << 1, core->dos_base + DOS_GEN_CTRL0); // set vififo_vbuf_rp_sel=>vdec_hevc
++	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | (1 << 3), core->dos_base + HEVC_STREAM_CONTROL);
++	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | 1, core->dos_base + HEVC_STREAM_CONTROL);
++	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_FIFO_CTL) | (1 << 29), core->dos_base + HEVC_STREAM_FIFO_CTL);
++}
++
+ static int vdec_hevc_start(struct vdec_session *sess)
+ {
+ 	int ret;
+@@ -87,18 +98,18 @@ static int vdec_hevc_start(struct vdec_session *sess)
+ 
+ 	printk("vdec_hevc_start\n");
+ 
++	/* Reset VDEC_HEVC*/
++	writel_relaxed(0xffffffff, core->dos_base + DOS_SW_RESET3);
++	udelay(10);
++	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET3);
++
+ 	writel_relaxed(0xffffffff, core->dos_base + DOS_GCLK_EN3);
+ 
+ 	/* VDEC_HEVC Memories */
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_MEM_PD_HEVC);
+ 
+ 	/* Remove VDEC_HEVC Isolation */
+-	regmap_write(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, ~0xc00);
+-
+-	/* Reset VDEC_HEVC*/
+-	writel_relaxed(0xffffffff, core->dos_base + DOS_SW_RESET3);
+-	udelay(10);
+-	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET3);
++	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc00, 0);
+ 
+ 	vdec_hevc_stbuf_init(sess);
+ 
+@@ -114,11 +125,6 @@ static int vdec_hevc_start(struct vdec_session *sess)
+ 
+ 	writel_relaxed(1, core->dos_base + HEVC_MPSR);
+ 
+-	/* VDEC_HEVC specific ESPARSER stuff */
+-	writel_relaxed(3 << 1, core->dos_base + DOS_GEN_CTRL0); // set vififo_vbuf_rp_sel=>vdec_hevc
+-	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | (1 << 3) | 1, core->dos_base + HEVC_STREAM_CONTROL);
+-	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_FIFO_CTL) | (1 << 29), core->dos_base + HEVC_STREAM_FIFO_CTL);
+-
+ 	printk("vdec_hevc_start end\n");
+ 
+ 	return 0;
+@@ -141,4 +147,5 @@ static int vdec_hevc_stop(struct vdec_session *sess)
+ struct vdec_ops vdec_hevc_ops = {
+ 	.start = vdec_hevc_start,
+ 	.stop = vdec_hevc_stop,
++	.conf_esparser = vdec_hevc_conf_esparser,
+ };
+\ No newline at end of file
+diff --git a/vh265_mc_mmu b/vh265_mc_mmu
+new file mode 100644
+index 0000000000000000000000000000000000000000..e2ba47431e867c020e8af18fb9ce4805544c9350
+GIT binary patch
+literal 16384
+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
+BggyWO
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,78 @@
+From a50128cf375212a50af2066cc02b38b0d79f372a Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Tue, 24 Apr 2018 15:25:47 +0200
+Subject: [PATCH] meson: vdec: hevc: enable mcrcc
+
+I'm not entirely sure, but in this context mcrcc seems to refer to
+motion compensation reference cache controller.
+
+https://patents.google.com/patent/US20150055707
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c | 38 ++++++++++++++++++++++++--
+ 1 file changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 1e7913e..6fe79a5 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -1170,6 +1170,10 @@ static void codec_hevc_set_mcrcc(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_hevc *hevc = sess->priv;
++	unsigned int rdata32;
++	unsigned int rdata32_2;
++	int l0_cnt = hevc->cur_frame->ref_num[0];
++	int l1_cnt = hevc->cur_frame->ref_num[1];
+ 
+ 	/* reset mcrcc */
+ 	writel_relaxed(0x02, core->dos_base + HEVCD_MCRCC_CTL1);
+@@ -1181,9 +1185,37 @@ static void codec_hevc_set_mcrcc(struct vdec_session *sess)
+ 	}
+ 
+ 	if (hevc->cur_frame->cur_slice_type == P_SLICE) {
+-
++		writel_relaxed((1 << 1), core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
++		rdata32 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++		rdata32 = rdata32 & 0xffff;
++		rdata32 = rdata32 | (rdata32 << 16);
++		writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL2);
++
++		if (l0_cnt == 1) {
++			writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL3);
++		} else {
++			rdata32 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++			rdata32 = rdata32 & 0xffff;
++			rdata32 = rdata32 | (rdata32 << 16);
++			writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL3);
++		}
+ 	} else { /* B_SLICE */
+-
++		writel_relaxed(0, core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
++		rdata32 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++		rdata32 = rdata32 & 0xffff;
++		rdata32 = rdata32 | (rdata32 << 16);
++		writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL2);
++
++		writel_relaxed((16 << 8) | (1 << 1), core->dos_base + HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR);
++		rdata32_2 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++		rdata32_2 = rdata32_2 & 0xffff;
++		rdata32_2 = rdata32_2 | (rdata32_2 << 16);
++		if (rdata32 == rdata32_2 && l1_cnt > 1) {
++			rdata32_2 = readl_relaxed(core->dos_base + HEVCD_MPP_ANC_CANVAS_DATA_ADDR);
++			rdata32_2 = rdata32_2 & 0xffff;
++			rdata32_2 = rdata32_2 | (rdata32_2 << 16);
++		}
++		writel_relaxed(rdata32, core->dos_base + HEVCD_MCRCC_CTL3);
+ 	}
+ 
+ 	/* enable mcrcc progressive-mode */
+@@ -1411,8 +1443,8 @@ static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
+ 		codec_hevc_update_frame_refs(sess, hevc->cur_frame);
+ 		codec_hevc_update_col_frame(hevc);
+ 		codec_hevc_update_ldc_flag(hevc);
+-		//codec_hevc_set_mcrcc(sess);
+ 		codec_hevc_set_mc(sess, hevc->cur_frame);
++		codec_hevc_set_mcrcc(sess);
+ 		codec_hevc_set_mpred(sess, hevc->cur_frame, hevc->col_frame);
+ 		codec_hevc_set_sao(sess, hevc->cur_frame);
+ 

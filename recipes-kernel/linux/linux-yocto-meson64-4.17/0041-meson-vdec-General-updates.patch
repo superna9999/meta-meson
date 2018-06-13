@@ -1,0 +1,1475 @@
+From 18b5e4eb59541d0a937d0d935e0a10dd4c1205db Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Thu, 26 Apr 2018 00:03:35 +0200
+Subject: [PATCH] meson: vdec: General updates
+
+This commits removes the vdec pwrc and instead manages
+power/clk in the driver directly. This allows having
+VDEC_1 and VDEC_HEVC both working instead of having to edit
+the old pwrc to set whether we want vdec_1 or vdec_hevc.
+
+There's also some work towards threaded ISR (CODEC_HEVC only for now).
+
+And also general cleanups overall..
+---
+ arch/arm64/boot/dts/amlogic/meson-gx.dtsi      |   9 +-
+ arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi    |  15 +-
+ arch/arm64/boot/dts/amlogic/meson-gxl.dtsi     |  15 +-
+ drivers/clk/meson/gxbb.c                       |  18 +-
+ drivers/clk/meson/gxbb.h                       |   2 +
+ drivers/media/platform/meson/vdec/codec_h264.c |   4 +-
+ drivers/media/platform/meson/vdec/codec_hevc.c | 389 +++++++++++--------------
+ drivers/media/platform/meson/vdec/vdec.c       |  47 ++-
+ drivers/media/platform/meson/vdec/vdec.h       |  11 +-
+ drivers/media/platform/meson/vdec/vdec_1.c     |  49 +++-
+ drivers/media/platform/meson/vdec/vdec_1.h     |  15 +-
+ drivers/media/platform/meson/vdec/vdec_hevc.c  |  90 +++---
+ drivers/media/platform/meson/vdec/vdec_hevc.h  |  14 +
+ drivers/soc/amlogic/Makefile                   |   1 -
+ drivers/soc/amlogic/meson-pwrc-vdec.c          | 152 ----------
+ 15 files changed, 360 insertions(+), 471 deletions(-)
+ delete mode 100644 drivers/soc/amlogic/meson-pwrc-vdec.c
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gx.dtsi b/arch/arm64/boot/dts/amlogic/meson-gx.dtsi
+index 4cc7d79..36832cc 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gx.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gx.dtsi
+@@ -369,12 +369,6 @@
+ 					amlogic,hhi-sysctrl = <&sysctrl>;
+ 				};
+ 
+-				pwrc_vdec: power-controller-vdec@0 {
+-					//reg = <0x0 0x80 0x0 0x80>;
+-					compatible = "amlogic,meson-pwrc-vdec";
+-					#power-domain-cells = <0>;
+-				};
+-
+ 				clkc_AO: clock-controller {
+ 					compatible = "amlogic,meson-gx-aoclkc";
+ 					#clock-cells = <1>;
+@@ -514,10 +508,9 @@
+ 
+ 			interrupts = <GIC_SPI 44 IRQ_TYPE_EDGE_RISING
+ 				      GIC_SPI 32 IRQ_TYPE_EDGE_RISING>;
+-			interrupt-names = "vdecirq", "esparserirq";
++			interrupt-names = "vdec", "esparser";
+ 
+ 			amlogic,ao-sysctrl = <&sysctrl_AO>;
+-			status = "okay";
+ 		};
+ 
+ 		vpu: vpu@d0100000 {
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+index f92e8e5..316852b 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxbb.dtsi
+@@ -798,17 +798,6 @@
+ 
+ &vdec {
+ 	compatible = "amlogic,meson-gxbb-vdec";
+-	power-domains = <&pwrc_vdec>;
+-};
+-
+-&pwrc_vdec {
+-	clocks = <&clkc CLKID_VPU_INTR>, <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
+-	clock-names = "vpu_intr", "dos_parser", "vdec_1", "vdec_hevc";
+-
+-	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
+-			  <&clkc CLKID_VDEC_1>;
+-	assigned-clock-parents = <&clkc CLKID_FCLK_DIV3>,
+-				 <0>;
+-	assigned-clock-rates = <0>,
+-			       <666666666>;
++	clocks = <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
++	clock-names = "dos_parser", "vdec_1", "vdec_hevc";
+ };
+diff --git a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+index 3d8547b..6cf114c 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
++++ b/arch/arm64/boot/dts/amlogic/meson-gxl.dtsi
+@@ -808,17 +808,6 @@
+ 
+ &vdec {
+ 	compatible = "amlogic,meson-gxl-vdec";
+-	power-domains = <&pwrc_vdec>;
+-};
+-
+-&pwrc_vdec {
+-	clocks = <&clkc CLKID_VPU_INTR>, <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
+-	clock-names = "vpu_intr", "dos_parser", "vdec_1", "vdec_hevc";
+-
+-	assigned-clocks = <&clkc CLKID_VDEC_1_SEL>,
+-			  <&clkc CLKID_VDEC_1>;
+-	assigned-clock-parents = <&clkc CLKID_FCLK_DIV3>,
+-				 <0>;
+-	assigned-clock-rates = <0>,
+-			       <666666666>;
++	clocks = <&clkc CLKID_DOS_PARSER>, <&clkc CLKID_VDEC_1>, <&clkc CLKID_VDEC_HEVC>;
++	clock-names = "dos_parser", "vdec_1", "vdec_hevc";
+ };
+diff --git a/drivers/clk/meson/gxbb.c b/drivers/clk/meson/gxbb.c
+index 8edd1ff..a893b1e 100644
+--- a/drivers/clk/meson/gxbb.c
++++ b/drivers/clk/meson/gxbb.c
+@@ -1554,13 +1554,14 @@ static struct clk_regmap gxbb_vdec_1_sel = {
+ 		.offset = HHI_VDEC_CLK_CNTL,
+ 		.mask = 0x3,
+ 		.shift = 9,
++		.flags = CLK_MUX_ROUND_CLOSEST,
+ 	},
+ 	.hw.init = &(struct clk_init_data){
+ 		.name = "vdec_1_sel",
+ 		.ops = &clk_regmap_mux_ops,
+ 		.parent_names = gxbb_vdec_parent_names,
+ 		.num_parents = ARRAY_SIZE(gxbb_vdec_parent_names),
+-		.flags = CLK_SET_RATE_NO_REPARENT,
++		.flags = CLK_SET_RATE_PARENT,
+ 	},
+ };
+ 
+@@ -1589,7 +1590,7 @@ static struct clk_regmap gxbb_vdec_1 = {
+ 		.ops = &clk_regmap_gate_ops,
+ 		.parent_names = (const char *[]){ "vdec_1_div" },
+ 		.num_parents = 1,
+-		.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
++		.flags = CLK_SET_RATE_PARENT,
+ 	},
+ };
+ 
+@@ -1598,13 +1599,14 @@ static struct clk_regmap gxbb_vdec_hevc_sel = {
+ 		.offset = HHI_VDEC2_CLK_CNTL,
+ 		.mask = 0x3,
+ 		.shift = 25,
++		.flags = CLK_MUX_ROUND_CLOSEST,
+ 	},
+ 	.hw.init = &(struct clk_init_data){
+ 		.name = "vdec_hevc_sel",
+ 		.ops = &clk_regmap_mux_ops,
+ 		.parent_names = gxbb_vdec_parent_names,
+ 		.num_parents = ARRAY_SIZE(gxbb_vdec_parent_names),
+-		.flags = CLK_SET_RATE_NO_REPARENT,
++		.flags = CLK_SET_RATE_PARENT,
+ 	},
+ };
+ 
+@@ -1633,7 +1635,7 @@ static struct clk_regmap gxbb_vdec_hevc = {
+ 		.ops = &clk_regmap_gate_ops,
+ 		.parent_names = (const char *[]){ "vdec_hevc_div" },
+ 		.num_parents = 1,
+-		.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
++		.flags = CLK_SET_RATE_PARENT,
+ 	},
+ };
+ 
+@@ -1881,8 +1883,8 @@ static struct clk_hw_onecell_data gxbb_hw_onecell_data = {
+ 		[CLKID_FCLK_DIV5_DIV]	    = &gxbb_fclk_div5_div.hw,
+ 		[CLKID_FCLK_DIV7_DIV]	    = &gxbb_fclk_div7_div.hw,
+ 		[CLKID_VDEC_1_SEL]	    = &gxbb_vdec_1_sel.hw,
+-		[CLKID_VDEC_1_DIV]          = &gxbb_vdec_1_div.hw,
+-		[CLKID_VDEC_1]         	    = &gxbb_vdec_1.hw,
++		[CLKID_VDEC_1_DIV]	    = &gxbb_vdec_1_div.hw,
++		[CLKID_VDEC_1]		    = &gxbb_vdec_1.hw,
+ 		[CLKID_VDEC_HEVC_SEL]	    = &gxbb_vdec_hevc_sel.hw,
+ 		[CLKID_VDEC_HEVC_DIV]	    = &gxbb_vdec_hevc_div.hw,
+ 		[CLKID_VDEC_HEVC]	    = &gxbb_vdec_hevc.hw,
+@@ -2043,8 +2045,8 @@ static struct clk_hw_onecell_data gxl_hw_onecell_data = {
+ 		[CLKID_FCLK_DIV5_DIV]	    = &gxbb_fclk_div5_div.hw,
+ 		[CLKID_FCLK_DIV7_DIV]	    = &gxbb_fclk_div7_div.hw,
+ 		[CLKID_VDEC_1_SEL]	    = &gxbb_vdec_1_sel.hw,
+-		[CLKID_VDEC_1_DIV]          = &gxbb_vdec_1_div.hw,
+-		[CLKID_VDEC_1]         	    = &gxbb_vdec_1.hw,
++		[CLKID_VDEC_1_DIV]	    = &gxbb_vdec_1_div.hw,
++		[CLKID_VDEC_1]		    = &gxbb_vdec_1.hw,
+ 		[CLKID_VDEC_HEVC_SEL]	    = &gxbb_vdec_hevc_sel.hw,
+ 		[CLKID_VDEC_HEVC_DIV]	    = &gxbb_vdec_hevc_div.hw,
+ 		[CLKID_VDEC_HEVC]	    = &gxbb_vdec_hevc.hw,
+diff --git a/drivers/clk/meson/gxbb.h b/drivers/clk/meson/gxbb.h
+index ae21d23..b3ef54f 100644
+--- a/drivers/clk/meson/gxbb.h
++++ b/drivers/clk/meson/gxbb.h
+@@ -204,7 +204,9 @@
+ #define CLKID_FCLK_DIV4_DIV	  148
+ #define CLKID_FCLK_DIV5_DIV	  149
+ #define CLKID_FCLK_DIV7_DIV	  150
++#define CLKID_VDEC_1_SEL	  151
+ #define CLKID_VDEC_1_DIV	  152
++#define CLKID_VDEC_HEVC_SEL	  154
+ #define CLKID_VDEC_HEVC_DIV	  155
+ 
+ #define NR_CLKS			  157
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index af7f046..b7daea1 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -82,9 +82,7 @@ struct codec_h264 {
+ 	void      *sei_vaddr;
+ 	dma_addr_t sei_paddr;
+ 
+-	/* Housekeeping thread for marking buffers to DONE
+-	 * and recycling them into the hardware
+-	 */
++	/* Housekeeping thread for recycling buffers them into the hardware */
+ 	struct task_struct *buffers_thread;
+ };
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 6fe79a5..a2c3e91 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -130,106 +130,79 @@
+ #define PARSER_CMD_SKIP_CFG_0 0x0000090b
+ #define PARSER_CMD_SKIP_CFG_1 0x1b14140f
+ #define PARSER_CMD_SKIP_CFG_2 0x001b1910
+-static const u16 parser_cmd[] = {
+-	0x0401,
+-	0x8401,
+-	0x0800,
+-	0x0402,
+-	0x9002,
+-	0x1423,
+-	0x8CC3,
+-	0x1423,
+-	0x8804,
+-	0x9825,
+-	0x0800,
+-	0x04FE,
+-	0x8406,
+-	0x8411,
+-	0x1800,
+-	0x8408,
+-	0x8409,
+-	0x8C2A,
+-	0x9C2B,
+-	0x1C00,
+-	0x840F,
+-	0x8407,
+-	0x8000,
+-	0x8408,
+-	0x2000,
+-	0xA800,
+-	0x8410,
+-	0x04DE,
+-	0x840C,
+-	0x840D,
+-	0xAC00,
+-	0xA000,
+-	0x08C0,
+-	0x08E0,
+-	0xA40E,
+-	0xFC00,
++static const uint16_t parser_cmd[] = {
++	0x0401,	0x8401,	0x0800,	0x0402,
++	0x9002,	0x1423,	0x8CC3,	0x1423,
++	0x8804,	0x9825,	0x0800,	0x04FE,
++	0x8406,	0x8411,	0x1800,	0x8408,
++	0x8409,	0x8C2A,	0x9C2B,	0x1C00,
++	0x840F,	0x8407,	0x8000,	0x8408,
++	0x2000,	0xA800,	0x8410,	0x04DE,
++	0x840C,	0x840D,	0xAC00,	0xA000,
++	0x08C0,	0x08E0,	0xA40E,	0xFC00,
+ 	0x7C00
+ };
+ 
+ union rpm_param {
+ 	struct {
+-		unsigned short data[RPM_END - RPM_BEGIN];
++		uint16_t data[RPM_END - RPM_BEGIN];
+ 	} l;
+ 	struct {
+ 		/* from ucode lmem, do not change this struct */
+-		unsigned short CUR_RPS[MAX_REF_ACTIVE];
+-		unsigned short num_ref_idx_l0_active;
+-		unsigned short num_ref_idx_l1_active;
+-		unsigned short slice_type;
+-		unsigned short slice_temporal_mvp_enable_flag;
+-		unsigned short dependent_slice_segment_flag;
+-		unsigned short slice_segment_address;
+-		unsigned short num_title_rows_minus1;
+-		unsigned short pic_width_in_luma_samples;
+-		unsigned short pic_height_in_luma_samples;
+-		unsigned short log2_min_coding_block_size_minus3;
+-		unsigned short log2_diff_max_min_coding_block_size;
+-		unsigned short log2_max_pic_order_cnt_lsb_minus4;
+-		unsigned short POClsb;
+-		unsigned short collocated_from_l0_flag;
+-		unsigned short collocated_ref_idx;
+-		unsigned short log2_parallel_merge_level;
+-		unsigned short five_minus_max_num_merge_cand;
+-		unsigned short sps_num_reorder_pics_0;
+-		unsigned short modification_flag;
+-		unsigned short tiles_flags;
+-		unsigned short num_tile_columns_minus1;
+-		unsigned short num_tile_rows_minus1;
+-		unsigned short tile_width[8];
+-		unsigned short tile_height[8];
+-		unsigned short misc_flag0;
+-		unsigned short pps_beta_offset_div2;
+-		unsigned short pps_tc_offset_div2;
+-		unsigned short slice_beta_offset_div2;
+-		unsigned short slice_tc_offset_div2;
+-		unsigned short pps_cb_qp_offset;
+-		unsigned short pps_cr_qp_offset;
+-		unsigned short first_slice_segment_in_pic_flag;
+-		unsigned short m_temporalId;
+-		unsigned short m_nalUnitType;
+-		unsigned short vui_num_units_in_tick_hi;
+-		unsigned short vui_num_units_in_tick_lo;
+-		unsigned short vui_time_scale_hi;
+-		unsigned short vui_time_scale_lo;
+-		unsigned short bit_depth;
+-		unsigned short profile_etc;
+-		unsigned short sei_frame_field_info;
+-		unsigned short video_signal_type;
+-		unsigned short modification_list[0x20];
+-		unsigned short conformance_window_flag;
+-		unsigned short conf_win_left_offset;
+-		unsigned short conf_win_right_offset;
+-		unsigned short conf_win_top_offset;
+-		unsigned short conf_win_bottom_offset;
+-		unsigned short chroma_format_idc;
+-		unsigned short color_description;
+-		unsigned short aspect_ratio_idc;
+-		unsigned short sar_width;
+-		unsigned short sar_height;
++		uint16_t CUR_RPS[MAX_REF_ACTIVE];
++		uint16_t num_ref_idx_l0_active;
++		uint16_t num_ref_idx_l1_active;
++		uint16_t slice_type;
++		uint16_t slice_temporal_mvp_enable_flag;
++		uint16_t dependent_slice_segment_flag;
++		uint16_t slice_segment_address;
++		uint16_t num_title_rows_minus1;
++		uint16_t pic_width_in_luma_samples;
++		uint16_t pic_height_in_luma_samples;
++		uint16_t log2_min_coding_block_size_minus3;
++		uint16_t log2_diff_max_min_coding_block_size;
++		uint16_t log2_max_pic_order_cnt_lsb_minus4;
++		uint16_t POClsb;
++		uint16_t collocated_from_l0_flag;
++		uint16_t collocated_ref_idx;
++		uint16_t log2_parallel_merge_level;
++		uint16_t five_minus_max_num_merge_cand;
++		uint16_t sps_num_reorder_pics_0;
++		uint16_t modification_flag;
++		uint16_t tiles_flags;
++		uint16_t num_tile_columns_minus1;
++		uint16_t num_tile_rows_minus1;
++		uint16_t tile_width[8];
++		uint16_t tile_height[8];
++		uint16_t misc_flag0;
++		uint16_t pps_beta_offset_div2;
++		uint16_t pps_tc_offset_div2;
++		uint16_t slice_beta_offset_div2;
++		uint16_t slice_tc_offset_div2;
++		uint16_t pps_cb_qp_offset;
++		uint16_t pps_cr_qp_offset;
++		uint16_t first_slice_segment_in_pic_flag;
++		uint16_t m_temporalId;
++		uint16_t m_nalUnitType;
++		uint16_t vui_num_units_in_tick_hi;
++		uint16_t vui_num_units_in_tick_lo;
++		uint16_t vui_time_scale_hi;
++		uint16_t vui_time_scale_lo;
++		uint16_t bit_depth;
++		uint16_t profile_etc;
++		uint16_t sei_frame_field_info;
++		uint16_t video_signal_type;
++		uint16_t modification_list[0x20];
++		uint16_t conformance_window_flag;
++		uint16_t conf_win_left_offset;
++		uint16_t conf_win_right_offset;
++		uint16_t conf_win_top_offset;
++		uint16_t conf_win_bottom_offset;
++		uint16_t chroma_format_idc;
++		uint16_t color_description;
++		uint16_t aspect_ratio_idc;
++		uint16_t sar_width;
++		uint16_t sar_height;
+ 	} p;
+ };
+ 
+@@ -349,6 +322,9 @@ struct tile_s {
+ };
+ 
+ struct codec_hevc {
++	/* Current decoding status provided by the ISR */
++	u32 dec_status;
++
+ 	/* Buffer for the HEVC Workspace */
+ 	void      *workspace_vaddr;
+ 	dma_addr_t workspace_paddr;
+@@ -424,94 +400,94 @@ static void codec_hevc_update_frame_refs(struct vdec_session *sess, struct hevc_
+ 		frame->ref_poc_list[0][frame->cur_slice_idx][i] = 0;
+ 		frame->ref_poc_list[1][frame->cur_slice_idx][i] = 0;
+ 	}
++
+ 	for (i = 0; i < 16; i++) {
+ 		u32 cur_rps = params->p.CUR_RPS[i];
++		int delt = cur_rps & ((1 << (RPS_USED_BIT - 1)) - 1);
++
+ 		if (cur_rps & 0x8000)
+ 			break;
+-		if ((cur_rps >> RPS_USED_BIT) & 1) {
+-			int delt =
+-				cur_rps &
+-				((1 << (RPS_USED_BIT - 1)) - 1);
+-			if ((cur_rps >> (RPS_USED_BIT - 1)) & 1) {
+-				RefPicSetStCurr0[num_neg] =
+-					frame->poc - ((1 << (RPS_USED_BIT - 1)) -
+-								delt);
+-				num_neg++;
+-			} else {
+-				RefPicSetStCurr1[num_pos] = frame->poc + delt;
+-				num_pos++;
+-			}
++
++		if (!((cur_rps >> RPS_USED_BIT) & 1))
++			continue;
++
++		if ((cur_rps >> (RPS_USED_BIT - 1)) & 1) {
++			RefPicSetStCurr0[num_neg] =
++				frame->poc - ((1 << (RPS_USED_BIT - 1)) -
++							delt);
++			num_neg++;
++		} else {
++			RefPicSetStCurr1[num_pos] = frame->poc + delt;
++			num_pos++;
+ 		}
+ 	}
+-	//printk("num_neg = %d; num_pos = %d\n", num_neg, num_pos);
++
+ 	total_num = num_neg + num_pos;
+ 
+-	if (total_num > 0) {
+-		if (params->p.modification_flag & 0x1) {
+-			for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
+-				int cIdx = params->p.modification_list[rIdx];
+-				frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
+-					cIdx >=
+-					num_neg ? RefPicSetStCurr1[cIdx -
+-					num_neg] :
+-					RefPicSetStCurr0[cIdx];
+-			}
+-		} else {
+-			for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
+-				int cIdx = rIdx % total_num;
+-				frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
+-					cIdx >=
+-					num_neg ? RefPicSetStCurr1[cIdx -
+-					num_neg] :
+-					RefPicSetStCurr0[cIdx];
+-			}
++	if (total_num <= 0)
++		goto end;
++
++	if (params->p.modification_flag & 0x1) {
++		for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
++			int cIdx = params->p.modification_list[rIdx];
++			frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
++				cIdx >=
++				num_neg ? RefPicSetStCurr1[cIdx -
++				num_neg] :
++				RefPicSetStCurr0[cIdx];
+ 		}
++	} else {
++		for (rIdx = 0; rIdx < num_ref_idx_l0_active; rIdx++) {
++			int cIdx = rIdx % total_num;
++			frame->ref_poc_list[0][frame->cur_slice_idx][rIdx] =
++				cIdx >=
++				num_neg ? RefPicSetStCurr1[cIdx -
++				num_neg] :
++				RefPicSetStCurr0[cIdx];
++		}
++	}
+ 
+-		if (params->p.slice_type == B_SLICE) {
+-			if (params->p.modification_flag & 0x2) {
+-
+-				for (rIdx = 0; rIdx < num_ref_idx_l1_active;
+-					 rIdx++) {
+-					int cIdx;
+-					if (params->p.modification_flag & 0x1) {
+-						cIdx =
+-							params->p.
+-							modification_list
+-							[num_ref_idx_l0_active +
+-							 rIdx];
+-					} else {
+-						cIdx =
+-							params->p.
+-							modification_list[rIdx];
+-					}
+-					frame->ref_poc_list[1][frame->
+-						cur_slice_idx][rIdx] =
+-						cIdx >=
+-						num_pos ?
+-						RefPicSetStCurr0[cIdx -	num_pos]
+-						: RefPicSetStCurr1[cIdx];
+-				}
+-			} else {
++	if (params->p.slice_type != B_SLICE)
++		goto end;
+ 
+-				for (rIdx = 0; rIdx < num_ref_idx_l1_active;
+-					 rIdx++) {
+-					int cIdx = rIdx % total_num;
+-					frame->ref_poc_list[1][frame->
+-						cur_slice_idx][rIdx] =
+-						cIdx >=
+-						num_pos ?
+-						RefPicSetStCurr0[cIdx -
+-						num_pos]
+-						: RefPicSetStCurr1[cIdx];
+-				}
++	if (params->p.modification_flag & 0x2) {
++		for (rIdx = 0; rIdx < num_ref_idx_l1_active;
++			 rIdx++) {
++			int cIdx;
++			if (params->p.modification_flag & 0x1) {
++				cIdx =
++					params->p.
++					modification_list
++					[num_ref_idx_l0_active +
++					 rIdx];
++			} else {
++				cIdx =
++					params->p.
++					modification_list[rIdx];
+ 			}
++			frame->ref_poc_list[1][frame->
++				cur_slice_idx][rIdx] =
++				cIdx >=
++				num_pos ?
++				RefPicSetStCurr0[cIdx -	num_pos]
++				: RefPicSetStCurr1[cIdx];
++		}
++	} else {
++		for (rIdx = 0; rIdx < num_ref_idx_l1_active; rIdx++) {
++			int cIdx = rIdx % total_num;
++			frame->ref_poc_list[1][frame->cur_slice_idx][rIdx] =
++				cIdx >= num_pos ?
++				RefPicSetStCurr0[cIdx - num_pos] :
++				RefPicSetStCurr1[cIdx];
+ 		}
+ 	}
+-	/*set m_PIC */
++
++end:
+ 	frame->ref_num[0] = num_ref_idx_l0_active;
+ 	frame->ref_num[1] = num_ref_idx_l1_active;
+ 
+-	printk("Update frame %u; slice %u; slice_type %u; num_l0 %u; num_l1 %u\n", frame->poc, frame->cur_slice_idx, params->p.slice_type, frame->ref_num[0], frame->ref_num[1]);
++	printk("Update frame %u; slice %u; slice_type %u; num_l0 %u; num_l1 %u\n",
++		frame->poc, frame->cur_slice_idx, params->p.slice_type, frame->ref_num[0], frame->ref_num[1]);
+ }
+ 
+ static void codec_hevc_update_ldc_flag(struct codec_hevc *hevc)
+@@ -544,6 +520,7 @@ static void codec_hevc_update_ldc_flag(struct codec_hevc *hevc)
+ 	}
+ }
+ 
++/* Not needed on GXL, to test with other SoCs */
+ static void codec_hevc_setup_canvas(struct vdec_session *sess)
+ {
+ 	struct v4l2_m2m_buffer *buf;
+@@ -599,7 +576,6 @@ static void codec_hevc_update_referenced(struct codec_hevc *hevc)
+ 				poc_tmp = curr_poc + delt;
+ 			if (poc_tmp == frame->poc) {
+ 				is_referenced = 1;
+-				/* hevc_print(hevc, 0, "i is %d\n", i); */
+ 				break;
+ 			}
+ 		}
+@@ -671,7 +647,7 @@ static void codec_hevc_setup_buffers(struct vdec_session *sess)
+ 	/* Fill the remaining unused slots with the last buffer's Y/UV addr ? */
+ 	for (i = buf_size; i < MAX_REF_PIC_NUM; ++i) {
+ 		writel_relaxed(buf_y_paddr  >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+-		writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
++		//writel_relaxed(buf_uv_paddr >> 5, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_DATA);
+ 	}
+ 
+ 	writel_relaxed(1, core->dos_base + HEVCD_MPP_ANC2AXI_TBL_CONF_ADDR);
+@@ -729,8 +705,6 @@ static int codec_hevc_start(struct vdec_session *sess)
+ 	int ret;
+ 	int i;
+ 
+-	//printk("Workspace size: %u\n", SIZE_WORKSPACE);
+-
+ 	hevc = kzalloc(sizeof(*hevc), GFP_KERNEL);
+ 	if (!hevc)
+ 		return -ENOMEM;
+@@ -748,8 +722,6 @@ static int codec_hevc_start(struct vdec_session *sess)
+ 	writel_relaxed(0, core->dos_base + HEVC_CABAC_CONTROL);
+ 	writel_relaxed(0, core->dos_base + HEVC_PARSER_CORE_CONTROL);
+ 	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | 1, core->dos_base + HEVC_STREAM_CONTROL);
+-	writel_relaxed(0x12345678, core->dos_base + HEVC_SHIFT_STARTCODE);
+-	writel_relaxed(0x9abcdef0, core->dos_base + HEVC_SHIFT_EMULATECODE);
+ 	writel_relaxed(0x00000100, core->dos_base + HEVC_SHIFT_STARTCODE);
+ 	writel_relaxed(0x00000300, core->dos_base + HEVC_SHIFT_EMULATECODE);
+ 	writel_relaxed((readl_relaxed(core->dos_base + HEVC_PARSER_INT_CONTROL) & 0x03ffffff) |
+@@ -832,7 +804,7 @@ static int codec_hevc_stop(struct vdec_session *sess)
+ 	struct codec_hevc *hevc = sess->priv;
+ 	struct vdec_core *core = sess->core;
+ 
+-	//printk("codec_hevc_stop\n");
++	printk("codec_hevc_stop\n");
+ 
+ 	if (hevc->workspace_vaddr) {
+ 		dma_free_coherent(core->dev, SIZE_WORKSPACE, hevc->workspace_vaddr, hevc->workspace_paddr);
+@@ -865,7 +837,7 @@ static void codec_hevc_update_tiles(struct vdec_session *sess)
+ 	u32 sao_vb_size = (sao_mem_unit + (2 << 4)) * pic_height_cu;
+ 	u32 tiles_flags = hevc->rpm_param.p.tiles_flags;
+ 
+-	//printk("tiles_flags = %08X\n", tiles_flags);
++	printk("tiles_flags = %08X\n", tiles_flags);
+ 
+ 	if (tiles_flags & 1) {
+ 		/* TODO; The sample I'm using has tiles_flags == 0 */
+@@ -914,7 +886,7 @@ static struct hevc_frame * codec_hevc_prepare_new_frame(struct vdec_session *ses
+ 
+ 	vbuf = v4l2_m2m_dst_buf_remove(sess->m2m_ctx);
+ 	if (!vbuf) {
+-		//printk("Couldn't remove dst buf\n");
++		printk("Couldn't remove dst buf\n");
+ 		return NULL;
+ 	}
+ 
+@@ -953,7 +925,6 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	writel_relaxed(sess->width | (sess->height << 16), core->dos_base + HEVC_SAO_PIC_SIZE);
+ 	writel_relaxed((hevc->lcu_x_num - 1) | (hevc->lcu_y_num - 1) << 16, core->dos_base + HEVC_SAO_PIC_SIZE_LCU);
+ 
+-	//printk("buf size: %08X\n", vdec_get_output_size(sess));
+ 	writel_relaxed(buf_y_paddr, core->dos_base + HEVC_SAO_Y_START_ADDR);
+ 	writel_relaxed(vdec_get_output_size(sess), core->dos_base + HEVC_SAO_Y_LENGTH);
+ 	writel_relaxed(buf_u_v_paddr, core->dos_base + HEVC_SAO_C_START_ADDR);
+@@ -966,14 +937,12 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 		writel_relaxed(sess->width | (sess->height << 16), core->dos_base + HEVC_DBLK_CFG2);
+ 
+ 		val = 0;
+-		if ((misc_flag0 >> PCM_ENABLE_FLAG_BIT) & 0x1) {
+-			//printk("Woo..\n");
++		if ((misc_flag0 >> PCM_ENABLE_FLAG_BIT) & 0x1)
+ 			val |= ((misc_flag0 >> PCM_LOOP_FILTER_DISABLED_FLAG_BIT) & 0x1) << 3;
+-		}
++
+ 		val |= (param->p.pps_cb_qp_offset & 0x1f) << 4;
+ 		val |= (param->p.pps_cr_qp_offset & 0x1f) << 9;
+ 		val |= (hevc->lcu_size == 64) ? 0 : ((hevc->lcu_size == 32) ? 1 : 2);
+-		//printk("HEVC_DBLK_CFG1: %08X\n", val);
+ 		writel_relaxed(val, core->dos_base + HEVC_DBLK_CFG1);
+ 	}
+ 
+@@ -994,8 +963,7 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	val = 0;
+ 	val_2 = readl_relaxed(core->dos_base + HEVC_SAO_CTRL0);
+ 	val_2 &= (~0x300);
+-	/* slice_deblocking_filter_disabled_flag = 0;
+-		ucode has handle it , so read it from ucode directly */
++
+ 	/*if (hevc->tile_enabled) {
+ 		val |=
+ 			((misc_flag0 >>
+@@ -1008,10 +976,9 @@ static void codec_hevc_set_sao(struct vdec_session *sess, struct hevc_frame *fra
+ 	}*/
+ 	slice_deblocking_filter_disabled_flag = (misc_flag0 >>
+ 			SLICE_DEBLOCKING_FILTER_DISABLED_FLAG_BIT) &
+-		0x1;	/* ucode has handle it,so read it from ucode directly */
++		0x1;
+ 	if ((misc_flag0 & (1 << DEBLOCKING_FILTER_OVERRIDE_ENABLED_FLAG_BIT))
+ 		&& (misc_flag0 & (1 << DEBLOCKING_FILTER_OVERRIDE_FLAG_BIT))) {
+-		//ucode has handle it , so read it from ucode directly */
+ 		val |= slice_deblocking_filter_disabled_flag << 2;
+ 
+ 		if (!slice_deblocking_filter_disabled_flag) {
+@@ -1098,16 +1065,13 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 	writel_relaxed(codec_hevc_get_frame_mv_paddr(hevc, frame), core->dos_base + HEVC_MPRED_MV_WR_START_ADDR);
+ 	writel_relaxed(col_mv_rd_start_addr, core->dos_base + HEVC_MPRED_MV_RD_START_ADDR);
+ 
+-	//printk("lcu_x_num = %u; tile_width_lcu = %u\n", hevc->lcu_x_num, hevc->tile_width_lcu);
+ 	val = ((hevc->lcu_x_num - hevc->tile_width_lcu) * mv_mem_unit);
+-	//printk("HEVC_MPRED_MV_WR_ROW_JUMP: %u\n", val);
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_MV_WR_ROW_JUMP);
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_MV_RD_ROW_JUMP);
+ 
+ 	if (slice_type == I_SLICE)
+ 		mv_rd_en = 0;
+ 
+-	//printk("HEVC_MPRED_CTRL0 before: %08X\n", readl_relaxed(core->dos_base + HEVC_MPRED_CTRL0));
+ 	val = slice_type |
+ 			  1 << 2 | // new pic
+ 			  1 << 3 | // new tile
+@@ -1122,7 +1086,6 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 			  lcu_size_log2 << 16 |
+ 			  3 << 20 | plevel << 24;
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_CTRL0);
+-	//printk("HEVC_MPRED_CTRL0 after: %08X\n", readl_relaxed(core->dos_base + HEVC_MPRED_CTRL0));
+ 
+ 	val = max_num_merge_cand | 2 << 4 | 3 << 8 | 5 << 12 | 36 << 16;
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_CTRL1);
+@@ -1131,13 +1094,10 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 
+ 	val = ((hevc->lcu_x_num - 1) | (hevc->lcu_y_num - 1) << 16);
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_PIC_SIZE_LCU);
+-	//printk("PIC_SIZE_LCU = %08X\n", val);
+ 	val = (hevc->tile_start_lcu_x | hevc->tile_start_lcu_y << 16);
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_TILE_START);
+-	//printk("HEVC_MPRED_TILE_START = %08X\n", val);
+ 	val = (hevc->tile_width_lcu | hevc->tile_height_lcu << 16);
+ 	writel_relaxed(val, core->dos_base + HEVC_MPRED_TILE_SIZE_LCU);
+-	//printk("HEVC_MPRED_TILE_SIZE_LCU = %08X\n", val);
+ 
+ 	writel_relaxed((ref_num[1] << 8) | ref_num[0], core->dos_base + HEVC_MPRED_REF_NUM);
+ 	writel_relaxed((1 << ref_num[0]) - 1, core->dos_base + HEVC_MPRED_REF_EN_L0);
+@@ -1153,7 +1113,6 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 	}
+ 
+ 	if (slice_segment_address == 0) {
+-		//printk("mpred_mv_wr_ptr = %08X; col_mv_rd_start_addr = %08X\n", mpred_mv_wr_ptr, col_mv_rd_start_addr);
+ 		writel_relaxed(hevc->workspace_paddr + MPRED_ABV_OFFSET, core->dos_base + HEVC_MPRED_ABV_START_ADDR);
+ 		writel_relaxed(mpred_mv_wr_ptr, core->dos_base + HEVC_MPRED_MV_WPTR);
+ 		writel_relaxed(col_mv_rd_start_addr, core->dos_base + HEVC_MPRED_MV_RPTR);
+@@ -1161,7 +1120,6 @@ static void codec_hevc_set_mpred(struct vdec_session *sess, struct hevc_frame *f
+ 		writel_relaxed(col_mv_rd_ptr, core->dos_base + HEVC_MPRED_MV_RPTR);
+ 	}
+ 
+-	//printk("col_mv_rd_end_addr = %08X\n", col_mv_rd_end_addr);
+ 	writel_relaxed(col_mv_rd_end_addr, core->dos_base + HEVC_MPRED_MV_RD_END_ADDR);
+ }
+ 
+@@ -1418,46 +1376,49 @@ static void codec_hevc_fetch_rpm(struct vdec_session *sess)
+ 			hevc->rpm_param.l.data[i + j] = rpm_vaddr[i + 3 - j];
+ 
+ 	codec_hevc_process_rpm(sess);
+-
+-	//printk("Size: %ux%u ; %ux%u\n", hevc->rpm_param.p.pic_width_in_luma_samples,  hevc->rpm_param.p.pic_height_in_luma_samples, sess->width, sess->height);
+ }
+ 
+-static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
++static irqreturn_t codec_hevc_threaded_isr(struct vdec_session *sess)
+ {
+-	u32 dec_status;
+ 	struct vdec_core *core = sess->core;
+ 	struct codec_hevc *hevc = sess->priv;
+ 
+-	dec_status = readl_relaxed(core->dos_base + HEVC_DEC_STATUS_REG);
+-	printk("!!! codec_hevc_isr: %08X\n", dec_status);
++	if (hevc->dec_status != HEVC_SLICE_SEGMENT_DONE) {
++		dev_warn(core->dev_dec, "Unrecognized dec_status: %08X\n",
++			hevc->dec_status);
++		return IRQ_HANDLED;
++	}
+ 
+-	//printk("HEVC_SHIFT_BYTE_COUNT: %u\n", readl_relaxed(core->dos_base + HEVC_SHIFT_BYTE_COUNT));
+-	//printk("HEVC_PARSER_LCU_START: %u\n", readl_relaxed(core->dos_base + HEVC_PARSER_LCU_START) & 0xffffff);
++	codec_hevc_fetch_rpm(sess);
++	codec_hevc_process_segment_header(sess);
++	codec_hevc_update_frame_refs(sess, hevc->cur_frame);
++	codec_hevc_update_col_frame(hevc);
++	codec_hevc_update_ldc_flag(hevc);
++	codec_hevc_set_mc(sess, hevc->cur_frame);
++	codec_hevc_set_mcrcc(sess);
++	codec_hevc_set_mpred(sess, hevc->cur_frame, hevc->col_frame);
++	codec_hevc_set_sao(sess, hevc->cur_frame);
+ 
+-	if (dec_status == HEVC_SLICE_SEGMENT_DONE) {
+-		codec_hevc_fetch_rpm(sess);
+-		codec_hevc_process_segment_header(sess);
++	writel_relaxed(readl_relaxed(core->dos_base + HEVC_WAIT_FLAG) | 2, core->dos_base + HEVC_WAIT_FLAG);
++	writel_relaxed(HEVC_CODED_SLICE_SEGMENT_DAT, core->dos_base + HEVC_DEC_STATUS_REG);
++	writel_relaxed(AMRISC_MAIN_REQ, core->dos_base + HEVC_MCPU_INTR_REQ);
+ 
+-		writel_relaxed(readl_relaxed(core->dos_base + HEVC_WAIT_FLAG) | 2, core->dos_base + HEVC_WAIT_FLAG);
++	return IRQ_HANDLED;
++}
+ 
+-		codec_hevc_update_frame_refs(sess, hevc->cur_frame);
+-		codec_hevc_update_col_frame(hevc);
+-		codec_hevc_update_ldc_flag(hevc);
+-		codec_hevc_set_mc(sess, hevc->cur_frame);
+-		codec_hevc_set_mcrcc(sess);
+-		codec_hevc_set_mpred(sess, hevc->cur_frame, hevc->col_frame);
+-		codec_hevc_set_sao(sess, hevc->cur_frame);
++static irqreturn_t codec_hevc_isr(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++	struct codec_hevc *hevc = sess->priv;
+ 
+-		//printk("Stream offset: %08X\n", readl_relaxed(core->dos_base + HEVC_SHIFT_BYTE_COUNT));
+-		writel_relaxed(HEVC_CODED_SLICE_SEGMENT_DAT, core->dos_base + HEVC_DEC_STATUS_REG);
+-		writel_relaxed(AMRISC_MAIN_REQ, core->dos_base + HEVC_MCPU_INTR_REQ);
+-	}
++	hevc->dec_status = readl_relaxed(core->dos_base + HEVC_DEC_STATUS_REG);
+ 
+-	return IRQ_HANDLED;
++	return IRQ_WAKE_THREAD;
+ }
+ 
+ struct vdec_codec_ops codec_hevc_ops = {
+ 	.start = codec_hevc_start,
+ 	.stop = codec_hevc_stop,
+ 	.isr = codec_hevc_isr,
++	.threaded_isr = codec_hevc_threaded_isr,
+ };
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 0d1270c..7708e1a 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -4,7 +4,6 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/mfd/syscon.h>
+-#include <linux/pm_runtime.h>
+ #include <linux/slab.h>
+ #include <media/v4l2-ioctl.h>
+ #include <media/v4l2-event.h>
+@@ -46,6 +45,10 @@ static int vdec_poweron(struct vdec_session *sess)
+ 
+ 	printk("vdec_poweron\n");
+ 
++	ret = clk_prepare_enable(sess->core->dos_parser_clk);
++	if (ret)
++		return ret;
++
+ 	ret = vdec_ops->start(sess);
+ 	if (ret)
+ 		return ret;
+@@ -61,6 +64,7 @@ static void vdec_poweroff(struct vdec_session *sess) {
+ 
+ 	codec_ops->stop(sess);
+ 	vdec_ops->stop(sess);
++	clk_disable_unprepare(sess->core->dos_parser_clk);
+ }
+ 
+ static void vdec_queue_recycle(struct vdec_session *sess, struct vb2_buffer *vb)
+@@ -171,7 +175,6 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 		goto bufs_done;
+ 	}
+ 
+-	pm_runtime_get_sync(sess->core->dev_dec);
+ 	ret = vdec_poweron(sess);
+ 	if (ret)
+ 		goto vififo_free;
+@@ -204,7 +207,6 @@ void vdec_stop_streaming(struct vb2_queue *q)
+ 
+ 	if (sess->streamon_out & sess->streamon_cap) {
+ 		vdec_poweroff(sess);
+-		pm_runtime_put_sync(sess->core->dev_dec);
+ 		dma_free_coherent(sess->core->dev, sess->vififo_size, sess->vififo_vaddr, sess->vififo_paddr);
+ 		INIT_LIST_HEAD(&sess->bufs);
+ 		INIT_LIST_HEAD(&sess->bufs_recycle);
+@@ -723,6 +725,22 @@ static const struct v4l2_file_operations vdec_fops = {
+ #endif
+ };
+ 
++static irqreturn_t vdec_isr(int irq, void *data)
++{
++	struct vdec_core *core = data;
++	struct vdec_session *sess = core->cur_sess;
++
++	return sess->fmt_out->codec_ops->isr(sess);
++}
++
++static irqreturn_t vdec_threaded_isr(int irq, void *data)
++{
++	struct vdec_core *core = data;
++	struct vdec_session *sess = core->cur_sess;
++
++	return sess->fmt_out->codec_ops->threaded_isr(sess);
++}
++
+ static const struct of_device_id vdec_dt_match[] = {
+ 	{ .compatible = "amlogic,meson-gxbb-vdec",
+ 	  .data = &vdec_platform_gxbb },
+@@ -781,12 +799,30 @@ static int vdec_probe(struct platform_device *pdev)
+ 		return PTR_ERR(core->regmap_ao);
+ 	}
+ 
++	core->dos_parser_clk = devm_clk_get(dev, "dos_parser");
++	if (IS_ERR(core->dos_parser_clk)) {
++		dev_err(dev, "dos_parser clock request failed\n");
++		return PTR_ERR(core->dos_parser_clk);
++	}
++
++	core->vdec_1_clk = devm_clk_get(dev, "vdec_1");
++	if (IS_ERR(core->vdec_1_clk)) {
++		dev_err(dev, "vdec_1 clock request failed\n");
++		return PTR_ERR(core->vdec_1_clk);
++	}
++
++	core->vdec_hevc_clk = devm_clk_get(dev, "vdec_hevc");
++	if (IS_ERR(core->vdec_hevc_clk)) {
++		dev_err(dev, "vdec_hevc clock request failed\n");
++		return PTR_ERR(core->vdec_hevc_clk);
++	}
++
+ 	irq = platform_get_irq(pdev, 0);
+ 	if (irq < 0)
+ 		return irq;
+ 		
+-	ret = devm_request_irq(core->dev, irq, vdec_1_isr,
+-				IRQF_SHARED, "vdecirq", core);
++	ret = devm_request_threaded_irq(core->dev, irq, vdec_isr,
++			vdec_threaded_isr, IRQF_ONESHOT, "vdec", core);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -822,7 +858,6 @@ static int vdec_probe(struct platform_device *pdev)
+ 	core->dev_dec = dev;
+ 
+ 	video_set_drvdata(vdev, core);
+-	pm_runtime_enable(dev);
+ 
+ 	return 0;
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 605fb61..f044956 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -48,6 +48,10 @@ struct vdec_core {
+ 	struct device *dev_dec;
+ 	const struct vdec_platform *platform;
+ 
++	struct clk *dos_parser_clk;
++	struct clk *vdec_1_clk;
++	struct clk *vdec_hevc_clk;
++
+ 	struct video_device *vdev_dec;
+ 	struct v4l2_device v4l2_dev;
+ 	
+@@ -68,6 +72,7 @@ struct vdec_codec_ops {
+ 	int (*stop)(struct vdec_session *sess);
+ 	int (*load_extended_firmware)(struct vdec_session *sess, const u8 *data, u32 len);
+ 	irqreturn_t (*isr)(struct vdec_session *sess);
++	irqreturn_t (*threaded_isr)(struct vdec_session *sess);
+ };
+ 
+ /* Describes one of the format that can be decoded/encoded */
+@@ -87,11 +92,10 @@ struct vdec_format {
+ struct vdec_session {
+ 	struct vdec_core *core;
+ 	
+-	struct mutex lock;
+-	
+ 	struct v4l2_fh fh;
+ 	struct v4l2_m2m_dev *m2m_dev;
+ 	struct v4l2_m2m_ctx *m2m_ctx;
++	struct mutex lock;
+ 	
+ 	const struct vdec_format *fmt_out;
+ 	const struct vdec_format *fmt_cap;
+@@ -129,7 +133,8 @@ struct vdec_session {
+ 	/* Buffers queued into the HW */
+ 	struct list_head bufs;
+ 	spinlock_t bufs_spinlock;
+-	
++
++	/* Codec private data */
+ 	void *priv;
+ };
+ 
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 1565d5e..0903f6b 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -1,9 +1,26 @@
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 and
++ * only version 2 as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
+ #include <linux/firmware.h>
++#include <linux/clk.h>
+ 
+ #include "vdec_1.h"
+ 
+ /* AO Registers */
+-#define AO_RTI_GEN_PWR_ISO0 0xec
++#define AO_RTI_GEN_PWR_SLEEP0	0xe8
++#define AO_RTI_GEN_PWR_ISO0	0xec
++	#define GEN_PWR_VDEC_1 (BIT(3) | BIT(2))
+ 
+ /* DOS Registers */
+ #define ASSIST_MBOX1_CLR_REG 0x01d4
+@@ -133,14 +150,6 @@ int vdec_1_stbuf_power_up(struct vdec_session *sess) {
+ 	return 0;
+ }
+ 
+-irqreturn_t vdec_1_isr(int irq, void *data)
+-{
+-	struct vdec_core *core = data;
+-	struct vdec_session *sess = core->cur_sess;
+-
+-	return sess->fmt_out->codec_ops->isr(sess);
+-}
+-
+ static void vdec_1_conf_esparser(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
+@@ -165,6 +174,16 @@ static int vdec_1_start(struct vdec_session *sess)
+ 	struct vdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+ 
+ 	printk("vdec_1_start\n");
++
++	clk_set_rate(core->vdec_1_clk, 666666666);
++	ret = clk_prepare_enable(core->vdec_1_clk);
++	if (ret)
++		return ret;
++
++	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
++		GEN_PWR_VDEC_1, 0);
++	udelay(10);
++
+ 	/* Reset VDEC1 */
+ 	writel_relaxed(0xfffffffc, core->dos_base + DOS_SW_RESET0);
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET0);
+@@ -173,10 +192,8 @@ static int vdec_1_start(struct vdec_session *sess)
+ 
+ 	/* VDEC Memories */
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_MEM_PD_VDEC);
+-
+ 	/* Remove VDEC1 Isolation */
+ 	regmap_write(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0x00000000);
+-
+ 	/* Reset DOS top registers */
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_VDEC_MCRCC_STALL_CTRL);
+ 
+@@ -186,8 +203,12 @@ static int vdec_1_start(struct vdec_session *sess)
+ 	vdec_1_stbuf_power_up(sess);
+ 
+ 	ret = vdec_1_load_firmware(sess, sess->fmt_out->firmware_path);
+-	if (ret)
++	if (ret) {
++		clk_disable_unprepare(core->vdec_1_clk);
++		regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
++			GEN_PWR_VDEC_1, GEN_PWR_VDEC_1);
+ 		return ret;
++	}
+ 
+ 	codec_ops->start(sess);
+ 
+@@ -232,6 +253,10 @@ static int vdec_1_stop(struct vdec_session *sess)
+ 	regmap_write(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc0);
+ 	/* power off vdec1 memories */
+ 	writel(0xffffffffUL, core->dos_base + DOS_MEM_PD_VDEC);
++	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
++		GEN_PWR_VDEC_1, GEN_PWR_VDEC_1);
++
++	clk_disable_unprepare(core->vdec_1_clk);
+ 
+ 	printk("vdec_poweroff end\n");
+ 	return 0;
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.h b/drivers/media/platform/meson/vdec/vdec_1.h
+index 82757ad..9bebec7 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.h
++++ b/drivers/media/platform/meson/vdec/vdec_1.h
+@@ -1,9 +1,22 @@
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 and
++ * only version 2 as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
+ #ifndef __MESON_VDEC_VDEC_1_H_
+ #define __MESON_VDEC_VDEC_1_H_
+ 
+ #include "vdec.h"
+ 
+ extern struct vdec_ops vdec_1_ops;
+-irqreturn_t vdec_1_isr(int irq, void *data);
+ 
+ #endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index 23126fb..ed29005 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -13,12 +13,15 @@
+  */
+ 
+ #include <linux/firmware.h>
++#include <linux/clk.h>
+ 
+ #include "vdec_1.h"
+ #include "hevc_regs.h"
+ 
+ /* AO Registers */
+-#define AO_RTI_GEN_PWR_ISO0 0xec
++#define AO_RTI_GEN_PWR_SLEEP0	0xe8
++#define AO_RTI_GEN_PWR_ISO0	0xec
++	#define GEN_PWR_VDEC_HEVC (BIT(7) | BIT(6))
+ 
+ /* DOS Registers */
+ #define ASSIST_MBOX1_CLR_REG 0x01d4
+@@ -33,25 +36,32 @@
+ 
+ static int vdec_hevc_load_firmware(struct vdec_session *sess, const char* fwname)
+ {
++	struct vdec_core *core = sess->core;
++	struct device *dev = core->dev_dec;
+ 	const struct firmware *fw;
+ 	static void *mc_addr;
+ 	static dma_addr_t mc_addr_map;
+ 	int ret;
+-	u32 i = 1000;
+-	struct vdec_core *core = sess->core;
+-	struct device *dev = core->dev_dec;
+-	struct vdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
++	u32 i = 100;
+ 
+ 	ret = request_firmware(&fw, fwname, dev);
+ 	if (ret < 0)  {
+ 		dev_err(dev, "Unable to request firmware %s\n", fwname);
+-		return -EINVAL;
++		return ret;
++	}
++
++	if (fw->size < MC_SIZE) {
++		dev_err(dev, "Firmware size %zu is too small. Expected %u.\n",
++			fw->size, MC_SIZE);
++		ret = -EINVAL;
++		goto release_firmware;
+ 	}
+ 
+ 	mc_addr = dma_alloc_coherent(core->dev, MC_SIZE, &mc_addr_map, GFP_KERNEL);
+ 	if (!mc_addr) {
+-		printk("Failed allocating memory for firmware loading\n");
+-		return -ENOMEM;
++		dev_err(dev, "Failed allocating memory for firmware loading\n");
++		ret = -ENOMEM;
++		goto release_firmware;
+ 	 }
+ 
+ 	memcpy(mc_addr, fw->data, MC_SIZE);
+@@ -66,15 +76,12 @@ static int vdec_hevc_load_firmware(struct vdec_session *sess, const char* fwname
+ 	while (--i && readl(core->dos_base + HEVC_IMEM_DMA_CTRL) & 0x8000) { }
+ 
+ 	if (i == 0) {
+-		printk("Firmware load fail (DMA hang?)\n");
+-		ret = -EINVAL;
+-	} else
+-		printk("Firmware load success\n");
+-
+-	if (codec_ops->load_extended_firmware)
+-		codec_ops->load_extended_firmware(sess, fw->data + MC_SIZE, fw->size - MC_SIZE);
++		dev_err(dev, "Firmware load fail (DMA hang?)\n");
++		ret = -ENODEV;
++	}
+ 
+ 	dma_free_coherent(core->dev, MC_SIZE, mc_addr, mc_addr_map);
++release_firmware:
+ 	release_firmware(fw);
+ 	return ret;
+ }
+@@ -83,15 +90,11 @@ static void vdec_hevc_stbuf_init(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
+ 
+-	printk("vdec_hevc_stbuf_init\n");
+-
+ 	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) & ~1, core->dos_base + HEVC_STREAM_CONTROL);
+ 	writel_relaxed(sess->vififo_paddr, core->dos_base + HEVC_STREAM_START_ADDR);
+ 	writel_relaxed(sess->vififo_paddr + sess->vififo_size, core->dos_base + HEVC_STREAM_END_ADDR);
+ 	writel_relaxed(sess->vififo_paddr, core->dos_base + HEVC_STREAM_RD_PTR);
+ 	writel_relaxed(sess->vififo_paddr, core->dos_base + HEVC_STREAM_WR_PTR);
+-
+-	printk("vdec_hevc_stbuf_init end\n");
+ }
+ 
+ /* VDEC_HEVC specific ESPARSER configuration */
+@@ -99,8 +102,6 @@ static void vdec_hevc_conf_esparser(struct vdec_session *sess)
+ {
+ 	struct vdec_core *core = sess->core;
+ 
+-	printk("vdec_hevc_conf_esparser\n");
+-
+ 	/* set vififo_vbuf_rp_sel=>vdec_hevc */
+ 	writel_relaxed(3 << 1, core->dos_base + DOS_GEN_CTRL0);
+ 	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL) | (1 << 3), core->dos_base + HEVC_STREAM_CONTROL);
+@@ -114,6 +115,25 @@ static u32 vdec_hevc_vififo_level(struct vdec_session *sess)
+ 	return 0;
+ }
+ 
++static int vdec_hevc_stop(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++	printk("vdec_hevc_stop\n");
++
++	/* Enable VDEC_HEVC Isolation */
++	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc00, 0xc00);
++
++	/* VDEC_HEVC Memories */
++	writel_relaxed(0xffffffffUL, core->dos_base + DOS_MEM_PD_HEVC);
++
++	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
++		GEN_PWR_VDEC_HEVC, GEN_PWR_VDEC_HEVC);
++
++	clk_disable_unprepare(core->vdec_hevc_clk);
++
++	return 0;
++}
++
+ static int vdec_hevc_start(struct vdec_session *sess)
+ {
+ 	int ret;
+@@ -122,6 +142,15 @@ static int vdec_hevc_start(struct vdec_session *sess)
+ 
+ 	printk("vdec_hevc_start\n");
+ 
++	clk_set_rate(core->vdec_hevc_clk, 666666666);
++	ret = clk_prepare_enable(core->vdec_hevc_clk);
++	if (ret)
++		return ret;
++
++	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
++		GEN_PWR_VDEC_HEVC, 0);
++	udelay(10);
++
+ 	/* Reset VDEC_HEVC*/
+ 	writel_relaxed(0xffffffff, core->dos_base + DOS_SW_RESET3);
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET3);
+@@ -135,14 +164,15 @@ static int vdec_hevc_start(struct vdec_session *sess)
+ 	regmap_update_bits(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc00, 0);
+ 
+ 	writel_relaxed(0xffffffff, core->dos_base + DOS_SW_RESET3);
+-	udelay(10);
+ 	writel_relaxed(0x00000000, core->dos_base + DOS_SW_RESET3);
+ 
+ 	vdec_hevc_stbuf_init(sess);
+ 
+ 	ret = vdec_hevc_load_firmware(sess, sess->fmt_out->firmware_path);
+-	if (ret)
++	if (ret) {
++		vdec_hevc_stop(sess);
+ 		return ret;
++	}
+ 
+ 	codec_ops->start(sess);
+ 
+@@ -157,20 +187,6 @@ static int vdec_hevc_start(struct vdec_session *sess)
+ 	return 0;
+ }
+ 
+-static int vdec_hevc_stop(struct vdec_session *sess)
+-{
+-	struct vdec_core *core = sess->core;
+-	printk("vdec_hevc_stop\n");
+-
+-	/* Enable VDEC_HEVC Isolation */
+-	regmap_write(core->regmap_ao, AO_RTI_GEN_PWR_ISO0, 0xc00);
+-
+-	/* VDEC_HEVC Memories */
+-	writel_relaxed(0xffffffffUL, core->dos_base + DOS_MEM_PD_HEVC);
+-
+-	return 0;
+-}
+-
+ struct vdec_ops vdec_hevc_ops = {
+ 	.start = vdec_hevc_start,
+ 	.stop = vdec_hevc_stop,
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.h b/drivers/media/platform/meson/vdec/vdec_hevc.h
+index af94bf0..a90529c 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.h
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.h
+@@ -1,3 +1,17 @@
++/*
++ * Copyright (C) 2018 Maxime Jourdan <maxi.jourdan@wanadoo.fr>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 and
++ * only version 2 as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
+ #ifndef __MESON_VDEC_VDEC_HEVC_H_
+ #define __MESON_VDEC_VDEC_HEVC_H_
+ 
+diff --git a/drivers/soc/amlogic/Makefile b/drivers/soc/amlogic/Makefile
+index ffb388d..8fa3218 100644
+--- a/drivers/soc/amlogic/Makefile
++++ b/drivers/soc/amlogic/Makefile
+@@ -1,4 +1,3 @@
+ obj-$(CONFIG_MESON_GX_SOCINFO) += meson-gx-socinfo.o
+ obj-$(CONFIG_MESON_GX_PM_DOMAINS) += meson-gx-pwrc-vpu.o
+-obj-$(CONFIG_MESON_GX_PM_DOMAINS) += meson-pwrc-vdec.o
+ obj-$(CONFIG_MESON_MX_SOCINFO) += meson-mx-socinfo.o
+diff --git a/drivers/soc/amlogic/meson-pwrc-vdec.c b/drivers/soc/amlogic/meson-pwrc-vdec.c
+deleted file mode 100644
+index 8aeb03e..0000000
+--- a/drivers/soc/amlogic/meson-pwrc-vdec.c
++++ /dev/null
+@@ -1,152 +0,0 @@
+-/*
+- * Author: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+- *
+- * SPDX-License-Identifier: GPL-2.0+
+- */
+-
+-#include <linux/of_address.h>
+-#include <linux/platform_device.h>
+-#include <linux/pm_domain.h>
+-#include <linux/bitfield.h>
+-#include <linux/regmap.h>
+-#include <linux/mfd/syscon.h>
+-#include <linux/reset.h>
+-#include <linux/clk.h>
+-#include <linux/clk-provider.h>
+-
+-/* AO Offsets */
+-#define AO_RTI_GEN_PWR_SLEEP0 (0x3a << 2)
+-
+-//#define GEN_PWR_VDEC_1 (BIT(7) | BIT(6))
+-#define GEN_PWR_VDEC_1 (BIT(3) | BIT(2))
+-
+-struct meson_pwrc_vdec {
+-	struct generic_pm_domain genpd;
+-	struct regmap *regmap_ao;
+-	struct clk *dos_parser_clk;
+-	struct clk *vpu_intr_clk;
+-	struct clk *vdec_1_clk;
+-	struct clk *vdec_hevc_clk;
+-};
+-
+-static inline
+-struct meson_pwrc_vdec *genpd_to_pd(struct generic_pm_domain *d)
+-{
+-	return container_of(d, struct meson_pwrc_vdec, genpd);
+-}
+-
+-static int meson_pwrc_vdec_power_off(struct generic_pm_domain *genpd)
+-{
+-	struct meson_pwrc_vdec *pd = genpd_to_pd(genpd);
+-
+-	printk("meson_pwrc_vdec_power_off\n");
+-	regmap_update_bits(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0,
+-			GEN_PWR_VDEC_1, GEN_PWR_VDEC_1);
+-	udelay(20);
+-
+-	//clk_disable_unprepare(pd->vpu_intr_clk);
+-	clk_disable_unprepare(pd->dos_parser_clk);
+-	clk_disable_unprepare(pd->vdec_1_clk);
+-	//clk_disable_unprepare(pd->vdec_hevc_clk);
+-
+-	return 0;
+-}
+-
+-static int meson_pwrc_vdec_setup_clk(struct meson_pwrc_vdec *pd) {
+-	printk("meson_pwrc_vdec_setup_clk\n");
+-	clk_prepare_enable(pd->dos_parser_clk);
+-	//clk_prepare_enable(pd->vpu_intr_clk);
+-	clk_prepare_enable(pd->vdec_1_clk);
+-	//clk_prepare_enable(pd->vdec_hevc_clk);
+-
+-	return 0;
+-}
+-
+-static int meson_pwrc_vdec_power_on(struct generic_pm_domain *genpd)
+-{
+-	struct meson_pwrc_vdec *pd = genpd_to_pd(genpd);
+-
+-	printk("meson_pwrc_vdec_power_on\n");
+-	meson_pwrc_vdec_setup_clk(pd);
+-	regmap_update_bits(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0, GEN_PWR_VDEC_1, 0);
+-	udelay(20);
+-
+-	return 0;
+-}
+-
+-static bool meson_pwrc_vdec_get_power(struct meson_pwrc_vdec *pd)
+-{
+-	u32 reg;
+-	
+-	printk("meson_pwrc_vdec_get_power\n");
+-	regmap_read(pd->regmap_ao, AO_RTI_GEN_PWR_SLEEP0, &reg);
+-
+-	return ((reg & GEN_PWR_VDEC_1) == GEN_PWR_VDEC_1);
+-}
+-
+-static struct meson_pwrc_vdec vdec_pd = {
+-	.genpd = {
+-		.name = "vdec",
+-		.power_off = meson_pwrc_vdec_power_off,
+-		.power_on = meson_pwrc_vdec_power_on,
+-	},
+-};
+-
+-static int meson_pwrc_vdec_probe(struct platform_device *pdev)
+-{
+-	struct regmap *regmap_ao;
+-	bool powered_off;
+-	int ret;
+-
+-	printk("Probe!\n");
+-	regmap_ao = syscon_node_to_regmap(of_get_parent(pdev->dev.of_node));
+-	if (IS_ERR(regmap_ao)) {
+-		dev_err(&pdev->dev, "failed to get AO regmap\n");
+-		return PTR_ERR(regmap_ao);
+-	}
+-
+-	vdec_pd.vpu_intr_clk = devm_clk_get(&pdev->dev, "vpu_intr");
+-	vdec_pd.dos_parser_clk = devm_clk_get(&pdev->dev, "dos_parser");
+-	vdec_pd.vdec_1_clk = devm_clk_get(&pdev->dev, "vdec_1");
+-	vdec_pd.vdec_hevc_clk = devm_clk_get(&pdev->dev, "vdec_hevc");
+-	vdec_pd.regmap_ao = regmap_ao;
+-
+-	powered_off = meson_pwrc_vdec_get_power(&vdec_pd);
+-
+-	pm_genpd_init(&vdec_pd.genpd, &simple_qos_governor,
+-		      powered_off);
+-
+-	/* If already powered, sync the clock states */
+-	if (!powered_off) {
+-		ret = meson_pwrc_vdec_setup_clk(&vdec_pd);
+-		if (ret)
+-			return ret;
+-	}
+-
+-	return of_genpd_add_provider_simple(pdev->dev.of_node,
+-					    &vdec_pd.genpd);
+-}
+-
+-static void meson_pwrc_vdec_shutdown(struct platform_device *pdev)
+-{
+-	bool powered_off;
+-
+-	powered_off = meson_pwrc_vdec_get_power(&vdec_pd);
+-	if (!powered_off)
+-		meson_pwrc_vdec_power_off(&vdec_pd.genpd);
+-}
+-
+-static const struct of_device_id meson_pwrc_vdec_match_table[] = {
+-	{ .compatible = "amlogic,meson-pwrc-vdec" },
+-	{ /* sentinel */ }
+-};
+-
+-static struct platform_driver meson_pwrc_vdec_driver = {
+-	.probe	= meson_pwrc_vdec_probe,
+-	.shutdown = meson_pwrc_vdec_shutdown,
+-	.driver = {
+-		.name		= "meson_pwrc_vdec",
+-		.of_match_table	= meson_pwrc_vdec_match_table,
+-	},
+-};
+-builtin_platform_driver(meson_pwrc_vdec_driver);

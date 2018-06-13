@@ -1,0 +1,27 @@
+From abee682c9cef46308990c2f2a2d54960c8ee4fde Mon Sep 17 00:00:00 2001
+From: Nicolas Dufresne <nicolas.dufresne@collabora.com>
+Date: Tue, 23 May 2017 14:36:37 -0400
+Subject: [PATCH 4/7] v4l2videodec: Remove unused forward declaration
+
+https://bugzilla.gnome.org/show_bug.cgi?id=728438
+(cherry picked from commit 7dc57e381bfab5895841575eb31ba01fa95ed357)
+---
+ sys/v4l2/gstv4l2videodec.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/sys/v4l2/gstv4l2videodec.c b/sys/v4l2/gstv4l2videodec.c
+index 2ca5ea582..2c07c30c7 100644
+--- a/sys/v4l2/gstv4l2videodec.c
++++ b/sys/v4l2/gstv4l2videodec.c
+@@ -38,8 +38,6 @@
+ GST_DEBUG_CATEGORY_STATIC (gst_v4l2_video_dec_debug);
+ #define GST_CAT_DEFAULT gst_v4l2_video_dec_debug
+ 
+-static gboolean gst_v4l2_video_dec_flush (GstVideoDecoder * decoder);
+-
+ typedef struct
+ {
+   gchar *device;
+-- 
+2.13.3
+

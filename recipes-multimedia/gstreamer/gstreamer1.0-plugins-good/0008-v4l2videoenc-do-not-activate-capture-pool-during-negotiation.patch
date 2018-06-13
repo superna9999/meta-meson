@@ -1,0 +1,42 @@
+diff -ur gst-plugins-good-1.12.2.orig/sys/v4l2/gstv4l2videoenc.c gst-plugins-good-1.12.2/sys/v4l2/gstv4l2videoenc.c
+--- gst-plugins-good-1.12.2.orig/sys/v4l2/gstv4l2videoenc.c	2017-12-19 12:20:59.287902748 +0000
++++ gst-plugins-good-1.12.2/sys/v4l2/gstv4l2videoenc.c	2017-12-19 12:23:27.933073786 +0000
+@@ -374,15 +374,15 @@
+   GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
+   gboolean ret;
+ 
+-  ret = GST_VIDEO_ENCODER_CLASS (parent_class)->negotiate (encoder);
++  /* Cannot renegotiate while the pool is active */
++  if (self->v4l2capture->pool &&
++      gst_buffer_pool_is_active (GST_BUFFER_POOL (self->v4l2capture->pool)))
++    return TRUE;
+ 
+-  if (!gst_buffer_pool_set_active (GST_BUFFER_POOL (self->v4l2capture->pool),
+-          TRUE)) {
+-    GST_WARNING_OBJECT (self, "Could not activate capture buffer pool.");
+-    ret = FALSE;
+-  }
++  if (!GST_VIDEO_ENCODER_CLASS (parent_class)->negotiate (encoder))
++    return FALSE;
+ 
+-  return ret;
++  return TRUE;
+ }
+ 
+ static GstVideoCodecFrame *
+@@ -525,6 +525,15 @@
+         goto activate_failed;
+     }
+ 
++    /* The capture pool is configured, but must not be activated during
++     * negotiation, because the active pool prevents a reconfiguration of
++     * output and capture. */
++    if (!gst_buffer_pool_set_active (GST_BUFFER_POOL (self->v4l2capture->pool),
++            TRUE)) {
++      GST_WARNING_OBJECT (self, "Could not activate capture buffer pool.");
++      goto activate_failed;
++    }
++
+     GST_DEBUG_OBJECT (self, "Starting encoding thread");
+ 
+     /* Start the processing task, when it quits, the task will disable input

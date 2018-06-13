@@ -1,0 +1,1030 @@
+From da5063ee12609808a07023c6798a02f10466ba70 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Date: Sun, 8 Apr 2018 03:46:40 +0200
+Subject: [PATCH] meson: vdec: Rework the input/output logic
+
+* Remove the esparser thread and instead queue the buffers as soon as
+userspace gives them to us
+* Remove the semaphore input lock, instead wait for the vififo to free up
+if it's full
+* DONE the output buffers instantly, don't do that in codec threads
+* Start using vdec_abort() for fatal error cases
+
+This commit will break ffmpeg/gst in "benchmark" mode such as
+ffmpeg -f null -.
+
+This is because those programs will spam input buffers, but will sometimes
+forget to give enough output buffers back to the driver, so the decoder stalls.
+
+Might have to find a work around that anyway..
+---
+ drivers/media/platform/meson/vdec/codec_h264.c    |  34 +---
+ drivers/media/platform/meson/vdec/codec_helpers.c |  21 +--
+ drivers/media/platform/meson/vdec/codec_helpers.h |   1 -
+ drivers/media/platform/meson/vdec/codec_hevc.c    |  34 ----
+ drivers/media/platform/meson/vdec/codec_mpeg12.c  |  37 +----
+ drivers/media/platform/meson/vdec/codec_mpeg4.c   |  40 +----
+ drivers/media/platform/meson/vdec/esparser.c      | 190 +++++++++-------------
+ drivers/media/platform/meson/vdec/esparser.h      |   3 +-
+ drivers/media/platform/meson/vdec/vdec.c          | 172 +++++++++++++++-----
+ drivers/media/platform/meson/vdec/vdec.h          |   9 +-
+ drivers/media/platform/meson/vdec/vdec_1.c        |   9 +
+ drivers/media/platform/meson/vdec/vdec_hevc.c     |   7 +
+ 12 files changed, 233 insertions(+), 324 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index af9002c..ad792b1 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -78,40 +78,10 @@ struct codec_h264 {
+ static int codec_h264_buffers_thread(void *data)
+ {
+ 	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned long flags;
+ 	struct vdec_session *sess = data;
+ 	struct vdec_core *core = sess->core;;
+ 
+ 	while (!kthread_should_stop()) {
+-		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-		while (!list_empty(&sess->bufs))
+-		{
+-			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
+-			if (tmp->index == -1)
+-				break;
+-
+-			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
+-			if (!vbuf) {
+-				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
+-				break;
+-			}
+-
+-			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
+-			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
+-			vbuf->vb2_buf.timestamp = tmp->timestamp;
+-			vbuf->sequence = sess->sequence_cap++;
+-			if (!(vbuf->sequence % 100))
+-				printk("%d\n", vbuf->sequence);
+-				
+-			printk("Buffer %d done\n", tmp->index);
+-
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-			list_del(&tmp->list);
+-			kfree(tmp);
+-		}
+-		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-
+ 		mutex_lock(&sess->bufs_recycle_lock);
+ 		while (!list_empty(&sess->bufs_recycle) &&
+ 		      (!readl_relaxed(core->dos_base + AV_SCRATCH_7) ||
+@@ -131,8 +101,6 @@ static int codec_h264_buffers_thread(void *data)
+ 
+ 			list_del(&tmp->list);
+ 			kfree(tmp);
+-
+-			up(&sess->queue_sema);
+ 		}
+ 		mutex_unlock(&sess->bufs_recycle_lock);
+ 
+@@ -392,7 +360,7 @@ static irqreturn_t codec_h264_isr(struct vdec_session *sess)
+ 				continue;
+ 			}
+ 
+-			codec_helper_fill_buf_idx(sess, buffer_index);
++			vdec_dst_buf_done(sess, buffer_index);
+ 		}
+ 
+ 		writel_relaxed(0, core->dos_base + AV_SCRATCH_0);
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.c b/drivers/media/platform/meson/vdec/codec_helpers.c
+index 0b53f0b..c383c58 100644
+--- a/drivers/media/platform/meson/vdec/codec_helpers.c
++++ b/drivers/media/platform/meson/vdec/codec_helpers.c
+@@ -31,23 +31,4 @@ void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base)
+ 			       ((cnv_uv_idx) << 8)  |
+ 				(cnv_y_idx), reg_base + buf_idx*4);
+ 	}
+-}
+-
+-/* Map a ready HW buffer index with a previously queued OUTPUT buffer's timestamp */
+-void codec_helper_fill_buf_idx(struct vdec_session *sess, u32 buffer_index)
+-{
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->index == -1) {
+-			tmp->index = buffer_index;
+-			goto unlock;
+-		}
+-	}
+-
+-	printk("Couldn't fill buffer idx %d\n", buffer_index);
+-unlock:
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
++}
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_helpers.h b/drivers/media/platform/meson/vdec/codec_helpers.h
+index 9e1e1d1..0a778ba 100644
+--- a/drivers/media/platform/meson/vdec/codec_helpers.h
++++ b/drivers/media/platform/meson/vdec/codec_helpers.h
+@@ -4,6 +4,5 @@
+ #include "vdec.h"
+ 
+ void codec_helper_set_canvases(struct vdec_session *sess, void *reg_base);
+-void codec_helper_fill_buf_idx(struct vdec_session *sess, u32 buffer_index);
+ 
+ #endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index b804aa6..a504af1 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -152,46 +152,12 @@ struct codec_hevc {
+ 
+ static int codec_hevc_buffers_thread(void *data)
+ {
+-	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned long flags;
+ 	struct vdec_session *sess = data;
+ 	struct vdec_core *core = sess->core;
+ 
+ 	while (!kthread_should_stop()) {
+ 		printk("status: %08X ; level = %d ; d_si = %08X ; d_st = %08X; d_sc = %08X ; sfc = %08X\n", readl_relaxed(core->dos_base + HEVC_PARSER_INT_STATUS), readl_relaxed(core->dos_base + HEVC_STREAM_LEVEL), readl_relaxed(core->dos_base + HEVC_DECODE_SIZE), readl_relaxed(core->dos_base + DECODE_STOP_POS), readl_relaxed(core->dos_base + HEVC_STREAM_CONTROL), readl_relaxed(core->dos_base + HEVC_STREAM_FIFO_CTL));
+ 
+-		/* The DONE part should probably be in a common thread */
+-		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-		while (!list_empty(&sess->bufs))
+-		{
+-			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
+-			if (tmp->index == -1)
+-				break;
+-
+-			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
+-			if (!vbuf) {
+-				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
+-				break;
+-			}
+-
+-			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
+-			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
+-			vbuf->vb2_buf.timestamp = tmp->timestamp;
+-			vbuf->sequence = sess->sequence_cap++;
+-			if (!(vbuf->sequence % 100))
+-				printk("%d\n", vbuf->sequence);
+-
+-			printk("Buffer %d done\n", tmp->index);
+-
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-
+-			list_del(&tmp->list);
+-
+-			kfree(tmp);
+-		}
+-		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-
+ 		msleep(100);
+ 	}
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.c b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+index 8c1d474..54c9670 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg12.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+@@ -41,8 +41,6 @@ struct codec_mpeg12 {
+ 	void      *workspace_vaddr;
+ 	dma_addr_t workspace_paddr;
+ 
+-	u32 last_buf_idx;
+-
+ 	/* Housekeeping thread for marking buffers to DONE
+ 	 * and recycling them into the hardware
+ 	 */
+@@ -52,39 +50,10 @@ struct codec_mpeg12 {
+ static int codec_mpeg12_buffers_thread(void *data)
+ {
+ 	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned long flags;
+ 	struct vdec_session *sess = data;
+ 	struct vdec_core *core = sess->core;;
+ 
+ 	while (!kthread_should_stop()) {
+-		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-		while (!list_empty(&sess->bufs))
+-		{
+-			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
+-			if (tmp->index == -1)
+-				break;
+-
+-			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
+-			if (!vbuf) {
+-				printk("HW buffer ready but we don't have the vb2 buffer !!!\n");
+-				break;
+-			}
+-
+-			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
+-			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
+-			vbuf->vb2_buf.timestamp = tmp->timestamp;
+-			vbuf->sequence = sess->sequence_cap++;
+-			if (!(vbuf->sequence % 100))
+-				printk("%d\n", vbuf->sequence);
+-
+-			printk("Buffer %d done\n", tmp->index);
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-			list_del(&tmp->list);
+-			kfree(tmp);
+-		}
+-		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-
+ 		mutex_lock(&sess->bufs_recycle_lock);
+ 		while (!list_empty(&sess->bufs_recycle) &&
+ 		       !readl_relaxed(core->dos_base + MREG_BUFFERIN))
+@@ -98,8 +67,6 @@ static int codec_mpeg12_buffers_thread(void *data)
+ 
+ 			list_del(&tmp->list);
+ 			kfree(tmp);
+-
+-			up(&sess->queue_sema);
+ 		}
+ 		mutex_unlock(&sess->bufs_recycle_lock);
+ 
+@@ -156,7 +123,6 @@ static int codec_mpeg12_start(struct vdec_session *sess) {
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
+ 
+ 	mpeg12->buffers_thread = kthread_run(codec_mpeg12_buffers_thread, sess, "buffers_done");
+-	mpeg12->last_buf_idx = 7;
+ 
+ 	return 0;
+ 
+@@ -190,7 +156,6 @@ static irqreturn_t codec_mpeg12_isr(struct vdec_session *sess)
+ 	u32 reg;
+ 	u32 buffer_index;
+ 	struct vdec_core *core = sess->core;
+-	struct codec_mpeg12 *mpeg12 = sess->priv;
+ 
+ 	writel_relaxed(1, core->dos_base + ASSIST_MBOX1_CLR_REG);
+ 
+@@ -207,7 +172,7 @@ static irqreturn_t codec_mpeg12_isr(struct vdec_session *sess)
+ 		goto end;
+ 
+ 	buffer_index = ((reg & 0xf) - 1) & 7;
+-	codec_helper_fill_buf_idx(sess, buffer_index);
++	vdec_dst_buf_done(sess, buffer_index);
+ 
+ end:
+ 	writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg4.c b/drivers/media/platform/meson/vdec/codec_mpeg4.c
+index 626b637..e74b56e 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg4.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg4.c
+@@ -40,8 +40,6 @@ struct codec_mpeg4 {
+ 	void      *workspace_vaddr;
+ 	dma_addr_t workspace_paddr;
+ 
+-	u32 last_buf_idx;
+-
+ 	/* Housekeeping thread for marking buffers to DONE
+ 	 * and recycling them into the hardware
+ 	 */
+@@ -51,39 +49,10 @@ struct codec_mpeg4 {
+ static int codec_mpeg4_buffers_thread(void *data)
+ {
+ 	struct vdec_buffer *tmp;
+-	struct vb2_v4l2_buffer *vbuf;
+-	unsigned long flags;
+ 	struct vdec_session *sess = data;
+ 	struct vdec_core *core = sess->core;;
+ 
+ 	while (!kthread_should_stop()) {
+-		spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-		while (!list_empty(&sess->bufs))
+-		{
+-			tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
+-			if (tmp->index == -1)
+-				break;
+-
+-			vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, tmp->index);
+-			if (!vbuf) {
+-				printk("HW buffer %d ready but we don't have the vb2 buffer !!!\n", tmp->index);
+-				break;
+-			}
+-
+-			vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
+-			vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
+-			vbuf->vb2_buf.timestamp = tmp->timestamp;
+-			vbuf->sequence = sess->sequence_cap++;
+-			if (!(vbuf->sequence % 100))
+-				printk("%d\n", vbuf->sequence);
+-
+-			printk("Buffer %d done\n", tmp->index);
+-			v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-			list_del(&tmp->list);
+-			kfree(tmp);
+-		}
+-		spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-
+ 		mutex_lock(&sess->bufs_recycle_lock);
+ 		while (!list_empty(&sess->bufs_recycle) &&
+ 		       !readl_relaxed(core->dos_base + MREG_BUFFERIN))
+@@ -97,8 +66,6 @@ static int codec_mpeg4_buffers_thread(void *data)
+ 
+ 			list_del(&tmp->list);
+ 			kfree(tmp);
+-
+-			up(&sess->queue_sema);
+ 		}
+ 		mutex_unlock(&sess->bufs_recycle_lock);
+ 
+@@ -158,10 +125,10 @@ static int codec_mpeg4_start(struct vdec_session *sess) {
+ 
+ 	sess->priv = mpeg4;
+ 
+-	/* Allocate some memory for the MPEG1/2 decoder's state */
++	/* Allocate some memory for the MPEG4 decoder's state */
+ 	mpeg4->workspace_vaddr = dma_alloc_coherent(core->dev, SIZE_WORKSPACE, &mpeg4->workspace_paddr, GFP_KERNEL);
+ 	if (!mpeg4->workspace_vaddr) {
+-		printk("Failed to request MPEG 4 Workspace\n");
++		printk("Failed to request MPEG4 Workspace\n");
+ 		ret = -ENOMEM;
+ 		goto free_mpeg4;
+ 	}
+@@ -187,7 +154,6 @@ static int codec_mpeg4_start(struct vdec_session *sess) {
+ 	writel_relaxed(readl_relaxed(core->dos_base + MDEC_PIC_DC_CTRL) | (1 << 17), core->dos_base + MDEC_PIC_DC_CTRL);
+ 
+ 	mpeg4->buffers_thread = kthread_run(codec_mpeg4_buffers_thread, sess, "buffers_done");
+-	mpeg4->last_buf_idx = 7;
+ 
+ 	return 0;
+ 
+@@ -231,7 +197,7 @@ static irqreturn_t codec_mpeg4_isr(struct vdec_session *sess)
+ 	reg = readl_relaxed(core->dos_base + MREG_BUFFEROUT);
+ 	if (reg) {
+ 		buffer_index = reg & 0x7;
+-		codec_helper_fill_buf_idx(sess, buffer_index);
++		vdec_dst_buf_done(sess, buffer_index);
+ 		writel_relaxed(0, core->dos_base + MREG_BUFFEROUT);
+ 	}
+ 
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 39aec6a..c14c89f 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -22,32 +22,33 @@
+ #include "esparser.h"
+ 
+ /* PARSER REGS (CBUS) */
+-#define PARSER_INT_STATUS 0x30
+-	#define PARSER_INTSTAT_SC_FOUND 1
+-#define PARSER_INT_ENABLE 0x2c
+-	#define PARSER_INT_HOST_EN_BIT 8
+-#define PARSER_VIDEO_START_PTR 0x80
+-#define PARSER_VIDEO_END_PTR 0x84
+-#define PARSER_ES_CONTROL 0x5c
+-#define PARSER_CONFIG 0x14
+-	#define PS_CFG_MAX_FETCH_CYCLE_BIT  0
+-	#define PS_CFG_STARTCODE_WID_24_BIT 10
+-	#define PS_CFG_MAX_ES_WR_CYCLE_BIT  12
+-	#define PS_CFG_PFIFO_EMPTY_CNT_BIT  16
+ #define PARSER_CONTROL 0x00
+ 	#define ES_PACK_SIZE_BIT	8
+ 	#define ES_WRITE		BIT(5)
+ 	#define ES_SEARCH		BIT(1)
+ 	#define ES_PARSER_START		BIT(0)
+-#define PFIFO_RD_PTR 0x1c
++#define PARSER_FETCH_ADDR 0x4
++#define PARSER_FETCH_CMD  0x8
++#define PARSER_CONFIG 0x14
++	#define PS_CFG_MAX_FETCH_CYCLE_BIT  0
++	#define PS_CFG_STARTCODE_WID_24_BIT 10
++	#define PS_CFG_MAX_ES_WR_CYCLE_BIT  12
++	#define PS_CFG_PFIFO_EMPTY_CNT_BIT  16
+ #define PFIFO_WR_PTR 0x18
++#define PFIFO_RD_PTR 0x1c
+ #define PARSER_SEARCH_PATTERN 0x24
+ 	#define ES_START_CODE_PATTERN 0x00000100
+ #define PARSER_SEARCH_MASK 0x28
+ 	#define ES_START_CODE_MASK	0xffffff00
+-#define PARSER_FETCH_ADDR 0x4
+-#define PARSER_FETCH_CMD  0x8
+ 	#define FETCH_ENDIAN_BIT	  27
++#define PARSER_INT_ENABLE 0x2c
++	#define PARSER_INT_HOST_EN_BIT 8
++#define PARSER_INT_STATUS 0x30
++	#define PARSER_INTSTAT_SC_FOUND 1
++#define PARSER_ES_CONTROL 0x5c
++#define PARSER_VIDEO_START_PTR 0x80
++#define PARSER_VIDEO_END_PTR 0x84
++#define PARSER_VIDEO_HOLE 0x90
+ 
+ /* STBUF regs */
+ #define VLD_MEM_VIFIFO_BUF_CNTL 0x3120
+@@ -58,7 +59,8 @@
+ static DECLARE_WAIT_QUEUE_HEAD(wq);
+ static int search_done;
+ 
+-static irqreturn_t esparser_isr(int irq, void *dev) {
++static irqreturn_t esparser_isr(int irq, void *dev)
++{
+ 	int int_status;
+ 	struct vdec_core *core = dev;
+ 
+@@ -77,50 +79,6 @@ static irqreturn_t esparser_isr(int irq, void *dev) {
+ 	return IRQ_HANDLED;
+ }
+ 
+-/**
+- * Userspace is very likely to feed us packets with timestamps not in chronological order
+- * because of B-frames. Rearrange them here.
+- */
+-static void add_buffer_to_list(struct vdec_session *sess, struct vdec_buffer *new_buf) {
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	if (list_empty(&sess->bufs))
+-		goto add_core;
+-
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (new_buf->timestamp < tmp->timestamp) {
+-			list_add_tail(&new_buf->list, &tmp->list);
+-			goto unlock;
+-		}
+-	}
+-
+-add_core:
+-	list_add_tail(&new_buf->list, &sess->bufs);
+-unlock:
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+-static void remove_buffer_from_list(struct vdec_session *sess, u64 ts)
+-{
+-	struct vdec_buffer *tmp;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&sess->bufs_spinlock, flags);
+-	list_for_each_entry(tmp, &sess->bufs, list) {
+-		if (tmp->timestamp == ts) {
+-			list_del(&tmp->list);
+-			kfree(tmp);
+-			goto unlock;
+-		}
+-	}
+-	printk("Couldn't remove buffer with timestamp %llu from list\n", ts);
+-
+-unlock:
+-	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
+-}
+-
+ /* Add a start code at the end of the buffer
+  * to trigger the esparser interrupt
+  */
+@@ -134,9 +92,9 @@ static void esparser_append_start_code(struct vb2_buffer *vb)
+ 	vaddr[3] = 0xff;
+ }
+ 
+-int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf) {
+-	struct vb2_buffer *vb = &vbuf->vb2_buf;
+-	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(&vbuf->vb2_buf, 0);
++static int esparser_process_buf(struct vdec_core *core, struct vb2_buffer *vb)
++{
++	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(vb, 0);
+ 	u32 payload_size = vb2_get_plane_payload(vb, 0);
+ 
+ 	esparser_append_start_code(vb);
+@@ -152,67 +110,69 @@ int esparser_process_buf(struct vdec_core *core, struct vb2_v4l2_buffer *vbuf) {
+ 	return wait_event_interruptible_timeout(wq, search_done != 0, HZ/5);
+ }
+ 
+-int esparser_queue(void *data) {
+-	struct vdec_session *sess = data;
++static u32 esparser_vififo_free_space(struct vdec_session *sess)
++{
++	u32 vififo_usage;
++	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 	struct vdec_core *core = sess->core;
+-	struct v4l2_m2m_buffer *buf, *n;
+-	struct vdec_buffer *new_buf;
++
++	vififo_usage  = vdec_ops->vififo_level(sess);
++	vififo_usage += readl_relaxed(core->esparser_base + PARSER_VIDEO_HOLE);
++	vififo_usage += (6 * SZ_1K);
++
++	if (vififo_usage > sess->vififo_size) {
++		dev_warn(sess->core->dev_dec,
++			"VIFIFO usage (%u) > VIFIFO size (%u)\n",
++			vififo_usage, sess->vififo_size);
++		return 0;
++	}
++
++	return sess->vififo_size - vififo_usage;
++}
++
++int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf)
++{
+ 	int ret;
++	struct vb2_buffer *vb = &vbuf->vb2_buf;
++	struct vdec_core *core = sess->core;
+ 
+-	for (;;) {
+-		ret = wait_event_interruptible(sess->input_buf_wq, sess->input_bufs_ready == 1 || kthread_should_stop());
+-		if (kthread_should_stop())
+-			break;
+-
+-		if (ret == -EINTR)
+-			continue;
+-
+-		sess->input_bufs_ready = 0;
+-
+-		v4l2_m2m_for_each_src_buf_safe(sess->m2m_ctx, buf, n) {
+-			struct vb2_v4l2_buffer *vbuf = &buf->vb;
+-			struct vb2_buffer *vb = &vbuf->vb2_buf;
+-			v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
+-
+-			while (down_timeout(&sess->queue_sema, HZ) < 0) {
+-				if (kthread_should_stop()) {
+-					v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+-					goto end;
+-				}
+-
+-				printk("Timed out waiting for an input slot. Trying again..\n");
+-			}
+-
+-			new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
+-			new_buf->timestamp = vb->timestamp;
+-			new_buf->index = -1;
+-			add_buffer_to_list(sess, new_buf);
+-
+-			ret = esparser_process_buf(core, vbuf);
+-
+-			if (ret > 0) {
+-				vbuf->flags = 0;
+-				vbuf->field = V4L2_FIELD_NONE;
+-				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
+-			} else if (ret <= 0) {
+-				printk("ESPARSER input parsing fatal error\n");
+-				remove_buffer_from_list(sess, vb->timestamp);
+-				v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+-				writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
+-				up(&sess->queue_sema);
+-			}
+-		}
++	u32 payload_size = vb2_get_plane_payload(vb, 0);
++
++	ret = wait_event_interruptible_timeout(sess->vififo_wq,
++		esparser_vififo_free_space(sess) >= payload_size, HZ);
++	if (ret <= 0) {
++		u32 nb = v4l2_m2m_num_dst_bufs_ready(sess->m2m_ctx);
++		dev_err(core->dev_dec,
++		   "Timed out waiting for VIFIFO to free up:\n");
++		dev_err(core->dev_dec,
++		   "decoder stuck or not enough output buffers (%u) available\n", nb);
++		return -ENODEV;
++	}
++
++	v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
++	vdec_add_buf_reorder(sess, vb->timestamp);
++
++	ret = esparser_process_buf(core, vb);
++
++	if (ret > 0) {
++		vbuf->flags = 0;
++		vbuf->field = V4L2_FIELD_NONE;
++		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++	} else if (ret <= 0) {
++		printk("ESPARSER input parsing error\n");
++		vdec_remove_buf(sess, vb->timestamp);
++		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
++		writel_relaxed(0, core->esparser_base + PARSER_FETCH_CMD);
+ 	}
+ 
+-end:
+ 	return 0;
+ }
+ 
+-int esparser_power_up(struct vdec_session *sess) {
++int esparser_power_up(struct vdec_session *sess)
++{
+ 	struct vdec_core *core = sess->core;
+ 	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 
+-	// WRITE_MPEG_REG(FEC_INPUT_CONTROL, 0);
+ 	writel_relaxed((10 << PS_CFG_PFIFO_EMPTY_CNT_BIT) |
+ 				(1  << PS_CFG_MAX_ES_WR_CYCLE_BIT) |
+ 				(16 << PS_CFG_MAX_FETCH_CYCLE_BIT),
+@@ -232,7 +192,6 @@ int esparser_power_up(struct vdec_session *sess) {
+ 
+ 	writel_relaxed((ES_SEARCH | ES_PARSER_START), core->esparser_base + PARSER_CONTROL);
+ 
+-	/* parser video */
+ 	writel_relaxed(sess->vififo_paddr, core->esparser_base + PARSER_VIDEO_START_PTR);
+ 	writel_relaxed(sess->vififo_paddr + sess->vififo_size - 8, core->esparser_base + PARSER_VIDEO_END_PTR);
+ 	writel_relaxed(readl_relaxed(core->esparser_base + PARSER_ES_CONTROL) & ~1, core->esparser_base + PARSER_ES_CONTROL);
+@@ -246,7 +205,8 @@ int esparser_power_up(struct vdec_session *sess) {
+ 	return 0;
+ }
+ 
+-int esparser_init(struct platform_device *pdev, struct vdec_core *core) {
++int esparser_init(struct platform_device *pdev, struct vdec_core *core)
++{
+ 	int ret;
+ 	int irq;
+ 
+diff --git a/drivers/media/platform/meson/vdec/esparser.h b/drivers/media/platform/meson/vdec/esparser.h
+index b008924..d60a7ea 100644
+--- a/drivers/media/platform/meson/vdec/esparser.h
++++ b/drivers/media/platform/meson/vdec/esparser.h
+@@ -5,7 +5,6 @@
+ 
+ int esparser_init(struct platform_device *pdev, struct vdec_core *core);
+ int esparser_power_up(struct vdec_session *sess);
+-int stbuf_power_up(struct vdec_session *sess);
+-int esparser_queue(void *data);
++int esparser_queue(struct vdec_session *sess, struct vb2_v4l2_buffer *vbuf);
+ 
+ #endif
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index c2a3b03..8473454 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -24,21 +24,28 @@
+ #include "codec_h264.h"
+ #include "codec_hevc.h"
+ 
+-static void vdec_abort(struct vdec_session *sess) {
++/* 16 MiB for parsed bitstream swap exchange */
++#define SIZE_VIFIFO (16 * SZ_1M)
++
++static void vdec_abort(struct vdec_session *sess)
++{
+ 	printk("Aborting decoding session!\n");
+ 	vb2_queue_error(&sess->m2m_ctx->cap_q_ctx.q);
+ 	vb2_queue_error(&sess->m2m_ctx->out_q_ctx.q);
+ }
+ 
+-static u32 get_output_size(u32 width, u32 height) {
++static u32 get_output_size(u32 width, u32 height)
++{
+ 	return ALIGN(width, 64) * ALIGN(height, 64);
+ }
+ 
+-u32 vdec_get_output_size(struct vdec_session *sess) {
++u32 vdec_get_output_size(struct vdec_session *sess)
++{
+ 	return get_output_size(sess->width, sess->height);
+ }
+ 
+-static int vdec_poweron(struct vdec_session *sess) {
++static int vdec_poweron(struct vdec_session *sess)
++{
+ 	int ret;
+ 	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 
+@@ -57,25 +64,38 @@ static void vdec_poweroff(struct vdec_session *sess) {
+ 	struct vdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 	struct vdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+ 
+-	kthread_stop(sess->esparser_queue_thread);
+-
+ 	codec_ops->stop(sess);
+ 	vdec_ops->stop(sess);
+ }
+ 
+-void vdec_m2m_device_run(void *priv) {
++static void vdec_queue_recycle(struct vdec_session *sess, struct vb2_buffer *vb)
++{
++	struct vdec_buffer *new_buf;
++
++	new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
++	new_buf->index = vb->index;
++
++	mutex_lock(&sess->bufs_recycle_lock);
++	list_add_tail(&new_buf->list, &sess->bufs_recycle);
++	mutex_unlock(&sess->bufs_recycle_lock);
++}
++
++void vdec_m2m_device_run(void *priv)
++{
++	struct v4l2_m2m_buffer *buf, *n;
+ 	struct vdec_session *sess = priv;
+ 
+ 	printk("vdec_m2m_device_run\n");
+ 	mutex_lock(&sess->lock);
+-
+-	sess->input_bufs_ready = 1;
+-	wake_up_interruptible(&sess->input_buf_wq);
+-
++	v4l2_m2m_for_each_src_buf_safe(sess->m2m_ctx, buf, n) {
++		if (esparser_queue(sess, &buf->vb) < 0)
++			vdec_abort(sess);
++	}
+ 	mutex_unlock(&sess->lock);
+ }
+ 
+-void vdec_m2m_job_abort(void *priv) {
++void vdec_m2m_job_abort(void *priv)
++{
+ 	struct vdec_session *sess = priv;
+ 
+ 	printk("vdec_m2m_job_abort\n");
+@@ -92,8 +112,8 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 		unsigned int sizes[], struct device *alloc_devs[])
+ {
+ 	struct vdec_session *sess = vb2_get_drv_priv(q);
+-	struct vdec_format *fmt_out = sess->fmt_out;
+-	struct vdec_format *fmt_cap = sess->fmt_cap;
++	const struct vdec_format *fmt_out = sess->fmt_out;
++	const struct vdec_format *fmt_cap = sess->fmt_cap;
+ 	printk("vdec_queue_setup\n");
+ 	
+ 	switch (q->type) {
+@@ -105,9 +125,9 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+ 		sizes[0] = vdec_get_output_size(sess);
+ 		sizes[1] = vdec_get_output_size(sess) / 2;
++		*num_planes = fmt_cap->num_planes;
+ 		*num_buffers = min(max(*num_buffers, fmt_out->min_buffers), fmt_out->max_buffers);
+ 		sess->num_output_bufs = *num_buffers;
+-		*num_planes = fmt_cap->num_planes;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -115,18 +135,6 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 	return 0;
+ }
+ 
+-static void vdec_queue_recycle(struct vdec_session *sess, struct vb2_buffer *vb)
+-{
+-	struct vdec_buffer *new_buf;
+-
+-	new_buf = kmalloc(sizeof(struct vdec_buffer), GFP_KERNEL);
+-	new_buf->index = vb->index;
+-
+-	mutex_lock(&sess->bufs_recycle_lock);
+-	list_add_tail(&new_buf->list, &sess->bufs_recycle);
+-	mutex_unlock(&sess->bufs_recycle_lock);
+-}
+-
+ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ {
+ 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+@@ -140,8 +148,8 @@ static void vdec_vb2_buf_queue(struct vb2_buffer *vb)
+ 		goto unlock;
+ 	
+ 	if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+-		sess->input_bufs_ready = 1;
+-		wake_up_interruptible(&sess->input_buf_wq);
++		if (esparser_queue(sess, vbuf) < 0)
++			vdec_abort(sess);
+ 	}
+ 	else
+ 		vdec_queue_recycle(sess, vb);
+@@ -167,16 +175,14 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 		mutex_unlock(&sess->lock);
+ 		return 0;
+ 	}
+-	
+-	/* Allocate 32 MiB for the VIFIFO buffer */
+-	sess->vififo_size = 0x2000000;
++
++	sess->vififo_size = SIZE_VIFIFO;
+ 	sess->vififo_vaddr = dma_alloc_coherent(sess->core->dev, sess->vififo_size, &sess->vififo_paddr, GFP_KERNEL);
+ 	if (!sess->vififo_vaddr) {
+-		printk("Failed to request 32MiB VIFIFO buffer\n");
++		printk("Failed to request VIFIFO buffer\n");
+ 		ret = -ENOMEM;
+ 		goto bufs_done;
+ 	}
+-	printk("Allocated 32MiB: %08X - %08X\n", sess->vififo_paddr, sess->vififo_paddr + sess->vififo_size);
+ 
+ 	pm_runtime_get_sync(sess->core->dev_dec);
+ 	ret = vdec_poweron(sess);
+@@ -185,8 +191,6 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 
+ 	sess->sequence_cap = 0;
+ 
+-	printk("Launching thread\n");
+-	sess->esparser_queue_thread = kthread_run(esparser_queue, sess, "esparser_queue");
+ 	printk("start_streaming done\n");
+ 	mutex_unlock(&sess->lock);
+ 
+@@ -217,8 +221,6 @@ void vdec_stop_streaming(struct vb2_queue *q)
+ 		dma_free_coherent(sess->core->dev, sess->vififo_size, sess->vififo_vaddr, sess->vififo_paddr);
+ 		INIT_LIST_HEAD(&sess->bufs);
+ 		INIT_LIST_HEAD(&sess->bufs_recycle);
+-		sema_init(&sess->queue_sema, 24);
+-		sess->input_bufs_ready = 0;
+ 	}
+ 
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+@@ -238,8 +240,6 @@ void vdec_stop_streaming(struct vb2_queue *q)
+ 
+ static const struct vb2_ops vdec_vb2_ops = {
+ 	.queue_setup = vdec_queue_setup,
+-	/*.buf_init = vdec_vb2_buf_init,
+-	.buf_prepare = vdec_vb2_buf_prepare,*/
+ 	.start_streaming = vdec_start_streaming,
+ 	.stop_streaming = vdec_stop_streaming,
+ 	.buf_queue = vdec_vb2_buf_queue,
+@@ -644,11 +644,10 @@ static int vdec_open(struct file *file)
+ 	sess->height = 720;
+ 	INIT_LIST_HEAD(&sess->bufs);
+ 	INIT_LIST_HEAD(&sess->bufs_recycle);
+-	init_waitqueue_head(&sess->input_buf_wq);
++	init_waitqueue_head(&sess->vififo_wq);
+ 	spin_lock_init(&sess->bufs_spinlock);
+ 	mutex_init(&sess->lock);
+ 	mutex_init(&sess->bufs_recycle_lock);
+-	sema_init(&sess->queue_sema, 24);
+ 
+ 	core->cur_sess = sess;
+ 
+@@ -688,6 +687,95 @@ static int vdec_close(struct file *file)
+ 	return 0;
+ }
+ 
++void vdec_dst_buf_done(struct vdec_session *sess, u32 buf_idx)
++{
++	unsigned long flags;
++	struct vdec_buffer *tmp;
++	struct vb2_v4l2_buffer *vbuf;
++	struct device *dev = sess->core->dev_dec;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	if (list_empty(&sess->bufs)) {
++		dev_err(dev, "Buffer %u done but list is empty\n", buf_idx);
++		vdec_abort(sess);
++		goto unlock;
++	}
++
++	tmp = list_first_entry(&sess->bufs, struct vdec_buffer, list);
++
++	vbuf = v4l2_m2m_dst_buf_remove_by_idx(sess->m2m_ctx, buf_idx);
++	if (!vbuf) {
++		dev_err(dev, "Buffer %u done but it doesn't exist in m2m_ctx\n",
++			buf_idx);
++		vdec_abort(sess);
++		goto unlock;
++	}
++
++	vbuf->vb2_buf.planes[0].bytesused = vdec_get_output_size(sess);
++	vbuf->vb2_buf.planes[1].bytesused = vdec_get_output_size(sess) / 2;
++	vbuf->vb2_buf.timestamp = tmp->timestamp;
++	vbuf->sequence = sess->sequence_cap++;
++
++	v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_DONE);
++	list_del(&tmp->list);
++	kfree(tmp);
++
++unlock:
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++
++	/* Buffer done probably means the vififo got freed */
++	wake_up_interruptible(&sess->vififo_wq);
++}
++
++/* Userspace will often queue input buffers that are not
++ * in chronological order. Rearrange them here.
++ */
++void vdec_add_buf_reorder(struct vdec_session *sess, u64 ts)
++{
++	struct vdec_buffer *new_buf, *tmp;
++	unsigned long flags;
++
++	new_buf = kmalloc(sizeof(*new_buf), GFP_KERNEL);
++	new_buf->timestamp = ts;
++	new_buf->index = -1;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	if (list_empty(&sess->bufs))
++		goto add_core;
++
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (ts < tmp->timestamp) {
++			list_add_tail(&new_buf->list, &tmp->list);
++			goto unlock;
++		}
++	}
++
++add_core:
++	list_add_tail(&new_buf->list, &sess->bufs);
++unlock:
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
++
++void vdec_remove_buf(struct vdec_session *sess, u64 ts)
++{
++	struct vdec_buffer *tmp;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sess->bufs_spinlock, flags);
++	list_for_each_entry(tmp, &sess->bufs, list) {
++		if (tmp->timestamp == ts) {
++			list_del(&tmp->list);
++			kfree(tmp);
++			goto unlock;
++		}
++	}
++	dev_warn(sess->core->dev_dec,
++		"Couldn't remove buffer with timestamp %llu from list\n", ts);
++
++unlock:
++	spin_unlock_irqrestore(&sess->bufs_spinlock, flags);
++}
++
+ static const struct v4l2_file_operations vdec_fops = {
+ 	.owner = THIS_MODULE,
+ 	.open = vdec_open,
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index fcb487d..46fd8c5 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -54,6 +54,7 @@ struct vdec_ops {
+ 	int (*start)(struct vdec_session *sess);
+ 	int (*stop)(struct vdec_session *sess);
+ 	void (*conf_esparser)(struct vdec_session *sess);
++	u32 (*vififo_level)(struct vdec_session *sess);
+ };
+ 
+ /* Describes one of the compression standard supported (H.264, HEVC..) */
+@@ -106,10 +107,7 @@ struct vdec_session {
+ 	unsigned int sequence_cap;
+ 
+ 	/* ESPARSER Input buffer management */
+-	struct task_struct *esparser_queue_thread;
+-	struct semaphore queue_sema;
+-	u32 input_bufs_ready;
+-	wait_queue_head_t input_buf_wq;
++	wait_queue_head_t vififo_wq;
+ 
+ 	/* Big contiguous area for the VIFIFO */
+ 	void *vififo_vaddr;
+@@ -128,5 +126,8 @@ struct vdec_session {
+ };
+ 
+ u32 vdec_get_output_size(struct vdec_session *sess);
++void vdec_dst_buf_done(struct vdec_session *sess, u32 buf_idx);
++void vdec_add_buf_reorder(struct vdec_session *sess, u64 ts);
++void vdec_remove_buf(struct vdec_session *sess, u64 ts);
+ 
+ #endif
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 3dad221..1565d5e 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -47,6 +47,7 @@
+ 	#define MEM_CTRL_FILL_EN	BIT(1)
+ #define VLD_MEM_VIFIFO_WP 0x3114
+ #define VLD_MEM_VIFIFO_RP 0x3118
++#define VLD_MEM_VIFIFO_LEVEL 0x311c
+ #define VLD_MEM_VIFIFO_BUF_CNTL 0x3120
+ 	#define MEM_BUFCTRL_MANUAL	BIT(1)
+ #define VLD_MEM_VIFIFO_WRAP_COUNT 0x3144
+@@ -150,6 +151,13 @@ static void vdec_1_conf_esparser(struct vdec_session *sess)
+ 	writel_relaxed(readl_relaxed(core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL) & ~1, core->dos_base + VLD_MEM_VIFIFO_BUF_CNTL);
+ }
+ 
++static u32 vdec_1_vififo_level(struct vdec_session *sess)
++{
++	struct vdec_core *core = sess->core;
++
++	return readl_relaxed(core->dos_base + VLD_MEM_VIFIFO_LEVEL);
++}
++
+ static int vdec_1_start(struct vdec_session *sess)
+ {
+ 	int ret;
+@@ -233,4 +241,5 @@ struct vdec_ops vdec_1_ops = {
+ 	.start = vdec_1_start,
+ 	.stop = vdec_1_stop,
+ 	.conf_esparser = vdec_1_conf_esparser,
++	.vififo_level = vdec_1_vififo_level,
+ };
+\ No newline at end of file
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index db9e71e..bced612 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -92,6 +92,12 @@ static void vdec_hevc_conf_esparser(struct vdec_session *sess)
+ 	writel_relaxed(readl_relaxed(core->dos_base + HEVC_STREAM_FIFO_CTL) | (1 << 29), core->dos_base + HEVC_STREAM_FIFO_CTL);
+ }
+ 
++static u32 vdec_hevc_vififo_level(struct vdec_session *sess)
++{
++	/* TODO */
++	return 0;
++}
++
+ static int vdec_hevc_start(struct vdec_session *sess)
+ {
+ 	int ret;
+@@ -150,4 +156,5 @@ struct vdec_ops vdec_hevc_ops = {
+ 	.start = vdec_hevc_start,
+ 	.stop = vdec_hevc_stop,
+ 	.conf_esparser = vdec_hevc_conf_esparser,
++	.vififo_level = vdec_hevc_vififo_level,
+ };
+\ No newline at end of file

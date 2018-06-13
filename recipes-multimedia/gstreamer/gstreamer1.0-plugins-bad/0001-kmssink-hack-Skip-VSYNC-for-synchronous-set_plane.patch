@@ -1,0 +1,69 @@
+From d22985b9219966c119b3eac839b42990eae913d8 Mon Sep 17 00:00:00 2001
+From: Devarsh Thakkar <devarsht@xilinx.com>
+Date: Fri, 9 Mar 2018 00:32:54 -0800
+Subject: [PATCH] kmssink: hack: Skip VSYNC for synchronous set_plane
+
+The new atomic DRM driver implements synchronous
+DRM_IOCTL_MODE_SETPLANE ioctl which unlike
+legacy DRM driver blocks until a VSYNC is done.
+
+As a workaround we skip the explicit wait for VSYNC done
+using drmWaitVBlank and drmModePageFlip whenever
+drmModeSetPlane is used by an atomic DRM driver, until
+kmssink starts supporting fully atomic DRM drivers.
+
+Signed-off-by: Devarsh Thakkar <devarsht@xilinx.com>
+---
+ sys/kms/gstkmssink.c | 12 ++++++++++++
+ sys/kms/gstkmssink.h |  1 +
+ 2 files changed, 13 insertions(+)
+
+diff --git a/sys/kms/gstkmssink.c b/sys/kms/gstkmssink.c
+index d19e19e..0012b6e 100644
+--- a/sys/kms/gstkmssink.c
++++ b/sys/kms/gstkmssink.c
+@@ -523,6 +523,15 @@ gst_kms_sink_start (GstBaseSink * bsink)
+   if (!res)
+     goto resources_failed;
+ 
++  ret = drmSetClientCap (self->fd, DRM_CLIENT_CAP_ATOMIC, 1);
++  if (ret) {
++    self->atomic_modesetting = FALSE;
++    GST_DEBUG_OBJECT (self, "No atomic modesetting support");
++  } else {
++    GST_DEBUG_OBJECT (self, "Atomic modesetting support enabled");
++    self->atomic_modesetting = TRUE;
++  }
++
+   if (self->conn_id == -1)
+     conn = find_main_monitor (self->fd, res);
+   else
+@@ -1288,6 +1297,8 @@ retry_set_plane:
+       goto retry_set_plane;
+     }
+     goto set_plane_failed;
++  } else if (self->atomic_modesetting) {
++    goto is_synchronous_set_plane;
+   }
+ 
+ sync_frame:
+@@ -1295,6 +1306,7 @@ sync_frame:
+   if (!gst_kms_sink_sync (self))
+     goto bail;
+ 
++is_synchronous_set_plane:
+   gst_buffer_replace (&self->last_buffer, buffer);
+   g_clear_pointer (&self->tmp_kmsmem, gst_memory_unref);
+ 
+diff --git a/sys/kms/gstkmssink.h b/sys/kms/gstkmssink.h
+index 214f3ad..97616a2 100644
+--- a/sys/kms/gstkmssink.h
++++ b/sys/kms/gstkmssink.h
+@@ -63,6 +63,7 @@ struct _GstKMSSink {
+   gboolean has_async_page_flip;
+   gboolean can_scale;
+ 
++  gboolean atomic_modesetting;
+   gboolean modesetting_enabled;
+ 
+   GstVideoInfo vinfo;
