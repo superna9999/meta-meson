@@ -4,8 +4,8 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-SRCREV_meson = "29dcea88779c856c7dc92040a0c01233263101d4"
-LINUX_VERSION = "4.17.0"
+SRCREV_meson = "d0c077266ecbe4ebbaac24c0fe5bd81c5304c5a2"
+LINUX_VERSION = "4.17.1"
 	
 # Linux stable tree
 SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=git;nocheckout=1;branch=linux-4.17.y;name=meson \
