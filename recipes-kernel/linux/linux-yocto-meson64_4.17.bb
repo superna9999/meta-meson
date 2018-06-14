@@ -23,6 +23,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
            file://0012-ARM64-dts-meson-gxl-add-sound-dai-cells-to-HDMI-node.patch \
            file://0013-ARM64-dts-meson-activate-hdmi-audio-HDMI-enabled-boa.patch \
            file://0014-clk-meson-audio-divider-fix-divider.patch \
+           file://0015-clk-meson-gxbb-set-fclk_div2.patch \
            file://defconfig \
            "
 
