@@ -71,6 +71,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
            file://0001-meson-vdec-MJPEG-EOS-signaling.patch \
            file://0002-meson-vdec-add-mjpeg-firmware-should-be-in-meson-gx-.patch \
            file://0003-meson-vdec-handle-DOS-clock-gate.patch \
+           file://0001-meson-vdec-Fix-HEVC-crash-freeze-misc.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
