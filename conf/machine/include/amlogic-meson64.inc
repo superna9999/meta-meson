@@ -13,9 +13,3 @@ require conf/machine/include/soc-family.inc
 
 DEFAULTTUNE ?= "aarch64"
 require conf/machine/include/arm/arch-armv8.inc
-
-EXTRA_IMAGEDEPENDS += " s905-autoscript"
-EXTRA_IMAGEDEPENDS += " s905-autoscript-multiboot"
-IMAGE_BOOT_FILES += " s905_autoscript"
-IMAGE_BOOT_FILES += " aml_autoscript"
-#IMAGE_BOOT_FILES += " aml_autoscript.zip"
