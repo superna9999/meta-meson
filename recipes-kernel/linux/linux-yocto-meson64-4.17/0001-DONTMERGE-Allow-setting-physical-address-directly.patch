@@ -1,0 +1,21 @@
+From dd7374571d683236dd480be9dad52608718244a7 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 11 Jul 2018 11:33:24 +0000
+Subject: [PATCH] [DONTMERGE] Allow setting physical address directly
+
+---
+ drivers/media/platform/meson/ao-cec.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/media/platform/meson/ao-cec.c b/drivers/media/platform/meson/ao-cec.c
+index 8040a62..db72f00 100644
+--- a/drivers/media/platform/meson/ao-cec.c
++++ b/drivers/media/platform/meson/ao-cec.c
+@@ -628,6 +628,7 @@ static int meson_ao_cec_probe(struct platform_device *pdev)
+ 
+ 	ao_cec->adap = cec_allocate_adapter(&meson_ao_cec_ops, ao_cec,
+ 					    "meson_ao_cec",
++					    CEC_CAP_PHYS_ADDR |
+ 					    CEC_CAP_LOG_ADDRS |
+ 					    CEC_CAP_TRANSMIT |
+ 					    CEC_CAP_RC |
