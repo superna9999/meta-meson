@@ -1,0 +1,25 @@
+From be43464085af3f568d70c3155869831aa41a24d9 Mon Sep 17 00:00:00 2001
+From: Jasper Kcoding <jasperkcoding@gmail.com>
+Date: Wed, 29 Aug 2018 23:43:53 +0200
+Subject: [PATCH] amlogic: board p212: Fix Ethernet PHY init
+
+---
+ board/amlogic/p212/p212.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/board/amlogic/p212/p212.c b/board/amlogic/p212/p212.c
+index 5fde53438e..d04c2fda18 100644
+--- a/board/amlogic/p212/p212.c
++++ b/board/amlogic/p212/p212.c
+@@ -29,7 +29,7 @@ int misc_init_r(void)
+ 	char serial[EFUSE_SN_SIZE];
+ 	ssize_t len;
+ 
+-	meson_gx_eth_init(PHY_INTERFACE_MODE_RMII, 0);
++	meson_gx_eth_init(PHY_INTERFACE_MODE_RMII, MESON_GXL_USE_INTERNAL_RMII_PHY);
+ 
+ 	if (!eth_env_get_enetaddr("ethaddr", mac_addr)) {
+ 		len = meson_sm_read_efuse(EFUSE_MAC_OFFSET,
+-- 
+2.11.0
+
