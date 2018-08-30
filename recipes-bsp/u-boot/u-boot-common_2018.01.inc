@@ -16,4 +16,6 @@ SRC_URI_append_friendlyelec-nanopik2 = " \
            file://0002-boards-amlogic-Add-FriendlyElec-NanoPi-K2-board-supp.patch \
 "
 
+SRC_URI_append_amlogic-p212 = " file://0003-amlogic-board-p212-Fix-Ethernet-PHY-init.patch "
+
 S = "${WORKDIR}/git"
