@@ -3,15 +3,15 @@ require ${PN}.inc
 PATCHTOOL = "git"
 PATCH_COMMIT_FUNCTIONS = "1"
 
-SRC_URI = "git://gitlab.freedesktop.org/lima/mesa.git;protocol=https;branch=lima-18.1 \
+SRC_URI = "git://gitlab.freedesktop.org/lima/mesa.git;protocol=https;branch=lima-18.2-rc5 \
            file://0001-Makefile.vulkan.am-explictly-add-lib-expat-to-intel-.patch \
            file://0003-winsys-svga-drm-Include-sys-types.h.patch \
            file://0004-hardware-gloat.patch \
            file://0005-Properly-get-LLVM-version-when-using-LLVM-Git-releas.patch \
            "
 
-PV = "18.1.0+git${SRCPV}"
-SRCREV = "f3d3d76b452cd40cc418b10285e68552556a25c5"
+PV = "18.2.0+git${SRCPV}"
+SRCREV = "e7c1c3101566ceb65717bfb695d1ccd2b66b7383"
 
 S = "${WORKDIR}/git"
 
