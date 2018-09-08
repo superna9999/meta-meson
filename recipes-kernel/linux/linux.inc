@@ -115,6 +115,7 @@ do_configure_prepend() {
     < '${WORKDIR}/defconfig' >>'${B}/.config'
 
     yes '' | oe_runmake -C ${S} O=${B} oldconfig
+    oe_runmake -C ${S} O=${B} savedefconfig
 }
 
 do_configure_append() {

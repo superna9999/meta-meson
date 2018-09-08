@@ -1,0 +1,41 @@
+From e74ff7f94aa4693434b76699d586f1e25cbf552a Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 19 Jun 2018 13:51:17 +0800
+Subject: [PATCH 35/39] drm/fourcc: add ARM tiled format modifier
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ include/uapi/drm/drm_fourcc.h | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/include/uapi/drm/drm_fourcc.h b/include/uapi/drm/drm_fourcc.h
+index e04613d..6743298 100644
+--- a/include/uapi/drm/drm_fourcc.h
++++ b/include/uapi/drm/drm_fourcc.h
+@@ -183,6 +183,7 @@ extern "C" {
+ #define DRM_FORMAT_MOD_VENDOR_QCOM    0x05
+ #define DRM_FORMAT_MOD_VENDOR_VIVANTE 0x06
+ #define DRM_FORMAT_MOD_VENDOR_BROADCOM 0x07
++#define DRM_FORMAT_MOD_VENDOR_ARM     0x08
+ /* add more to the end as needed */
+ 
+ #define DRM_FORMAT_RESERVED	      ((1ULL << 56) - 1)
+@@ -405,6 +406,15 @@ extern "C" {
+  */
+ #define DRM_FORMAT_MOD_BROADCOM_VC4_T_TILED fourcc_mod_code(BROADCOM, 1)
+ 
++/*
++ * ARM tiled format
++ *
++ * This is used by ARM Mali Utgard/Midgard GPU. It divides buffer into
++ * 16x16 pixel blocks. Blocks are stored linearly in order, but pixels
++ * in the block are reordered.
++ */
++#define DRM_FORMAT_MOD_ARM_TILED fourcc_mod_code(ARM, 1)
++
+ #if defined(__cplusplus)
+ }
+ #endif
+-- 
+2.0.1
+
