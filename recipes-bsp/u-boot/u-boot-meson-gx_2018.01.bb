@@ -5,7 +5,7 @@ DEPENDS += "bc-native dtc-native python-native amlogic-fip"
 
 PROVIDES = "u-boot"
 
-do_deploy_append_meson-gxbb () {
+deploy_gxbb () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
     DESTDIR="${B}/fip"
 
@@ -48,7 +48,7 @@ do_deploy_append_meson-gxbb () {
     install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
 }
 
-do_deploy_append_meson-gxl () {
+deploy_gxl () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
     DESTDIR="${B}/fip"
     
@@ -89,7 +89,7 @@ do_deploy_append_meson-gxl () {
     install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
 } 
 
-do_deploy_append_hardkernel-odroidc2 () {
+deploy_odroidc2 () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
     DESTDIR="${B}/fip"
     
@@ -109,3 +109,11 @@ do_deploy_append_hardkernel-odroidc2 () {
 
     install ${DESTDIR}/u-boot.img ${DEPLOYDIR}/u-boot.img
 } 
+
+DEPLOY_COMMAND_meson-gxl = "deploy_gxl"
+DEPLOY_COMMAND_meson-gxbb = "deploy_gxbb"
+DEPLOY_COMMAND_hardkernel-odroidc2 = "deploy_odroidc2"
+
+do_deploy_append_meson-gx () {
+	${DEPLOY_COMMAND}
+}
