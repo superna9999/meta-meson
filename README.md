@@ -3,6 +3,7 @@
 Now Amlogic SoCs of the Meson family are supported upstream :
  - Meson8b : s805
  - Meson-GX : s905 (GXBB) s905x/S905d (GXL) s912 (GXM)
+ - Meson AXG : a113d
 
 This Yocto/Openembedded will help building images for these SoCs using the lastest uptream linux branch.
 
@@ -28,6 +29,7 @@ Initialize environment :
 ```
 amlogic-bsp$ TEMPLATECONF=../meta-meson/conf
 amlogic-bsp$ source poky/oe-init-build-env
+amlogic-bsp/build$ cp ../poky/meta-poky/conf/local.conf.sample conf/local.conf
 ```
 
 or :
@@ -117,6 +119,10 @@ A .wic image will be generated in the tmp/deploy/images/$MACHINE/ directory.
 This Image contains a FAT32 BOOT partition will the kernel uImage and .dtb, compatible with Amlogic U-Boot already flashed on your device.
 
 For the amlogic-p212, khadas-vim and libretech-cc, Mainline U-Boot is automatically installed in a single ext4 partition .wic image in the tmp/deploy/images/$MACHINE/ directory.
+
+Flash the .wic file with the Etcher tool from https://etcher.io/
+
+Or for the connoisseurs :
 
 You will be able to dd the image onto the raw SDcard like :
 
