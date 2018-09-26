@@ -1,0 +1,125 @@
+From 47d7c3f47febfb97269027366aeaa28601f2024b Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Mon, 17 Sep 2018 21:19:27 +0200
+Subject: [PATCH] hevc: slight cleanups
+
+Use constants for buffer sizes + misc cleanups
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c | 63 +++++++++++++++++---------
+ 1 file changed, 41 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index b9fecef..9d9e8f2 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -48,31 +48,49 @@
+ /* HEVC Constants */
+ #define MAX_REF_PIC_NUM		24
+ #define MAX_REF_ACTIVE		16
+-#define MPRED_MV_BUF_SIZE	0x120000
+ #define MAX_TILE_COL_NUM	10
+ #define MAX_TILE_ROW_NUM	20
+ #define MAX_SLICE_NUM		800
+ #define INVALID_POC		0x80000000
+ 
+ /* HEVC Workspace layout */
++#define IPP_SIZE	0x4000
++#define SAO_ABV_SIZE	0x30000
++#define SAO_VB_SIZE	0x30000
++#define SH_TM_RPS_SIZE	0x800
++#define VPS_SIZE	0x800
++#define SPS_SIZE	0x800
++#define PPS_SIZE	0x2000
++#define SAO_UP_SIZE	0x800
++#define SWAP_BUF_SIZE	0x800
++#define SWAP_BUF2_SIZE	0x800
++#define SCALELUT_SIZE	0x8000
++#define DBLK_PARA_SIZE	0x20000
++#define DBLK_DATA_SIZE	0x40000
++#define MMU_VBH_SIZE	0x5000
++#define MPRED_ABV_SIZE	0x8000
++#define MPRED_MV_SIZE	(0x120000 * MAX_REF_PIC_NUM)
++#define RPM_BUF_SIZE	0x100
++#define LMEM_SIZE	0xA00
++
+ #define IPP_OFFSET       0x00
+-#define SAO_ABV_OFFSET   (IPP_OFFSET + 0x4000)
+-#define SAO_VB_OFFSET    (SAO_ABV_OFFSET + 0x30000)
+-#define SH_TM_RPS_OFFSET (SAO_VB_OFFSET + 0x30000)
+-#define VPS_OFFSET       (SH_TM_RPS_OFFSET + 0x800)
+-#define SPS_OFFSET       (VPS_OFFSET + 0x800)
+-#define PPS_OFFSET       (SPS_OFFSET + 0x800)
+-#define SAO_UP_OFFSET    (PPS_OFFSET + 0x2000)
+-#define SWAP_BUF_OFFSET  (SAO_UP_OFFSET + 0x800)
+-#define SWAP_BUF2_OFFSET (SWAP_BUF_OFFSET + 0x800)
+-#define SCALELUT_OFFSET  (SWAP_BUF2_OFFSET + 0x800)
+-#define DBLK_PARA_OFFSET (SCALELUT_OFFSET + 0x8000)
+-#define DBLK_DATA_OFFSET (DBLK_PARA_OFFSET + 0x20000)
+-#define MMU_VBH_OFFSET   (DBLK_DATA_OFFSET + 0x40000)
+-#define MPRED_ABV_OFFSET (MMU_VBH_OFFSET + 0x5000)
+-#define MPRED_MV_OFFSET  (MPRED_ABV_OFFSET + 0x8000)
+-#define RPM_OFFSET       (MPRED_MV_OFFSET + MPRED_MV_BUF_SIZE * MAX_REF_PIC_NUM)
+-#define LMEM_OFFSET      (RPM_OFFSET + 0x100)
++#define SAO_ABV_OFFSET   (IPP_OFFSET + IPP_SIZE)
++#define SAO_VB_OFFSET    (SAO_ABV_OFFSET + SAO_ABV_SIZE)
++#define SH_TM_RPS_OFFSET (SAO_VB_OFFSET + SAO_VB_SIZE)
++#define VPS_OFFSET       (SH_TM_RPS_OFFSET + SH_TM_RPS_SIZE)
++#define SPS_OFFSET       (VPS_OFFSET + VPS_SIZE)
++#define PPS_OFFSET       (SPS_OFFSET + SPS_SIZE)
++#define SAO_UP_OFFSET    (PPS_OFFSET + PPS_SIZE)
++#define SWAP_BUF_OFFSET  (SAO_UP_OFFSET + SAO_UP_SIZE)
++#define SWAP_BUF2_OFFSET (SWAP_BUF_OFFSET + SWAP_BUF_SIZE)
++#define SCALELUT_OFFSET  (SWAP_BUF2_OFFSET + SWAP_BUF2_SIZE)
++#define DBLK_PARA_OFFSET (SCALELUT_OFFSET + SCALELUT_SIZE)
++#define DBLK_DATA_OFFSET (DBLK_PARA_OFFSET + DBLK_PARA_SIZE)
++#define MMU_VBH_OFFSET   (DBLK_DATA_OFFSET + DBLK_DATA_SIZE)
++#define MPRED_ABV_OFFSET (MMU_VBH_OFFSET + MMU_VBH_SIZE)
++#define MPRED_MV_OFFSET  (MPRED_ABV_OFFSET + MPRED_ABV_SIZE)
++#define RPM_OFFSET       (MPRED_MV_OFFSET + MPRED_MV_SIZE)
++#define LMEM_OFFSET      (RPM_OFFSET + RPM_BUF_SIZE)
+ 
+ /* ISR decode status */
+ #define HEVC_DEC_IDLE                        0x0
+@@ -110,7 +128,7 @@
+ #define DM_CHROMA_IDX		36
+ 
+ /* Buffer sizes */
+-#define SIZE_WORKSPACE ALIGN(LMEM_OFFSET + 0xA00, 64 * SZ_1K)
++#define SIZE_WORKSPACE ALIGN(LMEM_OFFSET + LMEM_SIZE, 64 * SZ_1K)
+ #define SIZE_AUX (SZ_1K * 16)
+ #define SIZE_FRAME_MMU (0x1200 * 4)
+ #define RPM_SIZE 0x80
+@@ -554,7 +572,7 @@ static void codec_hevc_setup_buffers_gxbb(struct amvdec_session *sess)
+ 		if (codec_hevc_use_fbc(sess)) {
+ 			val = buf_y_paddr | (idx << 8) | 1;
+ 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR, val);
+-		} else if (sess->pixfmt_cap == V4L2_PIX_FMT_NV12M) {
++		} else {
+ 			buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+ 			val = buf_y_paddr | ((idx * 2) << 8) | 1;
+ 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_CMD_ADDR, val);
+@@ -627,13 +645,14 @@ static void codec_hevc_free_fbc_buffers(struct amvdec_session *sess)
+ 	u32 am21_size = amvdec_am21c_size(sess->width, sess->height);
+ 	int i;
+ 
+-	for (i = 0; i < MAX_REF_PIC_NUM; ++i)
++	for (i = 0; i < MAX_REF_PIC_NUM; ++i) {
+ 		if (hevc->fbc_buffer_vaddr[i]) {
+ 			dma_free_coherent(dev, am21_size,
+ 					  hevc->fbc_buffer_vaddr[i],
+ 					  hevc->fbc_buffer_paddr[i]);
+ 			hevc->fbc_buffer_vaddr[i] = NULL;
+ 		}
++	}
+ }
+ 
+ static int codec_hevc_alloc_fbc_buffers(struct amvdec_session *sess)
+@@ -1038,7 +1057,7 @@ static dma_addr_t codec_hevc_get_frame_mv_paddr(struct codec_hevc *hevc,
+ 						struct hevc_frame *frame)
+ {
+ 	return hevc->workspace_paddr + MPRED_MV_OFFSET +
+-		(frame->vbuf->vb2_buf.index * MPRED_MV_BUF_SIZE);
++		(frame->vbuf->vb2_buf.index * MPRED_MV_SIZE);
+ }
+ 
+ static void

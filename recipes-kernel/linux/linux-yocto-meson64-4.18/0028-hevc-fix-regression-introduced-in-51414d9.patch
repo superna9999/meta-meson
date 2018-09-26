@@ -1,0 +1,40 @@
+From 1b6b4b60627e14b8e92ee46db227df18b6af8c5a Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Wed, 26 Sep 2018 10:36:21 +0200
+Subject: [PATCH] hevc: fix regression introduced in 51414d9
+
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 9d9e8f2..c70eabc 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -54,6 +54,8 @@
+ #define INVALID_POC		0x80000000
+ 
+ /* HEVC Workspace layout */
++#define MPRED_MV_BUF_SIZE 0x120000
++
+ #define IPP_SIZE	0x4000
+ #define SAO_ABV_SIZE	0x30000
+ #define SAO_VB_SIZE	0x30000
+@@ -69,7 +71,7 @@
+ #define DBLK_DATA_SIZE	0x40000
+ #define MMU_VBH_SIZE	0x5000
+ #define MPRED_ABV_SIZE	0x8000
+-#define MPRED_MV_SIZE	(0x120000 * MAX_REF_PIC_NUM)
++#define MPRED_MV_SIZE	(MPRED_MV_BUF_SIZE * MAX_REF_PIC_NUM)
+ #define RPM_BUF_SIZE	0x100
+ #define LMEM_SIZE	0xA00
+ 
+@@ -1057,7 +1059,7 @@ static dma_addr_t codec_hevc_get_frame_mv_paddr(struct codec_hevc *hevc,
+ 						struct hevc_frame *frame)
+ {
+ 	return hevc->workspace_paddr + MPRED_MV_OFFSET +
+-		(frame->vbuf->vb2_buf.index * MPRED_MV_SIZE);
++		(frame->vbuf->vb2_buf.index * MPRED_MV_BUF_SIZE);
+ }
+ 
+ static void

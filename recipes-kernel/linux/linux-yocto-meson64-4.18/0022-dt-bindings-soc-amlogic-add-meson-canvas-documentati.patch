@@ -1,23 +1,24 @@
-From c50c3a3d2cb0d563757a8b8b1a3e52acdf68910e Mon Sep 17 00:00:00 2001
+From 4ad878940a92154620ef59af9ac3ff1025b07dc8 Mon Sep 17 00:00:00 2001
 From: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
-Date: Wed, 1 Aug 2018 20:51:26 +0200
+Date: Sat, 28 Jul 2018 22:40:27 +0200
 Subject: [PATCH] dt-bindings: soc: amlogic: add meson-canvas documentation
 
 DT bindings doc for amlogic,meson-canvas
 
-Signed-off-by: Maxime Jourdan <maxi.jourdan@wanadoo.fr>
+Reviewed-by: Jerome Brunet <jbrunet@baylibre.com>
+Signed-off-by: Maxime Jourdan <mjourdan@baylibre.com>
 ---
- .../bindings/soc/amlogic/amlogic,meson-canvas.txt  | 36 ++++++++++++++++++++++
- 1 file changed, 36 insertions(+)
- create mode 100644 Documentation/devicetree/bindings/soc/amlogic/amlogic,meson-canvas.txt
+ .../bindings/soc/amlogic/amlogic,canvas.txt        | 29 ++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/soc/amlogic/amlogic,canvas.txt
 
-diff --git a/Documentation/devicetree/bindings/soc/amlogic/amlogic,meson-canvas.txt b/Documentation/devicetree/bindings/soc/amlogic/amlogic,meson-canvas.txt
+diff --git a/Documentation/devicetree/bindings/soc/amlogic/amlogic,canvas.txt b/Documentation/devicetree/bindings/soc/amlogic/amlogic,canvas.txt
 new file mode 100644
-index 0000000..96e1437
+index 0000000..436d210
 --- /dev/null
-+++ b/Documentation/devicetree/bindings/soc/amlogic/amlogic,meson-canvas.txt
-@@ -0,0 +1,36 @@
-+Amlogic Meson Canvas
++++ b/Documentation/devicetree/bindings/soc/amlogic/amlogic,canvas.txt
+@@ -0,0 +1,29 @@
++Amlogic Canvas
 +================================
 +
 +A canvas is a collection of metadata that describes a pixel buffer.
@@ -33,23 +34,16 @@ index 0000000..96e1437
 +Device Tree Bindings:
 +---------------------
 +
-+Canvas Provider
++Video Lookup Table
 +--------------------------
 +
 +Required properties:
-+- compatible: "amlogic,meson-canvas"
-+
-+Parent node should have the following properties :
-+- compatible: "amlogic,meson-gx-dmc-sysctrl", "syscon", "simple-mfd"
-+- reg: base address and size of the DMC system control register space.
++- compatible: "amlogic,canvas"
++- reg: Base physical address and size of the canvas registers.
 +
 +Example:
 +
-+sysctrl_DMC: system-controller@0 {
-+	compatible = "amlogic,meson-gx-dmc-sysctrl", "syscon", "simple-mfd";
-+	reg = <0x0 0x0 0x0 0x1000>;
-+
-+	canvas: canvas-provider@0 {
-+		compatible = "amlogic,meson-canvas";
-+	};
++canvas: video-lut@48 {
++	compatible = "amlogic,canvas";
++	reg = <0x0 0x48 0x0 0x14>;
 +};

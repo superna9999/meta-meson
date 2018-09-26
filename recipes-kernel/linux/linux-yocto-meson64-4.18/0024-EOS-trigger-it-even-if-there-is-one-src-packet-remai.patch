@@ -1,0 +1,28 @@
+From 169753b4575039c576e84fc617eacc049b454938 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Wed, 19 Sep 2018 21:00:13 +0200
+Subject: [PATCH] EOS: trigger it even if there is one src packet remaining
+
+This is not a great fix, but it allows EOS for bitstreams where the last
+packet is not a timestamp match.
+
+The counterpart is that it'll make the driver trigger EOS one frame
+early on bitstreams that don't have such last packet.
+---
+ drivers/media/platform/meson/vdec/vdec_helpers.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec_helpers.c b/drivers/media/platform/meson/vdec/vdec_helpers.c
+index 94b5220..0f9e7b0 100644
+--- a/drivers/media/platform/meson/vdec/vdec_helpers.c
++++ b/drivers/media/platform/meson/vdec/vdec_helpers.c
+@@ -300,7 +300,8 @@ static void dst_buf_done(struct amvdec_session *sess,
+ 	vbuf->vb2_buf.timestamp = timestamp;
+ 	vbuf->sequence = sess->sequence_cap++;
+ 
+-	if (sess->should_stop && list_empty(&sess->timestamps)) {
++	if (sess->should_stop &&
++	    atomic_read(&sess->esparser_queued_bufs) <= 2) {
+ 		const struct v4l2_event ev = { .type = V4L2_EVENT_EOS };
+ 
+ 		dev_dbg(dev, "Signaling EOS\n");

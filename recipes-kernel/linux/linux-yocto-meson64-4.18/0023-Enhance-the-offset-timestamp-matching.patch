@@ -1,0 +1,303 @@
+From 5f7b6ce81a9358304b48dae26eca8a5f984d2974 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Wed, 19 Sep 2018 19:33:12 +0200
+Subject: [PATCH] Enhance the offset/timestamp matching
+
+Take into account vififo wrapping instead of ignoring it.
+
+Also remove vdec_ops "use_offsets" that has become unecessary.
+---
+ drivers/media/platform/meson/vdec/codec_h264.c   |  6 +++---
+ drivers/media/platform/meson/vdec/codec_mjpeg.c  |  2 +-
+ drivers/media/platform/meson/vdec/codec_mpeg12.c |  2 +-
+ drivers/media/platform/meson/vdec/esparser.c     | 27 ++++++++++++++++++------
+ drivers/media/platform/meson/vdec/vdec.c         |  2 ++
+ drivers/media/platform/meson/vdec/vdec.h         |  5 +++--
+ drivers/media/platform/meson/vdec/vdec_1.c       |  6 ------
+ drivers/media/platform/meson/vdec/vdec_helpers.c | 15 +++++--------
+ drivers/media/platform/meson/vdec/vdec_helpers.h |  4 ++--
+ drivers/media/platform/meson/vdec/vdec_hevc.c    |  6 ------
+ 10 files changed, 37 insertions(+), 38 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_h264.c b/drivers/media/platform/meson/vdec/codec_h264.c
+index 65cb024..95bce11 100644
+--- a/drivers/media/platform/meson/vdec/codec_h264.c
++++ b/drivers/media/platform/meson/vdec/codec_h264.c
+@@ -277,11 +277,11 @@ static void codec_h264_set_param(struct amvdec_session *sess)
+ /**
+  * The offset is split in half in 2 different registers
+  */
+-static s32 get_offset_msb(struct amvdec_core *core, int frame_num)
++static u32 get_offset_msb(struct amvdec_core *core, int frame_num)
+ {
+ 	int take_msb = frame_num % 2;
+ 	int reg_offset = (frame_num / 2) * 4;
+-	s32 offset_msb = amvdec_read_dos(core, AV_SCRATCH_A + reg_offset);
++	u32 offset_msb = amvdec_read_dos(core, AV_SCRATCH_A + reg_offset);
+ 
+ 	if (take_msb)
+ 		return offset_msb & 0xffff0000;
+@@ -309,7 +309,7 @@ static void codec_h264_frames_ready(struct amvdec_session *sess, u32 status)
+ 		u32 buffer_index = frame_status & BUF_IDX_MASK;
+ 		u32 pic_struct = (frame_status >> PIC_STRUCT_BIT) &
+ 				 PIC_STRUCT_MASK;
+-		s32 offset = (frame_status >> OFFSET_BIT) & OFFSET_MASK;
++		u32 offset = (frame_status >> OFFSET_BIT) & OFFSET_MASK;
+ 		u32 field = V4L2_FIELD_NONE;
+ 
+ 		/* A buffer decode error means it was decoded,
+diff --git a/drivers/media/platform/meson/vdec/codec_mjpeg.c b/drivers/media/platform/meson/vdec/codec_mjpeg.c
+index c3ec2e9..abea9e3 100644
+--- a/drivers/media/platform/meson/vdec/codec_mjpeg.c
++++ b/drivers/media/platform/meson/vdec/codec_mjpeg.c
+@@ -115,7 +115,7 @@ static irqreturn_t codec_mjpeg_isr(struct amvdec_session *sess)
+ 	struct amvdec_core *core = sess->core;
+ 	u32 reg;
+ 	u32 buffer_index;
+-	s32 offset;
++	u32 offset;
+ 
+ 	amvdec_write_dos(core, ASSIST_MBOX1_CLR_REG, 1);
+ 
+diff --git a/drivers/media/platform/meson/vdec/codec_mpeg12.c b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+index 85e2e80..c83b5f7 100644
+--- a/drivers/media/platform/meson/vdec/codec_mpeg12.c
++++ b/drivers/media/platform/meson/vdec/codec_mpeg12.c
+@@ -149,7 +149,7 @@ static irqreturn_t codec_mpeg12_threaded_isr(struct amvdec_session *sess)
+ 	u32 is_progressive;
+ 	u32 buffer_index;
+ 	u32 field = V4L2_FIELD_NONE;
+-	s32 offset;
++	u32 offset;
+ 
+ 	amvdec_write_dos(core, ASSIST_MBOX1_CLR_REG, 1);
+ 	reg = amvdec_read_dos(core, MREG_FATAL_ERROR);
+diff --git a/drivers/media/platform/meson/vdec/esparser.c b/drivers/media/platform/meson/vdec/esparser.c
+index 734ccbe..247e399 100644
+--- a/drivers/media/platform/meson/vdec/esparser.c
++++ b/drivers/media/platform/meson/vdec/esparser.c
+@@ -47,6 +47,7 @@
+ #define PARSER_ES_CONTROL	0x5c
+ #define PARSER_VIDEO_START_PTR	0x80
+ #define PARSER_VIDEO_END_PTR	0x84
++#define PARSER_VIDEO_WP		0x88
+ #define PARSER_VIDEO_HOLE	0x90
+ 
+ #define SEARCH_PATTERN_LEN	512
+@@ -216,6 +217,21 @@ int esparser_queue_eos(struct amvdec_core *core)
+ 	return ret;
+ }
+ 
++static u32 esparser_get_offset(struct amvdec_session *sess)
++{
++	struct amvdec_core *core = sess->core;
++	u32 offset = amvdec_read_parser(core, PARSER_VIDEO_WP) -
++		     sess->vififo_paddr;
++
++	if (offset < sess->last_offset)
++		sess->wrap_count++;
++
++	sess->last_offset = offset;
++	offset += (sess->wrap_count * sess->vififo_size);
++
++	return offset;
++}
++
+ static int
+ esparser_queue(struct amvdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ {
+@@ -223,11 +239,10 @@ esparser_queue(struct amvdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ 	struct vb2_buffer *vb = &vbuf->vb2_buf;
+ 	struct amvdec_core *core = sess->core;
+ 	struct amvdec_codec_ops *codec_ops = sess->fmt_out->codec_ops;
+-	struct amvdec_ops *vdec_ops = sess->fmt_out->vdec_ops;
+ 	u32 num_dst_bufs = 0;
+ 	u32 payload_size = vb2_get_plane_payload(vb, 0);
+ 	dma_addr_t phy = vb2_dma_contig_plane_dma_addr(vb, 0);
+-	s32 offset = 0;
++	u32 offset;
+ 	u32 pad_size;
+ 
+ 	if (codec_ops->num_pending_bufs)
+@@ -241,13 +256,11 @@ esparser_queue(struct amvdec_session *sess, struct vb2_v4l2_buffer *vbuf)
+ 
+ 	v4l2_m2m_src_buf_remove_by_buf(sess->m2m_ctx, vbuf);
+ 
+-	if (vdec_ops->use_offsets())
+-		offset = amvdec_read_dos(core, VLD_MEM_VIFIFO_WP) -
+-			 sess->vififo_paddr;
++	offset = esparser_get_offset(sess);
+ 
+ 	amvdec_add_ts_reorder(sess, vb->timestamp, offset);
+-	dev_dbg(core->dev, "esparser: Queuing ts = %llu pld_size = %u\n",
+-		vb->timestamp, payload_size);
++	dev_dbg(core->dev, "esparser: ts = %llu pld_size = %u offset = %08X\n",
++		vb->timestamp, payload_size, offset);
+ 
+ 	pad_size = esparser_pad_start_code(vb);
+ 	ret = esparser_write_data(core, phy, payload_size + pad_size);
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 8b82403..1a03539 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -285,6 +285,8 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 
+ 	sess->should_stop = 0;
+ 	sess->keyframe_found = 0;
++	sess->last_offset = 0;
++	sess->wrap_count = 0;
+ 	sess->pixelaspect.numerator = 1;
+ 	sess->pixelaspect.denominator = 1;
+ 	atomic_set(&sess->esparser_queued_bufs, 0);
+diff --git a/drivers/media/platform/meson/vdec/vdec.h b/drivers/media/platform/meson/vdec/vdec.h
+index 92c757d..3748da7 100644
+--- a/drivers/media/platform/meson/vdec/vdec.h
++++ b/drivers/media/platform/meson/vdec/vdec.h
+@@ -34,7 +34,7 @@ struct amvdec_buffer {
+ struct amvdec_timestamp {
+ 	struct list_head list;
+ 	u64 ts;
+-	s32 offset;
++	u32 offset;
+ };
+ 
+ struct amvdec_session;
+@@ -99,7 +99,6 @@ struct amvdec_ops {
+ 	int (*stop)(struct amvdec_session *sess);
+ 	void (*conf_esparser)(struct amvdec_session *sess);
+ 	u32 (*vififo_level)(struct amvdec_session *sess);
+-	int (*use_offsets)(void);
+ };
+ 
+ /**
+@@ -238,6 +237,8 @@ struct amvdec_session {
+ 	spinlock_t ts_spinlock;
+ 
+ 	u64 last_irq_jiffies;
++	u32 last_offset;
++	u32 wrap_count;
+ 
+ 	void *priv;
+ };
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 9c58447..88b8bed 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -223,15 +223,9 @@ static int vdec_1_start(struct amvdec_session *sess)
+ 	return ret;
+ }
+ 
+-static int vdec_1_use_offsets(void)
+-{
+-	return 1;
+-}
+-
+ struct amvdec_ops vdec_1_ops = {
+ 	.start = vdec_1_start,
+ 	.stop = vdec_1_stop,
+ 	.conf_esparser = vdec_1_conf_esparser,
+ 	.vififo_level = vdec_1_vififo_level,
+-	.use_offsets = vdec_1_use_offsets,
+ };
+diff --git a/drivers/media/platform/meson/vdec/vdec_helpers.c b/drivers/media/platform/meson/vdec/vdec_helpers.c
+index 184a098..94b5220 100644
+--- a/drivers/media/platform/meson/vdec/vdec_helpers.c
++++ b/drivers/media/platform/meson/vdec/vdec_helpers.c
+@@ -224,7 +224,7 @@ int amvdec_set_canvases(struct amvdec_session *sess,
+ }
+ EXPORT_SYMBOL_GPL(amvdec_set_canvases);
+ 
+-void amvdec_add_ts_reorder(struct amvdec_session *sess, u64 ts, s32 offset)
++void amvdec_add_ts_reorder(struct amvdec_session *sess, u64 ts, u32 offset)
+ {
+ 	struct amvdec_timestamp *new_ts, *tmp;
+ 	unsigned long flags;
+@@ -350,7 +350,7 @@ EXPORT_SYMBOL_GPL(amvdec_dst_buf_done);
+ 
+ static void amvdec_dst_buf_done_offset(struct amvdec_session *sess,
+ 				       struct vb2_v4l2_buffer *vbuf,
+-				       s32 offset,
++				       u32 offset,
+ 				       u32 field)
+ {
+ 	struct device *dev = sess->core->dev_dec;
+@@ -359,14 +359,11 @@ static void amvdec_dst_buf_done_offset(struct amvdec_session *sess,
+ 	u64 timestamp = 0;
+ 	unsigned long flags;
+ 
+-	/* codec offsets do not wrap around the vififo size */
+-	offset %= sess->vififo_size;
+-
+ 	spin_lock_irqsave(&sess->ts_spinlock, flags);
+ 
+ 	/* Look for our vififo offset to get the corresponding timestamp. */
+ 	list_for_each_entry_safe(tmp, n, &sess->timestamps, list) {
+-		s32 delta = offset - tmp->offset;
++		s64 delta = (s64)offset - tmp->offset;
+ 
+ 		/* Offsets reported by codecs usually differ slightly,
+ 		 * so we need some wiggle room.
+@@ -379,10 +376,8 @@ static void amvdec_dst_buf_done_offset(struct amvdec_session *sess,
+ 
+ 		/* Delete any timestamp entry that appears before our target
+ 		 * (not all src packets/timestamps lead to a frame)
+-		 * Also handle the special case where the vififo wraps around,
+-		 * leading to a big negative value
+ 		 */
+-		if (delta > 0 || delta < -1 * ((s32)sess->vififo_size / 2)) {
++		if (delta > 0 || delta < -1 * (s32)sess->vififo_size) {
+ 			atomic_dec(&sess->esparser_queued_bufs);
+ 			list_del(&tmp->list);
+ 			kfree(tmp);
+@@ -405,7 +400,7 @@ static void amvdec_dst_buf_done_offset(struct amvdec_session *sess,
+ }
+ 
+ void amvdec_dst_buf_done_idx(struct amvdec_session *sess,
+-			     u32 buf_idx, s32 offset, u32 field)
++			     u32 buf_idx, u32 offset, u32 field)
+ {
+ 	struct vb2_v4l2_buffer *vbuf;
+ 	struct device *dev = sess->core->dev_dec;
+diff --git a/drivers/media/platform/meson/vdec/vdec_helpers.h b/drivers/media/platform/meson/vdec/vdec_helpers.h
+index 1539781..cf577e0 100644
+--- a/drivers/media/platform/meson/vdec/vdec_helpers.h
++++ b/drivers/media/platform/meson/vdec/vdec_helpers.h
+@@ -31,7 +31,7 @@ u32 amvdec_am21c_head_size(u32 width, u32 height);
+ u32 amvdec_am21c_size(u32 width, u32 height);
+ 
+ void amvdec_dst_buf_done_idx(struct amvdec_session *sess, u32 buf_idx,
+-			     s32 offset, u32 field);
++			     u32 offset, u32 field);
+ void amvdec_dst_buf_done(struct amvdec_session *sess,
+ 			 struct vb2_v4l2_buffer *vbuf, u32 field);
+ 
+@@ -42,7 +42,7 @@ void amvdec_dst_buf_done(struct amvdec_session *sess,
+  * @ts: timestamp to add
+  * @offset: offset in the VIFIFO where the associated packet was written
+  */
+-void amvdec_add_ts_reorder(struct amvdec_session *sess, u64 ts, s32 offset);
++void amvdec_add_ts_reorder(struct amvdec_session *sess, u64 ts, u32 offset);
+ void amvdec_remove_ts(struct amvdec_session *sess, u64 ts);
+ 
+ void amvdec_set_par_from_dar(struct amvdec_session *sess,
+diff --git a/drivers/media/platform/meson/vdec/vdec_hevc.c b/drivers/media/platform/meson/vdec/vdec_hevc.c
+index c2b1d6d..8872f58 100644
+--- a/drivers/media/platform/meson/vdec/vdec_hevc.c
++++ b/drivers/media/platform/meson/vdec/vdec_hevc.c
+@@ -183,15 +183,9 @@ static int vdec_hevc_start(struct amvdec_session *sess)
+ 	return ret;
+ }
+ 
+-static int vdec_hevc_use_offsets(void)
+-{
+-	return 0;
+-}
+-
+ struct amvdec_ops vdec_hevc_ops = {
+ 	.start = vdec_hevc_start,
+ 	.stop = vdec_hevc_stop,
+ 	.conf_esparser = vdec_hevc_conf_esparser,
+ 	.vififo_level = vdec_hevc_vififo_level,
+-	.use_offsets = vdec_hevc_use_offsets,
+ };
+\ No newline at end of file

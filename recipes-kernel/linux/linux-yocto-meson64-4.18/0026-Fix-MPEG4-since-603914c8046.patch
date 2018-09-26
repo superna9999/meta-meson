@@ -1,0 +1,22 @@
+From 3498c41452492b9801aa3b7b78d81eedd0aab0cb Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Thu, 20 Sep 2018 00:34:49 +0200
+Subject: [PATCH] Fix MPEG4 since 603914c8046
+
+---
+ drivers/media/platform/meson/vdec/vdec_helpers.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec_helpers.c b/drivers/media/platform/meson/vdec/vdec_helpers.c
+index 0f9e7b0..b4a7df4 100644
+--- a/drivers/media/platform/meson/vdec/vdec_helpers.c
++++ b/drivers/media/platform/meson/vdec/vdec_helpers.c
+@@ -414,7 +414,7 @@ void amvdec_dst_buf_done_idx(struct amvdec_session *sess,
+ 		return;
+ 	}
+ 
+-	if (offset >= 0)
++	if (offset != -1)
+ 		amvdec_dst_buf_done_offset(sess, vbuf, offset, field);
+ 	else
+ 		amvdec_dst_buf_done(sess, vbuf, field);

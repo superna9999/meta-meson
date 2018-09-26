@@ -1,0 +1,54 @@
+From f0e989116fe69d40a790152ab6adb4b4dd1b3692 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Thu, 13 Sep 2018 11:06:58 +0200
+Subject: [PATCH] Fix YUV420 output, disable it for H.264
+
+---
+ drivers/media/platform/meson/vdec/vdec_1.c        | 2 ++
+ drivers/media/platform/meson/vdec/vdec_platform.c | 6 +++---
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec_1.c b/drivers/media/platform/meson/vdec/vdec_1.c
+index 81ff6c9..9c58447 100644
+--- a/drivers/media/platform/meson/vdec/vdec_1.c
++++ b/drivers/media/platform/meson/vdec/vdec_1.c
+@@ -208,6 +208,8 @@ static int vdec_1_start(struct amvdec_session *sess)
+ 	/* Enable 2-plane output */
+ 	if (sess->pixfmt_cap == V4L2_PIX_FMT_NV12M)
+ 		amvdec_write_dos_bits(core, MDEC_PIC_DC_CTRL, BIT(17));
++	else
++		amvdec_clear_dos_bits(core, MDEC_PIC_DC_CTRL, BIT(17));
+ 
+ 	/* Enable firmware processor */
+ 	amvdec_write_dos(core, MPSR, 1);
+diff --git a/drivers/media/platform/meson/vdec/vdec_platform.c b/drivers/media/platform/meson/vdec/vdec_platform.c
+index b81b30f..d3214dd 100644
+--- a/drivers/media/platform/meson/vdec/vdec_platform.c
++++ b/drivers/media/platform/meson/vdec/vdec_platform.c
+@@ -75,7 +75,7 @@ static const struct amvdec_format vdec_formats_gxbb[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_h264_ops,
+ 		.firmware_path = "meson/gxbb/vh264_mc",
+-		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, V4L2_PIX_FMT_YUV420M, 0 },
++		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, 0 },
+ 	}, {
+ 		.pixfmt = V4L2_PIX_FMT_MPEG1,
+ 		.min_buffers = 8,
+@@ -159,7 +159,7 @@ static const struct amvdec_format vdec_formats_gxl[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_h264_ops,
+ 		.firmware_path = "meson/gxl/vh264_mc",
+-		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, V4L2_PIX_FMT_YUV420M, 0 },
++		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, 0 },
+ 	}, {
+ 		.pixfmt = V4L2_PIX_FMT_MPEG1,
+ 		.min_buffers = 8,
+@@ -243,7 +243,7 @@ static const struct amvdec_format vdec_formats_gxm[] = {
+ 		.vdec_ops = &vdec_1_ops,
+ 		.codec_ops = &codec_h264_ops,
+ 		.firmware_path = "meson/gxm/vh264_mc",
+-		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, V4L2_PIX_FMT_YUV420M, 0 },
++		.pixfmts_cap = { V4L2_PIX_FMT_NV12M, 0 },
+ 	}, {
+ 		.pixfmt = V4L2_PIX_FMT_MPEG1,
+ 		.min_buffers = 8,

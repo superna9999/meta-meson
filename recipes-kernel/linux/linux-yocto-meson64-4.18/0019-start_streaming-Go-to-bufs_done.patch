@@ -1,0 +1,27 @@
+From b0ecebeb599b722cbd22ac83e813e6fcebb7195a Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Fri, 14 Sep 2018 10:32:55 +0200
+Subject: [PATCH] start_streaming: Go to bufs_done
+
+Don't return instantly -EBUSY if another session starts to stream.
+---
+ drivers/media/platform/meson/vdec/vdec.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 0b9eb2e..62038b2 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -258,8 +258,10 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 	struct vb2_v4l2_buffer *buf;
+ 	int ret;
+ 
+-	if (core->cur_sess)
+-		return -EBUSY;
++	if (core->cur_sess) {
++		ret = -EBUSY;
++		goto bufs_done;
++	}
+ 
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		sess->streamon_out = 1;

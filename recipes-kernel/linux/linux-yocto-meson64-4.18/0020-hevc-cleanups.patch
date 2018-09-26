@@ -1,0 +1,200 @@
+From 7f39d65a8be2ec69ec32316ac05a47a630f1691a Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Fri, 14 Sep 2018 17:04:23 +0200
+Subject: [PATCH] hevc: cleanups
+
+---
+ drivers/media/platform/meson/vdec/codec_hevc.c | 70 +++++++++++++-------------
+ 1 file changed, 34 insertions(+), 36 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/codec_hevc.c b/drivers/media/platform/meson/vdec/codec_hevc.c
+index 5cc3b16..b9fecef 100644
+--- a/drivers/media/platform/meson/vdec/codec_hevc.c
++++ b/drivers/media/platform/meson/vdec/codec_hevc.c
+@@ -279,8 +279,8 @@ struct codec_hevc {
+ 	/* In case of downsampling (decoding with FBC but outputting in NV12M),
+ 	 * we need to allocate additional buffers for FBC.
+ 	 */
+-	 void      *fbc_buffer_vaddr[24];
+-	 dma_addr_t fbc_buffer_paddr[24];
++	void      *fbc_buffer_vaddr[MAX_REF_PIC_NUM];
++	dma_addr_t fbc_buffer_paddr[MAX_REF_PIC_NUM];
+ };
+ 
+ /* Returns 1 if we must use framebuffer compression */
+@@ -600,7 +600,7 @@ static void codec_hevc_setup_buffers_gxl(struct amvdec_session *sess)
+ 
+ 		amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_DATA, buf_y_paddr >> 5);
+ 		if (!codec_hevc_use_fbc(sess)) {
+-			buf_uv_paddr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
++			buf_uv_paddr =vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 1);
+ 			amvdec_write_dos(core, HEVCD_MPP_ANC2AXI_TBL_DATA,
+ 					 buf_uv_paddr >> 5);
+ 		}
+@@ -624,11 +624,14 @@ static void codec_hevc_free_fbc_buffers(struct amvdec_session *sess)
+ {
+ 	struct codec_hevc *hevc = sess->priv;
+ 	struct device *dev = sess->core->dev;
++	u32 am21_size = amvdec_am21c_size(sess->width, sess->height);
+ 	int i;
+ 
+-	for (i = 0; i < 24; ++i)
++	for (i = 0; i < MAX_REF_PIC_NUM; ++i)
+ 		if (hevc->fbc_buffer_vaddr[i]) {
+-			dma_free_coherent(dev, amvdec_am21c_size(sess->width, sess->height), hevc->fbc_buffer_vaddr[i], hevc->fbc_buffer_paddr[i]);
++			dma_free_coherent(dev, am21_size,
++					  hevc->fbc_buffer_vaddr[i],
++					  hevc->fbc_buffer_paddr[i]);
+ 			hevc->fbc_buffer_vaddr[i] = NULL;
+ 		}
+ }
+@@ -638,15 +641,21 @@ static int codec_hevc_alloc_fbc_buffers(struct amvdec_session *sess)
+ 	struct codec_hevc *hevc = sess->priv;
+ 	struct device *dev = sess->core->dev;
+ 	struct v4l2_m2m_buffer *buf;
++	u32 am21_size = amvdec_am21c_size(sess->width, sess->height);
+ 
+ 	v4l2_m2m_for_each_dst_buf(sess->m2m_ctx, buf) {
+ 		u32 idx = buf->vb.vb2_buf.index;
+-		hevc->fbc_buffer_vaddr[idx] = dma_alloc_coherent(dev, amvdec_am21c_size(sess->width, sess->height), &hevc->fbc_buffer_paddr[idx], GFP_KERNEL);
+-		if (!hevc->fbc_buffer_vaddr[idx]) {
++		dma_addr_t paddr;
++		void *vaddr = dma_alloc_coherent(dev, am21_size, &paddr,
++						 GFP_KERNEL);
++		if (!vaddr) {
+ 			dev_err(dev, "Couldn't allocate FBC buffer %u\n", idx);
+ 			codec_hevc_free_fbc_buffers(sess);
+ 			return -ENOMEM;
+ 		}
++
++		hevc->fbc_buffer_vaddr[idx] = vaddr;
++		hevc->fbc_buffer_paddr[idx] = paddr;
+ 	}
+ 
+ 	return 0;
+@@ -781,7 +790,8 @@ static int codec_hevc_start(struct amvdec_session *sess)
+ 	}
+ 
+ 	amvdec_write_dos(core, HEVC_AUX_ADR, hevc->aux_paddr);
+-	amvdec_write_dos(core, HEVC_AUX_DATA_SIZE, (((SIZE_AUX) >> 4) << 16) | 0);
++	amvdec_write_dos(core, HEVC_AUX_DATA_SIZE,
++			 (((SIZE_AUX) >> 4) << 16) | 0);
+ 	mutex_init(&hevc->lock);
+ 	sess->priv = hevc;
+ 
+@@ -835,7 +845,8 @@ static int codec_hevc_stop(struct amvdec_session *sess)
+ 	return 0;
+ }
+ 
+-static struct hevc_frame * codec_hevc_get_frame_by_poc(struct codec_hevc *hevc, u32 poc)
++static struct hevc_frame *
++codec_hevc_get_frame_by_poc(struct codec_hevc *hevc, u32 poc)
+ {
+ 	struct hevc_frame *tmp;
+ 
+@@ -847,7 +858,8 @@ static struct hevc_frame * codec_hevc_get_frame_by_poc(struct codec_hevc *hevc,
+ 	return NULL;
+ }
+ 
+-static struct hevc_frame * codec_hevc_prepare_new_frame(struct amvdec_session *sess)
++static struct hevc_frame *
++codec_hevc_prepare_new_frame(struct amvdec_session *sess)
+ {
+ 	struct vb2_v4l2_buffer *vbuf;
+ 	struct hevc_frame *new_frame = NULL;
+@@ -876,7 +888,8 @@ static struct hevc_frame * codec_hevc_prepare_new_frame(struct amvdec_session *s
+ 	return new_frame;
+ }
+ 
+-static void codec_hevc_set_sao(struct amvdec_session *sess, struct hevc_frame *frame)
++static void
++codec_hevc_set_sao(struct amvdec_session *sess, struct hevc_frame *frame)
+ {
+ 	struct amvdec_core *core = sess->core;
+ 	struct codec_hevc *hevc = sess->priv;
+@@ -930,7 +943,8 @@ static void codec_hevc_set_sao(struct amvdec_session *sess, struct hevc_frame *f
+ 			 (amvdec_get_output_size(sess) / 2));
+ 
+ 	if (frame->cur_slice_idx == 0) {
+-		amvdec_write_dos(core, HEVC_DBLK_CFG2, hevc->width | (hevc->height << 16));
++		amvdec_write_dos(core, HEVC_DBLK_CFG2,
++				 hevc->width | (hevc->height << 16));
+ 
+ 		val = 0;
+ 		if ((misc_flag0 >> PCM_ENABLE_FLAG_BIT) & 0x1)
+@@ -1013,9 +1027,11 @@ static void codec_hevc_set_sao(struct amvdec_session *sess, struct hevc_frame *f
+ 	amvdec_write_dos(core, HEVC_SAO_CTRL0, val_2);
+ 
+ 	amvdec_write_dos(core, HEVC_sao_mem_unit, sao_mem_unit);
+-	amvdec_write_dos(core, HEVC_SAO_ABV, hevc->workspace_paddr + SAO_ABV_OFFSET);
++	amvdec_write_dos(core, HEVC_SAO_ABV,
++			 hevc->workspace_paddr + SAO_ABV_OFFSET);
+ 	amvdec_write_dos(core, HEVC_sao_vb_size, sao_vb_size);
+-	amvdec_write_dos(core, HEVC_SAO_VB, hevc->workspace_paddr + SAO_VB_OFFSET);
++	amvdec_write_dos(core, HEVC_SAO_VB,
++			 hevc->workspace_paddr + SAO_VB_OFFSET);
+ }
+ 
+ static dma_addr_t codec_hevc_get_frame_mv_paddr(struct codec_hevc *hevc,
+@@ -1121,7 +1137,8 @@ static void codec_hevc_set_mpred(struct amvdec_session *sess,
+ 	codec_hevc_set_mpred_ctrl(core, hevc);
+ 	codec_hevc_set_mpred_mv(core, hevc, frame, col_frame);
+ 
+-	amvdec_write_dos(core, HEVC_MPRED_PIC_SIZE, hevc->width | (hevc->height << 16));
++	amvdec_write_dos(core, HEVC_MPRED_PIC_SIZE,
++			 hevc->width | (hevc->height << 16));
+ 
+ 	val = ((hevc->lcu_x_num - 1) | (hevc->lcu_y_num - 1) << 16);
+ 	amvdec_write_dos(core, HEVC_MPRED_PIC_SIZE_LCU, val);
+@@ -1383,10 +1400,8 @@ static int codec_hevc_process_segment(struct amvdec_session *sess)
+ 	return 0;
+ }
+ 
+-static int codec_hevc_process_rpm(struct amvdec_session *sess)
++static void codec_hevc_process_rpm(struct codec_hevc *hevc)
+ {
+-	struct amvdec_core *core = sess->core;
+-	struct codec_hevc *hevc = sess->priv;
+ 	union rpm_param *rpm_param = &hevc->rpm_param;
+ 	u32 lcu_x_num_div, lcu_y_num_div;
+ 
+@@ -1396,15 +1411,6 @@ static int codec_hevc_process_rpm(struct amvdec_session *sess)
+ 	hevc->width = rpm_param->p.pic_width_in_luma_samples;
+ 	hevc->height = rpm_param->p.pic_height_in_luma_samples;
+ 
+-	/*if (hevc->width  != sess->width ||
+-	    hevc->height != sess->height) {
+-		dev_err(sess->core->dev_dec,
+-			"Size mismatch: bitstream %ux%u ; driver %ux%u\n",
+-			hevc->width, hevc->height,
+-			sess->width, sess->height);
+-		return -EINVAL;
+-	}*/
+-
+ 	hevc->lcu_size = 1 << (rpm_param->p.log2_min_coding_block_size_minus3 +
+ 		3 + rpm_param->p.log2_diff_max_min_coding_block_size);
+ 
+@@ -1413,11 +1419,6 @@ static int codec_hevc_process_rpm(struct amvdec_session *sess)
+ 	hevc->lcu_x_num = ((hevc->width % hevc->lcu_size) == 0) ? lcu_x_num_div : lcu_x_num_div + 1;
+ 	hevc->lcu_y_num = ((hevc->height % hevc->lcu_size) == 0) ? lcu_y_num_div : lcu_y_num_div + 1;
+ 	hevc->lcu_total = hevc->lcu_x_num * hevc->lcu_y_num;
+-
+-	dev_dbg(core->dev, "lcu_size = %u ; lcu_x_num = %u; lcu_y_num = %u",
+-		hevc->lcu_size, hevc->lcu_x_num, hevc->lcu_y_num);
+-
+-	return 0;
+ }
+ 
+ /* The RPM section within the workspace contains
+@@ -1454,10 +1455,7 @@ static irqreturn_t codec_hevc_threaded_isr(struct amvdec_session *sess)
+ 
+ 	sess->keyframe_found = 1;
+ 	codec_hevc_fetch_rpm(sess);
+-	if (codec_hevc_process_rpm(sess)) {
+-		amvdec_abort(sess);
+-		goto unlock;
+-	}
++	codec_hevc_process_rpm(hevc);
+ 
+ 	if (!hevc->is_buflist_init) {
+ 		if (codec_hevc_setup_buffers(sess)) {

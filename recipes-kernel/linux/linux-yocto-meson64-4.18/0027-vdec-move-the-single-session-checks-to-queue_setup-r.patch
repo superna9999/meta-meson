@@ -1,0 +1,113 @@
+From 7da431f1f1169910afd9d0ba6a1fe4805b9ec7a4 Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Thu, 20 Sep 2018 18:45:27 +0200
+Subject: [PATCH] vdec: move the single session checks to
+ queue_setup/reqbufs/close
+
+Instead of start/stop streaming, use queue_setup and vidioc_reqbufs to
+check and set the current decoding session.
+
+Also clear it in .close() in case userspace didn't  call vidioc_reqbufs
+before exiting.
+---
+ drivers/media/platform/meson/vdec/vdec.c | 36 ++++++++++++++++++++++++--------
+ 1 file changed, 27 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 233250d..c3d7634 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -161,6 +161,7 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 		unsigned int sizes[], struct device *alloc_devs[])
+ {
+ 	struct amvdec_session *sess = vb2_get_drv_priv(q);
++	struct amvdec_core *core = sess->core;
+ 	const struct amvdec_format *fmt_out = sess->fmt_out;
+ 	u32 output_size = amvdec_get_output_size(sess);
+ 	u32 am21c_size = amvdec_am21c_size(sess->width, sess->height);
+@@ -199,9 +200,13 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 		return 0;
+ 	}
+ 
++	/* Only allow one session at a time */
++	if (core->cur_sess && core->cur_sess != sess)
++		return -EBUSY;
++
+ 	switch (q->type) {
+ 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+-		sizes[0] = amvdec_get_output_size(sess);
++		sizes[0] = output_size;
+ 		*num_planes = 1;
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+@@ -260,11 +265,6 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 	struct vb2_v4l2_buffer *buf;
+ 	int ret;
+ 
+-	if (core->cur_sess && core->cur_sess != sess) {
+-		ret = -EBUSY;
+-		goto bufs_done;
+-	}
+-
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+ 		sess->streamon_out = 1;
+ 	else
+@@ -354,7 +354,6 @@ static void vdec_reset_bufs_recycle(struct amvdec_session *sess)
+ static void vdec_stop_streaming(struct vb2_queue *q)
+ {
+ 	struct amvdec_session *sess = vb2_get_drv_priv(q);
+-	struct amvdec_core *core = sess->core;
+ 	struct vb2_v4l2_buffer *buf;
+ 
+ 	if (sess->streamon_out && sess->streamon_cap) {
+@@ -369,7 +368,6 @@ static void vdec_stop_streaming(struct vb2_queue *q)
+ 		vdec_reset_bufs_recycle(sess);
+ 		kfree(sess->priv);
+ 		sess->priv = NULL;
+-		core->cur_sess = NULL;
+ 	}
+ 
+ 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+@@ -720,6 +718,24 @@ static int vdec_cropcap(struct file *file, void *fh,
+ 	return 0;
+ }
+ 
++int vdec_reqbufs(struct file *file, void *priv, struct v4l2_requestbuffers *rb)
++{
++	struct amvdec_session *sess =
++		container_of(file->private_data, struct amvdec_session, fh);
++	struct amvdec_core *core = sess->core;
++	int ret;
++
++	ret = v4l2_m2m_ioctl_reqbufs(file, priv, rb);
++	if (ret)
++		return ret;
++
++	if (rb->count)
++		core->cur_sess = sess;
++	else
++		core->cur_sess = NULL;
++
++	return ret;
++}
+ static const struct v4l2_ioctl_ops vdec_ioctl_ops = {
+ 	.vidioc_querycap = vdec_querycap,
+ 	.vidioc_enum_fmt_vid_cap_mplane = vdec_enum_fmt,
+@@ -730,7 +746,7 @@ static const struct v4l2_ioctl_ops vdec_ioctl_ops = {
+ 	.vidioc_g_fmt_vid_out_mplane = vdec_g_fmt,
+ 	.vidioc_try_fmt_vid_cap_mplane = vdec_try_fmt,
+ 	.vidioc_try_fmt_vid_out_mplane = vdec_try_fmt,
+-	.vidioc_reqbufs = v4l2_m2m_ioctl_reqbufs,
++	.vidioc_reqbufs = vdec_reqbufs,
+ 	.vidioc_querybuf = v4l2_m2m_ioctl_querybuf,
+ 	.vidioc_create_bufs = v4l2_m2m_ioctl_create_bufs,
+ 	.vidioc_prepare_buf = v4l2_m2m_ioctl_prepare_buf,
+@@ -854,6 +870,8 @@ static int vdec_close(struct file *file)
+ 
+ 	mutex_destroy(&sess->lock);
+ 	mutex_destroy(&sess->bufs_recycle_lock);
++	if (sess->core->cur_sess == sess)
++		sess->core->cur_sess = NULL;
+ 
+ 	kfree(sess);
+ 

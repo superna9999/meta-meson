@@ -1,0 +1,33 @@
+From 7782e0c670324e2d92d916bab72282063aab815d Mon Sep 17 00:00:00 2001
+From: Maxime Jourdan <mjourdan@baylibre.com>
+Date: Mon, 17 Sep 2018 21:18:52 +0200
+Subject: [PATCH] vdec: override min_buffers_needed in queue_setup
+
+We always need all the capture buffers to be queued before we start
+streaming.
+---
+ drivers/media/platform/meson/vdec/vdec.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/meson/vdec/vdec.c b/drivers/media/platform/meson/vdec/vdec.c
+index 62038b2..8b82403 100644
+--- a/drivers/media/platform/meson/vdec/vdec.c
++++ b/drivers/media/platform/meson/vdec/vdec.c
+@@ -225,6 +225,8 @@ static int vdec_queue_setup(struct vb2_queue *q,
+ 		}
+ 		*num_buffers = min(max(*num_buffers, fmt_out->min_buffers),
+ 				   fmt_out->max_buffers);
++		/* The HW needs all buffers to be configured during startup */
++		q->min_buffers_needed = *num_buffers;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -258,7 +260,7 @@ static int vdec_start_streaming(struct vb2_queue *q, unsigned int count)
+ 	struct vb2_v4l2_buffer *buf;
+ 	int ret;
+ 
+-	if (core->cur_sess) {
++	if (core->cur_sess && core->cur_sess != sess) {
+ 		ret = -EBUSY;
+ 		goto bufs_done;
+ 	}
