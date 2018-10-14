@@ -39,6 +39,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
            file://0027-ARM64-dts-meson-gx-add-vdec-entry.patch \
            file://0001-libretech-cc-disable-CVBS-connector.patch \
            file://0001-ARM64-dts-meson-add-vdec-entries.patch \
+           file://0001-clk-meson-gxbb-set-fclk_div3-as-CLK_IS_CRITICAL.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
