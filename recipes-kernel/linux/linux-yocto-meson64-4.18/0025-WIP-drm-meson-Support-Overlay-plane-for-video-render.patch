@@ -1,4 +1,4 @@
-From 5d0ab03232cdda74b9eb4ce283e98aa60c40b0c9 Mon Sep 17 00:00:00 2001
+From a4282004408d7162e86b4c53fc0d20d45796608a Mon Sep 17 00:00:00 2001
 From: Neil Armstrong <narmstrong@baylibre.com>
 Date: Thu, 2 Aug 2018 10:00:01 +0200
 Subject: [PATCH] [WIP] drm/meson: Support Overlay plane for video rendering
@@ -9,21 +9,21 @@ This Overlay plane support various YUV layouts and a non-alpha RGB32
 layout.
 ---
  drivers/gpu/drm/meson/Makefile          |   2 +-
- drivers/gpu/drm/meson/meson_crtc.c      | 170 ++++++++-
+ drivers/gpu/drm/meson/meson_crtc.c      | 172 ++++++-
  drivers/gpu/drm/meson/meson_drv.c       |  14 +
  drivers/gpu/drm/meson/meson_drv.h       |  52 +++
- drivers/gpu/drm/meson/meson_overlay.c   | 595 ++++++++++++++++++++++++++++++++
+ drivers/gpu/drm/meson/meson_overlay.c   | 595 ++++++++++++++++++++++++
  drivers/gpu/drm/meson/meson_overlay.h   |  14 +
  drivers/gpu/drm/meson/meson_registers.h |   3 +
  drivers/gpu/drm/meson/meson_viu.c       |  15 +
- drivers/gpu/drm/meson/meson_vpp.c       |  44 ++-
+ drivers/gpu/drm/meson/meson_vpp.c       |  44 +-
  drivers/soc/amlogic/meson-gx-pwrc-vpu.c |   8 +-
- 10 files changed, 910 insertions(+), 7 deletions(-)
+ 10 files changed, 912 insertions(+), 7 deletions(-)
  create mode 100644 drivers/gpu/drm/meson/meson_overlay.c
  create mode 100644 drivers/gpu/drm/meson/meson_overlay.h
 
 diff --git a/drivers/gpu/drm/meson/Makefile b/drivers/gpu/drm/meson/Makefile
-index bd67429..d4ea82f 100644
+index bd67429185ff7..d4ea82fc493b6 100644
 --- a/drivers/gpu/drm/meson/Makefile
 +++ b/drivers/gpu/drm/meson/Makefile
 @@ -1,5 +1,5 @@
@@ -34,7 +34,7 @@ index bd67429..d4ea82f 100644
  obj-$(CONFIG_DRM_MESON) += meson-drm.o
  obj-$(CONFIG_DRM_MESON_DW_HDMI) += meson_dw_hdmi.o
 diff --git a/drivers/gpu/drm/meson/meson_crtc.c b/drivers/gpu/drm/meson/meson_crtc.c
-index 7c8ad06..90c826b 100644
+index 1ca9c6c45f9b9..a4b9463f8125a 100644
 --- a/drivers/gpu/drm/meson/meson_crtc.c
 +++ b/drivers/gpu/drm/meson/meson_crtc.c
 @@ -25,6 +25,7 @@
@@ -56,7 +56,12 @@ index 7c8ad06..90c826b 100644
  	writel_bits_relaxed(VPP_POSTBLEND_ENABLE, VPP_POSTBLEND_ENABLE,
  			    priv->io_base + _REG(VPP_MISC));
  
-@@ -118,8 +123,12 @@ static void meson_crtc_atomic_disable(struct drm_crtc *crtc,
+@@ -109,11 +114,17 @@ static void meson_crtc_atomic_disable(struct drm_crtc *crtc,
+ 	struct meson_crtc *meson_crtc = to_meson_crtc(crtc);
+ 	struct meson_drm *priv = meson_crtc->priv;
+ 
++	DRM_DEBUG_DRIVER("\n");
++
  	priv->viu.osd1_enabled = false;
  	priv->viu.osd1_commit = false;
  
@@ -70,7 +75,7 @@ index 7c8ad06..90c826b 100644
  			    priv->io_base + _REG(VPP_MISC));
  
  	if (crtc->state->event && !crtc->state->active) {
-@@ -154,6 +163,7 @@ static void meson_crtc_atomic_flush(struct drm_crtc *crtc,
+@@ -148,6 +159,7 @@ static void meson_crtc_atomic_flush(struct drm_crtc *crtc,
  	struct meson_drm *priv = meson_crtc->priv;
  
  	priv->viu.osd1_commit = true;
@@ -78,7 +83,7 @@ index 7c8ad06..90c826b 100644
  }
  
  static const struct drm_crtc_helper_funcs meson_crtc_helper_funcs = {
-@@ -210,6 +220,164 @@ void meson_crtc_irq(struct meson_drm *priv)
+@@ -204,6 +216,164 @@ void meson_crtc_irq(struct meson_drm *priv)
  		priv->viu.osd1_commit = false;
  	}
  
@@ -87,20 +92,20 @@ index 7c8ad06..90c826b 100644
 +
 +		switch (priv->viu.vd1_planes) {
 +		case 3:
-+			priv->canvas_ops->setup(priv->canvas_id_vd1_2,
++			meson_canvas_config(priv->canvas, priv->canvas_id_vd1_2,
 +				   priv->viu.vd1_addr2, priv->viu.vd1_stride2,
 +				   priv->viu.vd1_height2, MESON_CANVAS_WRAP_NONE,
-+				   MESON_CANVAS_BLKMODE_LINEAR, 7);
++				   MESON_CANVAS_BLKMODE_LINEAR, MESON_CANVAS_ENDIAN_SWAP64);
 +		case 2:
-+			priv->canvas_ops->setup(priv->canvas_id_vd1_1,
++			meson_canvas_config(priv->canvas, priv->canvas_id_vd1_1,
 +				   priv->viu.vd1_addr1, priv->viu.vd1_stride1,
 +				   priv->viu.vd1_height1, MESON_CANVAS_WRAP_NONE,
-+				   MESON_CANVAS_BLKMODE_LINEAR, 7);
++				   MESON_CANVAS_BLKMODE_LINEAR, MESON_CANVAS_ENDIAN_SWAP64);
 +		case 1:
-+			priv->canvas_ops->setup(priv->canvas_id_vd1_0,
++			meson_canvas_config(priv->canvas, priv->canvas_id_vd1_0,
 +				   priv->viu.vd1_addr0, priv->viu.vd1_stride0,
 +				   priv->viu.vd1_height0, MESON_CANVAS_WRAP_NONE,
-+				   MESON_CANVAS_BLKMODE_LINEAR, 7);
++				   MESON_CANVAS_BLKMODE_LINEAR, MESON_CANVAS_ENDIAN_SWAP64);
 +		};
 +
 +		writel_relaxed(priv->viu.vd1_if0_gen_reg,
@@ -244,10 +249,10 @@ index 7c8ad06..90c826b 100644
  
  	spin_lock_irqsave(&priv->drm->event_lock, flags);
 diff --git a/drivers/gpu/drm/meson/meson_drv.c b/drivers/gpu/drm/meson/meson_drv.c
-index de46833..2a002cc 100644
+index fb5b0e3c5efce..04b634eade20d 100644
 --- a/drivers/gpu/drm/meson/meson_drv.c
 +++ b/drivers/gpu/drm/meson/meson_drv.c
-@@ -42,6 +42,7 @@
+@@ -41,6 +41,7 @@
  
  #include "meson_drv.h"
  #include "meson_plane.h"
@@ -255,23 +260,23 @@ index de46833..2a002cc 100644
  #include "meson_crtc.h"
  #include "meson_venc_cvbs.h"
  
-@@ -241,6 +242,15 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
- 	ret = priv->canvas_ops->alloc(&priv->canvas_id_osd1);
+@@ -222,6 +223,15 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
+ 	}
+ 
+ 	ret = meson_canvas_alloc(priv->canvas, &priv->canvas_id_osd1);
++	if (ret)
++		goto free_drm;
++	ret = meson_canvas_alloc(priv->canvas, &priv->canvas_id_vd1_0);
++	if (ret)
++		goto free_drm;
++	ret = meson_canvas_alloc(priv->canvas, &priv->canvas_id_vd1_1);
++	if (ret)
++		goto free_drm;
++	ret = meson_canvas_alloc(priv->canvas, &priv->canvas_id_vd1_2);
  	if (ret)
  		goto free_drm;
-+	ret = priv->canvas_ops->alloc(&priv->canvas_id_vd1_0);
-+	if (ret)
-+		goto free_drm;
-+	ret = priv->canvas_ops->alloc(&priv->canvas_id_vd1_1);
-+	if (ret)
-+		goto free_drm;
-+	ret = priv->canvas_ops->alloc(&priv->canvas_id_vd1_2);
-+	if (ret)
-+		goto free_drm;
  
- 	priv->vsync_irq = platform_get_irq(pdev, 0);
- 
-@@ -278,6 +288,10 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
+@@ -261,6 +271,10 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
  	if (ret)
  		goto free_drm;
  
@@ -283,16 +288,16 @@ index de46833..2a002cc 100644
  	if (ret)
  		goto free_drm;
 diff --git a/drivers/gpu/drm/meson/meson_drv.h b/drivers/gpu/drm/meson/meson_drv.h
-index dfea959..e9305d7 100644
+index 9e902a6df7843..cc2288cc3858e 100644
 --- a/drivers/gpu/drm/meson/meson_drv.h
 +++ b/drivers/gpu/drm/meson/meson_drv.h
 @@ -33,11 +33,15 @@ struct meson_drm {
  
- 	struct meson_canvas_platform_data *canvas_ops;
- 	uint8_t canvas_id_osd1;
-+	uint8_t canvas_id_vd1_0;
-+	uint8_t canvas_id_vd1_1;
-+	uint8_t canvas_id_vd1_2;
+ 	struct meson_canvas *canvas;
+ 	u8 canvas_id_osd1;
++	u8 canvas_id_vd1_0;
++	u8 canvas_id_vd1_1;
++	u8 canvas_id_vd1_2;
  
  	struct drm_device *drm;
  	struct drm_crtc *crtc;
@@ -359,7 +364,7 @@ index dfea959..e9305d7 100644
  	struct {
 diff --git a/drivers/gpu/drm/meson/meson_overlay.c b/drivers/gpu/drm/meson/meson_overlay.c
 new file mode 100644
-index 0000000..ea7261a
+index 0000000000000..01fee0321dc16
 --- /dev/null
 +++ b/drivers/gpu/drm/meson/meson_overlay.c
 @@ -0,0 +1,595 @@
@@ -571,7 +576,7 @@ index 0000000..ea7261a
 +
 +	/* Vertical */
 +
-+	start = video_top + video_height / 2 - ((h_in << 17) / ratio_x);
++	start = video_top + video_height / 2 - ((h_in << 17) / ratio_y);
 +	end = (h_in << 18) / ratio_y + start - 1;
 +
 +	if (video_top < 0 && start < 0)
@@ -960,7 +965,7 @@ index 0000000..ea7261a
 +}
 diff --git a/drivers/gpu/drm/meson/meson_overlay.h b/drivers/gpu/drm/meson/meson_overlay.h
 new file mode 100644
-index 0000000..0fd63da
+index 0000000000000..0fd63dabcb964
 --- /dev/null
 +++ b/drivers/gpu/drm/meson/meson_overlay.h
 @@ -0,0 +1,14 @@
@@ -979,7 +984,7 @@ index 0000000..0fd63da
 +
 +#endif /* __MESON_OVERLAY_H */
 diff --git a/drivers/gpu/drm/meson/meson_registers.h b/drivers/gpu/drm/meson/meson_registers.h
-index bca8714..5c7e02c 100644
+index bca87143e5488..5c7e02c703bc7 100644
 --- a/drivers/gpu/drm/meson/meson_registers.h
 +++ b/drivers/gpu/drm/meson/meson_registers.h
 @@ -286,6 +286,7 @@
@@ -1007,7 +1012,7 @@ index bca8714..5c7e02c 100644
  #define VPP_FIFO_STATUS 0x1d28
  #define VPP_SMOKE_CTRL 0x1d29
 diff --git a/drivers/gpu/drm/meson/meson_viu.c b/drivers/gpu/drm/meson/meson_viu.c
-index 5b48c4c..a423e7a 100644
+index 5b48c4c0985b5..a423e7a61bf2c 100644
 --- a/drivers/gpu/drm/meson/meson_viu.c
 +++ b/drivers/gpu/drm/meson/meson_viu.c
 @@ -328,6 +328,21 @@ void meson_viu_init(struct meson_drm *priv)
@@ -1033,7 +1038,7 @@ index 5b48c4c..a423e7a 100644
  	priv->viu.osd1_commit = false;
  	priv->viu.osd1_interlace = false;
 diff --git a/drivers/gpu/drm/meson/meson_vpp.c b/drivers/gpu/drm/meson/meson_vpp.c
-index 27356f8..5dc24a9 100644
+index 27356f81a0abe..5dc24a99e978b 100644
 --- a/drivers/gpu/drm/meson/meson_vpp.c
 +++ b/drivers/gpu/drm/meson/meson_vpp.c
 @@ -122,6 +122,31 @@ static void meson_vpp_write_scaling_filter_coefs(struct meson_drm *priv,
@@ -1105,7 +1110,7 @@ index 27356f8..5dc24a9 100644
 +						true);
  }
 diff --git a/drivers/soc/amlogic/meson-gx-pwrc-vpu.c b/drivers/soc/amlogic/meson-gx-pwrc-vpu.c
-index 6289965..05421d0 100644
+index 6289965c42e98..05421d029dff9 100644
 --- a/drivers/soc/amlogic/meson-gx-pwrc-vpu.c
 +++ b/drivers/soc/amlogic/meson-gx-pwrc-vpu.c
 @@ -54,12 +54,12 @@ static int meson_gx_pwrc_vpu_power_off(struct generic_pm_domain *genpd)
