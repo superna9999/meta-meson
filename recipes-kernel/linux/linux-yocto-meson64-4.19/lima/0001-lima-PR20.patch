@@ -1,0 +1,29 @@
+From 039c482ba031a864074bcdd29773311b6ce901ce Mon Sep 17 00:00:00 2001
+From: Koen Kooi <koen@dominion.thruhere.net>
+Date: Wed, 7 Nov 2018 15:42:14 +0100
+Subject: [PATCH] lima: PR20
+
+Signed-off-by: Koen Kooi <koen@dominion.thruhere.net>
+---
+ drivers/gpu/drm/lima/lima_sched.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/lima/lima_sched.c b/drivers/gpu/drm/lima/lima_sched.c
+index d09aae4..7635cfb 100644
+--- a/drivers/gpu/drm/lima/lima_sched.c
++++ b/drivers/gpu/drm/lima/lima_sched.c
+@@ -128,8 +128,10 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
+ 	int i, new_dep = 4;
+ 
+ 	/* same context's fence is definitly earlier then this task */
+-	if (fence->context == task->base.s_fence->finished.context)
++	if (fence->context == task->base.s_fence->finished.context) {
++		dma_fence_put(fence);
+ 		return 0;
++	}
+ 
+ 	if (task->dep && task->num_dep == task->max_dep)
+ 		new_dep = task->max_dep * 2;
+-- 
+2.0.1
+
