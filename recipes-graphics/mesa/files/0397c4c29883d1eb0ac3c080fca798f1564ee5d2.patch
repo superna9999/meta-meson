@@ -1,0 +1,156 @@
+From 0397c4c29883d1eb0ac3c080fca798f1564ee5d2 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Wed, 31 Oct 2018 18:11:23 +0100
+Subject: [PATCH] WIP: Add gl_FragCoord
+
+Imho this is still not correct, but at least shows some output with glmark's
+conditionals scene.
+---
+ src/gallium/drivers/lima/ir/pp/codegen.c       | 11 +++++++++--
+ src/gallium/drivers/lima/ir/pp/lower.c         |  2 +-
+ src/gallium/drivers/lima/ir/pp/nir.c           | 12 ++++++++++++
+ src/gallium/drivers/lima/ir/pp/node.c          |  7 +++++++
+ src/gallium/drivers/lima/ir/pp/node_to_instr.c |  7 ++++++-
+ src/gallium/drivers/lima/ir/pp/ppir.h          |  1 +
+ src/gallium/drivers/lima/lima_screen.c         |  3 +++
+ 7 files changed, 39 insertions(+), 4 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/ir/pp/codegen.c b/src/gallium/drivers/lima/ir/pp/codegen.c
+index 766b9bc367..c369f15233 100644
+--- a/src/gallium/drivers/lima/ir/pp/codegen.c
++++ b/src/gallium/drivers/lima/ir/pp/codegen.c
+@@ -54,7 +54,9 @@ static void ppir_codegen_encode_varying(ppir_node *node, void *code)
+    int num_components = load->num_components;
+ 
+    if (num_components) {
+-      assert(node->op == ppir_op_load_varying || node->op == ppir_op_load_coords);
++      assert(node->op == ppir_op_load_varying ||
++             node->op == ppir_op_load_coords ||
++             node->op == ppir_op_load_fragcoords);
+ 
+       f->imm.dest = index >> 2;
+       f->imm.mask = dest->write_mask << (index & 0x3);
+@@ -67,9 +69,14 @@ static void ppir_codegen_encode_varying(ppir_node *node, void *code)
+          f->imm.index = load->index >> 2;
+       else
+          f->imm.index = load->index >> alignment;
++
++      if (node->op == ppir_op_load_fragcoords) {
++         f->imm.source_type = 2;
++         f->imm.perspective = 3;
++      }
+    }
+    else {
+-      assert(node->op == ppir_op_load_coords);
++      assert(node->op == ppir_op_load_coords || node->op == ppir_op_load_fragcoords);
+ 
+       f->reg.dest = index >> 2;
+       f->reg.mask = dest->write_mask << (index & 0x3);
+diff --git a/src/gallium/drivers/lima/ir/pp/lower.c b/src/gallium/drivers/lima/ir/pp/lower.c
+index 3892bfcecf..b5f8123886 100644
+--- a/src/gallium/drivers/lima/ir/pp/lower.c
++++ b/src/gallium/drivers/lima/ir/pp/lower.c
+@@ -270,7 +270,7 @@ static bool ppir_lower_texture(ppir_block *block, ppir_node *node)
+          /* If ldtex is the only successor of load_varying node
+           * we're good. Just change load_varying op type to load_coords.
+           */
+-         if (ppir_node_has_single_succ(pred)) {
++      if (ppir_node_has_single_succ(pred)) {
+             pred->op = ppir_op_load_coords;
+             return true;
+          }
+diff --git a/src/gallium/drivers/lima/ir/pp/nir.c b/src/gallium/drivers/lima/ir/pp/nir.c
+index 3c22857d08..9290b5e070 100644
+--- a/src/gallium/drivers/lima/ir/pp/nir.c
++++ b/src/gallium/drivers/lima/ir/pp/nir.c
+@@ -223,6 +223,18 @@ static ppir_node *ppir_emit_intrinsic(ppir_block *block, nir_instr *ni)
+       lnode->index = nir_intrinsic_base(instr) * 4 + nir_intrinsic_component(instr);
+       return &lnode->node;
+ 
++   case nir_intrinsic_load_frag_coord:
++      if (!instr->dest.is_ssa)
++         mask = u_bit_consecutive(0, instr->num_components);
++
++      lnode = ppir_node_create_dest(block, ppir_op_load_fragcoords, &instr->dest, mask);
++      if (!lnode)
++         return NULL;
++
++      lnode->num_components = instr->num_components;
++      lnode->index = nir_intrinsic_base(instr);
++      return &lnode->node;
++
+    case nir_intrinsic_load_uniform:
+       if (!instr->dest.is_ssa)
+          mask = u_bit_consecutive(0, instr->num_components);
+diff --git a/src/gallium/drivers/lima/ir/pp/node.c b/src/gallium/drivers/lima/ir/pp/node.c
+index 5a91f4c0d9..6cd88dc4b5 100644
+--- a/src/gallium/drivers/lima/ir/pp/node.c
++++ b/src/gallium/drivers/lima/ir/pp/node.c
+@@ -219,6 +219,13 @@ const ppir_op_info ppir_op_infos[] = {
+          PPIR_INSTR_SLOT_VARYING, PPIR_INSTR_SLOT_END
+       },
+    },
++   [ppir_op_load_fragcoords] = {
++      .name = "ld_fragcoords",
++      .type = ppir_node_type_load,
++      .slots = (int []) {
++         PPIR_INSTR_SLOT_VARYING, PPIR_INSTR_SLOT_END
++      },
++   },
+    [ppir_op_load_uniform] = {
+       .name = "ld_uni",
+       .type = ppir_node_type_load,
+diff --git a/src/gallium/drivers/lima/ir/pp/node_to_instr.c b/src/gallium/drivers/lima/ir/pp/node_to_instr.c
+index 43ced57cdd..65d09394d4 100644
+--- a/src/gallium/drivers/lima/ir/pp/node_to_instr.c
++++ b/src/gallium/drivers/lima/ir/pp/node_to_instr.c
+@@ -168,7 +168,8 @@ static bool insert_to_each_succ_instr(ppir_block *block, ppir_node *node)
+       dup->instr_pos = node->instr_pos;
+       ppir_node_replace_pred(dep, dup);
+ 
+-      if (node->op == ppir_op_load_uniform) {
++      if (node->op == ppir_op_load_uniform ||
++          node->op == ppir_op_load_fragcoords) {
+          ppir_load_node *load = ppir_node_to_load(node);
+          ppir_load_node *dup_load = ppir_node_to_load(dup);
+          dup_load->dest = load->dest;
+@@ -227,6 +228,10 @@ static bool ppir_do_node_to_instr(ppir_block *block, ppir_node *node)
+          if (!create_new_instr(block, node))
+             return false;
+       }
++      else if (node->op == ppir_op_load_fragcoords) {
++         if (!insert_to_each_succ_instr(block, node))
++            return false;
++      }
+       else if (node->op == ppir_op_load_coords) {
+          ppir_node *ldtex = ppir_node_first_succ(node);
+          if (!insert_to_load_tex(block, node, ldtex))
+diff --git a/src/gallium/drivers/lima/ir/pp/ppir.h b/src/gallium/drivers/lima/ir/pp/ppir.h
+index bcc335ac38..cd94076755 100644
+--- a/src/gallium/drivers/lima/ir/pp/ppir.h
++++ b/src/gallium/drivers/lima/ir/pp/ppir.h
+@@ -101,6 +101,7 @@ typedef enum {
+    ppir_op_load_uniform,
+    ppir_op_load_varying,
+    ppir_op_load_coords,
++   ppir_op_load_fragcoords,
+    ppir_op_load_texture,
+ 
+    ppir_op_store_temp,
+diff --git a/src/gallium/drivers/lima/lima_screen.c b/src/gallium/drivers/lima/lima_screen.c
+index 8fea9f09c3..d21859cda0 100644
+--- a/src/gallium/drivers/lima/lima_screen.c
++++ b/src/gallium/drivers/lima/lima_screen.c
+@@ -123,6 +123,9 @@ lima_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_TGSI_FS_COORD_PIXEL_CENTER_HALF_INTEGER:
+       return 1;
+ 
++   case PIPE_CAP_TGSI_FS_POSITION_IS_SYSVAL:
++      return 1;
++
+    case PIPE_CAP_MAX_TEXTURE_2D_LEVELS:
+       return LIMA_MAX_MIP_LEVELS;
+ 
+-- 
+2.18.1
+

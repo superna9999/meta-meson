@@ -8,10 +8,11 @@ SRC_URI = "git://gitlab.freedesktop.org/lima/mesa.git;protocol=https;branch=lima
            file://0003-winsys-svga-drm-Include-sys-types.h.patch \
            file://0004-hardware-gloat.patch \
            file://0005-Properly-get-LLVM-version-when-using-LLVM-Git-releas.patch \
+           file://0001-lima-fix-multi-triangle-index-draw-hang.patch \
            "
 
 PV = "18.2.0+git${SRCPV}"
-SRCREV = "e7c1c3101566ceb65717bfb695d1ccd2b66b7383"
+SRCREV = "c6861de4f8338f1a382fa1855e10d404ea2879f4"
 
 S = "${WORKDIR}/git"
 
