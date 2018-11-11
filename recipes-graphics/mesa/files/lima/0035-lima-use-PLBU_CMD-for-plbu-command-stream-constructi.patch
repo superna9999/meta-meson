@@ -1,0 +1,344 @@
+From 2756a25dfde5dd33551862fb59e5a4718ba021fd Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 6 Sep 2018 17:12:02 +0800
+Subject: [PATCH 35/47] lima: use PLBU_CMD for plbu command stream construction
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_draw.c | 232 ++++++++++++++++-------------------
+ 1 file changed, 108 insertions(+), 124 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_draw.c b/src/gallium/drivers/lima/lima_draw.c
+index 052d73f..a943437 100644
+--- a/src/gallium/drivers/lima/lima_draw.c
++++ b/src/gallium/drivers/lima/lima_draw.c
+@@ -114,6 +114,58 @@ struct lima_render_state {
+    uint32_t varyings_address;
+ };
+ 
++#define PLBU_CMD_BEGIN(max) { \
++   int i = 0, max_n = max; \
++   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
++
++#define PLBU_CMD_END() \
++   assert(i <= max_n); \
++   ctx->plbu_cmd_array.size += i * 4; \
++}
++
++#define PLBU_CMD(v1, v2) \
++   do { \
++      plbu_cmd[i++] = v1; \
++      plbu_cmd[i++] = v2; \
++   } while (0)
++
++#define PLBU_CMD_BLOCK_STEP(shift_max, shift_h, shift_w) \
++   PLBU_CMD(((shift_max) << 28) | ((shift_h) << 16) | (shift_w), 0x1000010C)
++#define PLBU_CMD_TILED_DIMENSIONS(tiled_w, tiled_h) \
++   PLBU_CMD((((tiled_w) - 1) << 24) | (((tiled_h) - 1) << 8), 0x10000109)
++#define PLBU_CMD_BLOCK_STRIDE(block_w) PLBU_CMD(block_w, 0x30000000)
++#define PLBU_CMD_ARRAY_ADDRESS(gp_stream, block_num) \
++   PLBU_CMD(gp_stream, 0x28000000 | ((block_num) - 1))
++#define PLBU_CMD_VIEWPORT_X(v) PLBU_CMD(v, 0x10000107)
++#define PLBU_CMD_VIEWPORT_W(v) PLBU_CMD(v, 0x10000108)
++#define PLBU_CMD_VIEWPORT_Y(v) PLBU_CMD(v, 0x10000105)
++#define PLBU_CMD_VIEWPORT_H(v) PLBU_CMD(v, 0x10000106)
++#define PLBU_CMD_ARRAYS_SEMAPHORE_BEGIN() PLBU_CMD(0x00010002, 0x60000000)
++#define PLBU_CMD_ARRAYS_SEMAPHORE_END() PLBU_CMD(0x00010001, 0x60000000)
++#define PLBU_CMD_PRIMITIVE_SETUP(cull, index_size) \
++   PLBU_CMD( \
++      0x00002000 | 0x00000200 | (cull) | ((index_size) == 2 ? 0x00000400 : 0), \
++      0x1000010B)
++#define PLBU_CMD_RSW_VERTEX_ARRAY(rsw, gl_pos) \
++   PLBU_CMD(rsw, 0x80000000 | ((gl_pos) >> 4))
++#define PLBU_CMD_SCISSORS(minx, maxx, miny, maxy) \
++   PLBU_CMD(((minx) << 30) | ((maxy) - 1) << 15 | (miny), \
++            0x70000000 | ((maxx) - 1) << 13 | ((minx) >> 2))
++#define PLBU_CMD_UNKNOWN1() PLBU_CMD(0x00000000, 0x1000010A)
++#define PLBU_CMD_UNKNOWN2() PLBU_CMD(0x00000200, 0x1000010B)
++#define PLBU_CMD_DEPTH_RANGE_NEAR(v) PLBU_CMD(v, 0x1000010E)
++#define PLBU_CMD_DEPTH_RANGE_FAR(v) PLBU_CMD(v, 0x1000010F)
++#define PLBU_CMD_INDEXED_DEST(gl_pos) PLBU_CMD(gl_pos, 0x10000100)
++#define PLBU_CMD_INDICES(va) PLBU_CMD(va, 0x10000101)
++#define PLBU_CMD_DRAW_ARRAYS(mode, start, count) \
++   PLBU_CMD(((count) << 24) | (start), (((mode) & 0x1F) << 16) | ((count) >> 8))
++/* TODO: check if the 2nd start should be count, otherwise we
++ * can only use < 256 index while start doesn't need to be
++ * 32 bit big */
++#define PLBU_CMD_DRAW_ELEMENTS(mode, start, count) \
++   PLBU_CMD(((count) << 24) | (start), \
++            0x00200000 | (((mode) & 0x1F) << 16) | ((start) >> 8))
++
+ static inline bool
+ lima_ctx_dirty(struct lima_context *ctx)
+ {
+@@ -211,41 +263,25 @@ lima_pack_reload_plbu_cmd(struct lima_context *ctx)
+    lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_READ);
+    pipe_resource_reference(&pres, NULL);
+ 
+-   int i = 0, max_n = 20;
+-   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x10000107;
+-
+-   plbu_cmd[i++] = width;
+-   plbu_cmd[i++] = 0x10000108;
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x10000105;
+-
+-   plbu_cmd[i++] = height;
+-   plbu_cmd[i++] = 0x10000106;
+-
+-   plbu_cmd[i++] = va + lima_reload_render_state_offset;
+-   plbu_cmd[i++] = 0x80000000 | ((va + lima_reload_gl_pos_offset) >> 4);
+-
+-   plbu_cmd[i++] = 0x00000200;
+-   plbu_cmd[i++] = 0x1000010b;
++   PLBU_CMD_BEGIN(20);
+ 
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x1000010a;
++   PLBU_CMD_VIEWPORT_X(0);
++   PLBU_CMD_VIEWPORT_W(width);
++   PLBU_CMD_VIEWPORT_Y(0);
++   PLBU_CMD_VIEWPORT_H(height);
+ 
+-   plbu_cmd[i++] = screen->pp_buffer->va + pp_shared_index_offset;
+-   plbu_cmd[i++] = 0x10000101;
++   PLBU_CMD_RSW_VERTEX_ARRAY(
++      va + lima_reload_render_state_offset,
++      va + lima_reload_gl_pos_offset);
+ 
+-   plbu_cmd[i++] = va + lima_reload_gl_pos_offset;
+-   plbu_cmd[i++] = 0x10000100;
++   PLBU_CMD_UNKNOWN2();
++   PLBU_CMD_UNKNOWN1();
+ 
+-   plbu_cmd[i++] = 0x03000000;
+-   plbu_cmd[i++] = 0x002f0000;
++   PLBU_CMD_INDICES(screen->pp_buffer->va + pp_shared_index_offset);
++   PLBU_CMD_INDEXED_DEST(va + lima_reload_gl_pos_offset);
++   PLBU_CMD_DRAW_ELEMENTS(0xf, 0, 3);
+ 
+-   assert(i <= max_n);
+-   ctx->plbu_cmd_array.size += i * 4;
++   PLBU_CMD_END();
+ }
+ 
+ static void
+@@ -294,45 +330,26 @@ lima_pack_clear_plbu_cmd(struct lima_context *ctx)
+    memcpy(cpu + lima_clear_render_state_offset, &clear_render_state,
+           sizeof(clear_render_state));
+ 
+-   int i = 0, max_n = 22;
+-   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x10000107;
+-
+-   plbu_cmd[i++] = 0x45800000;
+-   plbu_cmd[i++] = 0x10000108;
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x10000105;
++   PLBU_CMD_BEGIN(22);
+ 
+-   plbu_cmd[i++] = 0x45800000;
+-   plbu_cmd[i++] = 0x10000106;
++   PLBU_CMD_VIEWPORT_X(0);
++   PLBU_CMD_VIEWPORT_W(0x45800000);
++   PLBU_CMD_VIEWPORT_Y(0);
++   PLBU_CMD_VIEWPORT_H(0x45800000);
+ 
+    struct pipe_scissor_state *scissor = &ctx->scissor;
+-   plbu_cmd[i++] = (scissor->minx << 30) | (scissor->maxy - 1) << 15 | scissor->miny;
+-   plbu_cmd[i++] = 0x70000000 | (scissor->maxx - 1) << 13 | (scissor->minx >> 2);
+-
+-   plbu_cmd[i++] = va + lima_clear_render_state_offset;
+-   plbu_cmd[i++] = 0x80000000 | (gl_pos_va >> 4);
+-
+-   plbu_cmd[i++] = 0x00000200;
+-   plbu_cmd[i++] = 0x1000010b;
++   PLBU_CMD_SCISSORS(scissor->minx, scissor->maxx, scissor->miny, scissor->maxy);
+ 
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x1000010a;
+-
+-   plbu_cmd[i++] = screen->pp_buffer->va + pp_shared_index_offset;
+-   plbu_cmd[i++] = 0x10000101;
++   PLBU_CMD_RSW_VERTEX_ARRAY(va + lima_clear_render_state_offset, gl_pos_va);
+ 
+-   plbu_cmd[i++] = gl_pos_va;
+-   plbu_cmd[i++] = 0x10000100;
++   PLBU_CMD_UNKNOWN2();
++   PLBU_CMD_UNKNOWN1();
+ 
+-   plbu_cmd[i++] = 0x03000000;
+-   plbu_cmd[i++] = 0x002f0000;
++   PLBU_CMD_INDICES(screen->pp_buffer->va + pp_shared_index_offset);
++   PLBU_CMD_INDEXED_DEST(gl_pos_va);
++   PLBU_CMD_DRAW_ELEMENTS(0xf, 0, 3);
+ 
+-   assert(i <= max_n);
+-   ctx->plbu_cmd_array.size += i * 4;
++   PLBU_CMD_END();
+ }
+ 
+ static void
+@@ -342,27 +359,20 @@ lima_pack_head_plbu_cmd(struct lima_context *ctx)
+    if (lima_ctx_dirty(ctx))
+       return;
+ 
+-   int i = 0, max_n = 10;
+-   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+    struct lima_context_framebuffer *fb = &ctx->framebuffer;
+ 
+-   plbu_cmd[i++] = 0x00000200;
+-   plbu_cmd[i++] = 0x1000010B; /* PRIMITIVE_SETUP */
+-
+-   plbu_cmd[i++] = (fb->shift_max << 28) | (fb->shift_h << 16) | fb->shift_w;
+-   plbu_cmd[i++] = 0x1000010C; /* BLOCK_STEP */
++   PLBU_CMD_BEGIN(10);
+ 
+-   plbu_cmd[i++] = ((fb->tiled_w - 1) << 24) | ((fb->tiled_h - 1) << 8);
+-   plbu_cmd[i++] = 0x10000109; /* TILED_DIMENSIONS */
++   PLBU_CMD_UNKNOWN2();
++   PLBU_CMD_BLOCK_STEP(fb->shift_max, fb->shift_h, fb->shift_w);
++   PLBU_CMD_TILED_DIMENSIONS(fb->tiled_w, fb->tiled_h);
++   PLBU_CMD_BLOCK_STRIDE(fb->block_w);
+ 
+-   plbu_cmd[i++] = fb->block_w;
+-   plbu_cmd[i++] = 0x30000000; /* PLBU_BLOCK_STRIDE */
++   PLBU_CMD_ARRAY_ADDRESS(
++      ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size,
++      fb->block_w * fb->block_h);
+ 
+-   plbu_cmd[i++] = ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size;
+-   plbu_cmd[i++] = 0x28000000 | (fb->block_w * fb->block_h - 1); /* PLBU_ARRAY_ADDRESS */
+-
+-   assert(i <= max_n);
+-   ctx->plbu_cmd_array.size += i * 4;
++   PLBU_CMD_END();
+ 
+    if (lima_fb_need_reload(ctx))
+       lima_pack_reload_plbu_cmd(ctx);
+@@ -778,25 +788,15 @@ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+    if (lima_is_scissor_zero(ctx))
+       return;
+ 
+-   int i = 0, max_n = 30;
+-   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+-
+-   plbu_cmd[i++] = fui(ctx->viewport.x);
+-   plbu_cmd[i++] = 0x10000107; /* VIEWPORT_X */
++   PLBU_CMD_BEGIN(30);
+ 
+-   plbu_cmd[i++] = fui(ctx->viewport.width);
+-   plbu_cmd[i++] = 0x10000108; /* VIEWPORT_W */
++   PLBU_CMD_VIEWPORT_X(fui(ctx->viewport.x));
++   PLBU_CMD_VIEWPORT_W(fui(ctx->viewport.width));
++   PLBU_CMD_VIEWPORT_Y(fui(ctx->viewport.y));
++   PLBU_CMD_VIEWPORT_H(fui(ctx->viewport.height));
+ 
+-   plbu_cmd[i++] = fui(ctx->viewport.y);
+-   plbu_cmd[i++] = 0x10000105; /* VIEWPORT_Y */
+-
+-   plbu_cmd[i++] = fui(ctx->viewport.height);
+-   plbu_cmd[i++] = 0x10000106; /* VIEWPORT_H */
+-
+-   if (!info->index_size) {
+-      plbu_cmd[i++] = 0x00010002; /* ARRAYS_SEMAPHORE_BEGIN */
+-      plbu_cmd[i++] = 0x60000000; /* ARRAYS_SEMAPHORE */
+-   }
++   if (!info->index_size)
++      PLBU_CMD_ARRAYS_SEMAPHORE_BEGIN();
+ 
+    int cf = ctx->rasterizer->base.cull_face;
+    int ccw = ctx->rasterizer->base.front_ccw;
+@@ -807,37 +807,28 @@ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+       if (cf & PIPE_FACE_BACK)
+          cull |= ccw ? 0x00020000 : 0x00040000;
+    }
+-   plbu_cmd[i++] = 0x00002000 | 0x00000200 | cull |
+-      (info->index_size == 2 ? 0x00000400 : 0);
+-   plbu_cmd[i++] = 0x1000010B; /* PRIMITIVE_SETUP */
++   PLBU_CMD_PRIMITIVE_SETUP(cull, info->index_size);
+ 
+    uint32_t gl_position_va = lima_ctx_buff_va(ctx, lima_ctx_buff_sh_gl_pos);
+-   plbu_cmd[i++] = lima_ctx_buff_va(ctx, lima_ctx_buff_pp_plb_rsw);
+-   plbu_cmd[i++] = 0x80000000 | (gl_position_va >> 4); /* RSW_VERTEX_ARRAY */
++   PLBU_CMD_RSW_VERTEX_ARRAY(
++      lima_ctx_buff_va(ctx, lima_ctx_buff_pp_plb_rsw), gl_position_va);
+ 
+    /* TODO
+     * - we should set it only for the first draw that enabled the scissor and for
+     *   latter draw only if scissor is dirty
+-    * - check why scissor is not affecting bounds of region cleared by glClear
+     */
+    if (ctx->rasterizer->base.scissor) {
+       struct pipe_scissor_state *scissor = &ctx->scissor;
+-      plbu_cmd[i++] = (scissor->minx << 30) | (scissor->maxy - 1) << 15 | scissor->miny;
+-      plbu_cmd[i++] = 0x70000000 | (scissor->maxx - 1) << 13 | (scissor->minx >> 2); /* PLBU_CMD_SCISSORS */
++      PLBU_CMD_SCISSORS(scissor->minx, scissor->maxx, scissor->miny, scissor->maxy);
+    }
+ 
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x1000010A; /* ?? */
+-
+-   plbu_cmd[i++] = fui(ctx->viewport.near);
+-   plbu_cmd[i++] = 0x1000010E; /* DEPTH_RANGE_NEAR */
++   PLBU_CMD_UNKNOWN1();
+ 
+-   plbu_cmd[i++] = fui(ctx->viewport.far);
+-   plbu_cmd[i++] = 0x1000010F; /* DEPTH_RANGE_FAR */
++   PLBU_CMD_DEPTH_RANGE_NEAR(fui(ctx->viewport.near));
++   PLBU_CMD_DEPTH_RANGE_FAR(fui(ctx->viewport.far));
+ 
+    if (info->index_size) {
+-      plbu_cmd[i++] = gl_position_va;
+-      plbu_cmd[i++] = 0x10000100; /* INDEXED_DEST */
++      PLBU_CMD_INDEXED_DEST(gl_position_va);
+ 
+       struct pipe_resource *indexbuf = NULL;
+       unsigned index_offset = 0;
+@@ -851,31 +842,24 @@ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+ 
+       lima_bo_update(res->bo, false, true);
+       lima_submit_add_bo(ctx->gp_submit, res->bo, LIMA_SUBMIT_BO_READ);
+-      plbu_cmd[i++] = res->bo->va + info->start * info->index_size + index_offset;
+-      plbu_cmd[i++] = 0x10000101; /* INDICES */
++      PLBU_CMD_INDICES(res->bo->va + info->start * info->index_size + index_offset);
+ 
+       if (indexbuf)
+          pipe_resource_reference(&indexbuf, NULL);
+    }
+    else {
+       /* can this make the attribute info static? */
+-      plbu_cmd[i++] = (info->count << 24) | info->start;
+-      plbu_cmd[i++] = 0x00000000 | 0x00000000 |
+-         ((info->mode & 0x1F) << 16) | (info->count >> 8); /* DRAW | DRAW_ARRAYS */
++      PLBU_CMD_DRAW_ARRAYS(info->mode, info->start, info->count);
+    }
+ 
+-   plbu_cmd[i++] = 0x00010001; /* ARRAYS_SEMAPHORE_END */
+-   plbu_cmd[i++] = 0x60000000; /* ARRAYS_SEMAPHORE */
++   PLBU_CMD_ARRAYS_SEMAPHORE_END();
+ 
+    if (info->index_size) {
+       unsigned num = info->max_index - info->min_index + 1;
+-      plbu_cmd[i++] = (num << 24) | info->min_index;
+-      plbu_cmd[i++] = 0x00000000 | 0x00200000 |
+-         ((info->mode & 0x1F) << 16) | (info->min_index >> 8); /* DRAW | DRAW_ELEMENTS */
++      PLBU_CMD_DRAW_ELEMENTS(info->mode, info->min_index, num);
+    }
+ 
+-   assert(i <= max_n);
+-   ctx->plbu_cmd_array.size += i * 4;
++   PLBU_CMD_END();
+ }
+ 
+ static int
+-- 
+2.0.1
+

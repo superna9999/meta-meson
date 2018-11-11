@@ -1,0 +1,102 @@
+From e70a13f2651b8a41e952177783385ee3fcd5f021 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sat, 1 Sep 2018 19:46:25 +0800
+Subject: [PATCH 29/47] lima: set damage with tile buffer region
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_context.h |  9 ++++++--
+ src/gallium/drivers/lima/lima_state.c   | 37 +++++++++++++++++++++------------
+ 2 files changed, 31 insertions(+), 15 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_context.h b/src/gallium/drivers/lima/lima_context.h
+index 62b7501..2a001e7 100644
+--- a/src/gallium/drivers/lima/lima_context.h
++++ b/src/gallium/drivers/lima/lima_context.h
+@@ -153,6 +153,12 @@ struct lima_ctx_plb_pp_stream {
+    uint32_t offset[4];
+ };
+ 
++struct lima_damage_state {
++   struct pipe_scissor_state *region;
++   unsigned num_region;
++   bool aligned;
++};
++
+ struct lima_context {
+    struct pipe_context base;
+ 
+@@ -194,8 +200,7 @@ struct lima_context {
+    struct pipe_stencil_ref stencil_ref;
+    struct lima_context_constant_buffer const_buffer[PIPE_SHADER_TYPES];
+    struct lima_texture_stateobj tex_stateobj;
+-   struct pipe_scissor_state *damage_region;
+-   unsigned num_damage;
++   struct lima_damage_state damage;
+ 
+    #define LIMA_CTX_PLB_MIN_NUM  1
+    #define LIMA_CTX_PLB_MAX_NUM  4
+diff --git a/src/gallium/drivers/lima/lima_state.c b/src/gallium/drivers/lima/lima_state.c
+index d06ac6e..ca4f40c 100644
+--- a/src/gallium/drivers/lima/lima_state.c
++++ b/src/gallium/drivers/lima/lima_state.c
+@@ -477,32 +477,43 @@ static boolean
+ lima_set_damage_region(struct pipe_context *pctx, unsigned num_rects, int *rects)
+ {
+    struct lima_context *ctx = lima_context(pctx);
++   struct lima_damage_state *damage = &ctx->damage;
+    int i;
+ 
+-   if (ctx->damage_region)
+-      ralloc_free(ctx->damage_region);
++   if (damage->region)
++      ralloc_free(damage->region);
+ 
+    if (!num_rects) {
+-      ctx->damage_region = NULL;
+-      ctx->num_damage = 0;
++      damage->region = NULL;
++      damage->num_region = 0;
+       return true;
+    }
+ 
+-   ctx->damage_region = ralloc_size(ctx, sizeof(*ctx->damage_region) * num_rects);
+-   if (!ctx->damage_region) {
+-      ctx->num_damage = 0;
++   damage->region = ralloc_size(ctx, sizeof(*damage->region) * num_rects);
++   if (!damage->region) {
++      damage->num_region = 0;
+       return false;
+    }
+ 
+    for (i = 0; i < num_rects; i++) {
+-      struct pipe_scissor_state *r = ctx->damage_region + i;
+-      r->minx = rects[i * 4];
+-      r->miny = rects[i * 4 + 1];
+-      r->maxx = rects[i * 4 + 2];
+-      r->maxy = rects[i * 4 + 3];
++      struct pipe_scissor_state *r = damage->region + i;
++      /* region in tile unit */
++      r->minx = rects[i * 4] >> 4;
++      r->miny = rects[i * 4 + 1] >> 4;
++      r->maxx = (rects[i * 4 + 2] + 0xf) >> 4;
++      r->maxy = (rects[i * 4 + 3] + 0xf) >> 4;
+    }
+ 
+-   ctx->num_damage = num_rects;
++   /* is region aligned to tiles? */
++   damage->aligned = true;
++   for (i = 0; i < num_rects * 4; i++) {
++      if (rects[i] & 0xf) {
++         damage->aligned = false;
++         break;
++      }
++   }
++
++   damage->num_region = num_rects;
+    return true;
+ }
+ 
+-- 
+2.0.1
+

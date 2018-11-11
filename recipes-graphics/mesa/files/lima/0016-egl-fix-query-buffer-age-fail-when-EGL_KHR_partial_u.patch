@@ -1,0 +1,35 @@
+From 8f26b487e1ef6bffeee4b7ff4598f620b77f5a08 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 28 Jun 2018 15:50:12 +0800
+Subject: [PATCH 16/47] egl: fix query buffer age fail when
+ EGL_KHR_partial_update
+
+When no EGL_EXT_buffer_age but has EGL_KHR_partial_update,
+query buffer age should not fail.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/egl/main/eglsurface.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/egl/main/eglsurface.c b/src/egl/main/eglsurface.c
+index 3bd14a8..222ef49 100644
+--- a/src/egl/main/eglsurface.c
++++ b/src/egl/main/eglsurface.c
+@@ -388,7 +388,12 @@ _eglQuerySurface(_EGLDriver *drv, _EGLDisplay *dpy, _EGLSurface *surface,
+       *value = surface->PostSubBufferSupportedNV;
+       break;
+    case EGL_BUFFER_AGE_EXT:
+-      if (!dpy->Extensions.EXT_buffer_age)
++      /* EGL_BUFFER_AGE_EXT belong to EGL_EXT_buffer_age
++       * EGL_BUFFER_AGE_KHR belong to EGL_KHR_partial_update
++       * but EGL_BUFFER_AGE_EXT == EGL_BUFFER_AGE_KHR by value
++       */
++      if (!dpy->Extensions.EXT_buffer_age &&
++          !dpy->Extensions.KHR_partial_update)
+          return _eglError(EGL_BAD_ATTRIBUTE, "eglQuerySurface");
+ 
+       _EGLContext *ctx = _eglGetCurrentContext();
+-- 
+2.0.1
+

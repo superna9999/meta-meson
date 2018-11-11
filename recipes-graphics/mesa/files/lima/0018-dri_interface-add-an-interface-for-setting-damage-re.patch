@@ -1,0 +1,60 @@
+From d78cb05351b7f8e3afeb8b500cc1cc555d639a2b Mon Sep 17 00:00:00 2001
+From: Harish Krupo <harish.krupo.kps@intel.com>
+Date: Wed, 4 Jul 2018 18:22:59 +0530
+Subject: [PATCH 18/47] dri_interface: add an interface for setting damage
+ region
+
+Implementors of this interface provide ability to render only
+to damaged regions on the framebuffer.
+
+Signed-off-by: Harish Krupo <harish.krupo.kps@intel.com>
+---
+ include/GL/internal/dri_interface.h | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/include/GL/internal/dri_interface.h b/include/GL/internal/dri_interface.h
+index 046965f..084c6b3 100644
+--- a/include/GL/internal/dri_interface.h
++++ b/include/GL/internal/dri_interface.h
+@@ -83,6 +83,7 @@ typedef struct __DRI2throttleExtensionRec	__DRI2throttleExtension;
+ typedef struct __DRI2fenceExtensionRec          __DRI2fenceExtension;
+ typedef struct __DRI2interopExtensionRec	__DRI2interopExtension;
+ typedef struct __DRI2blobExtensionRec           __DRI2blobExtension;
++typedef struct __DRI2damageExtensionRec         __DRI2damageExtension;
+ 
+ typedef struct __DRIimageLoaderExtensionRec     __DRIimageLoaderExtension;
+ typedef struct __DRIimageDriverExtensionRec     __DRIimageDriverExtension;
+@@ -460,6 +461,30 @@ struct __DRI2fenceExtensionRec {
+    int (*get_fence_fd)(__DRIscreen *screen, void *fence);
+ };
+ 
++/**
++ * Extension for damage rendering
++ */
++
++#define __DRI2_DAMAGE "DRI2_Damage"
++#define __DRI2_DAMAGE_VERSION 1
++
++struct __DRI2damageExtensionRec {
++   __DRIextension base;
++
++   /**
++    * Provides rectangles to the driver to restrict its rendering
++    * to those rectangles.
++    *
++    * \param ctx     the context where commands are flushed
++    * \param size    total elements in the array
++    * \param rects   the array of rectangles
++    *
++    * Calling this function with size: 0 and rects: NULL should reset the
++    * damage to the full surface.
++    */
++   GLboolean (*set_damage_region)(__DRIcontext *ctx, GLuint size, GLint *rects);
++
++};
+ 
+ /**
+  * Extension for API interop.
+-- 
+2.0.1
+

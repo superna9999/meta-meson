@@ -1,0 +1,115 @@
+From 064f8aaaab498a8eaf8490e1d357df7e9e715d60 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgehimkreisrum.de>
+Date: Tue, 23 Oct 2018 09:13:18 +0200
+Subject: [PATCH 42/47] lima/gpir: add fnot op support
+
+Signed-off-by: Andreas Baierl <ichgeh@imkreisrum.de>
+---
+ src/gallium/drivers/lima/ir/gp/gpir.h  |  1 +
+ src/gallium/drivers/lima/ir/gp/lower.c | 41 ++++++++++++++++++++++++++++++++++
+ src/gallium/drivers/lima/ir/gp/nir.c   |  1 +
+ src/gallium/drivers/lima/ir/gp/node.c  |  5 +++++
+ 4 files changed, 48 insertions(+)
+
+diff --git a/src/gallium/drivers/lima/ir/gp/gpir.h b/src/gallium/drivers/lima/ir/gp/gpir.h
+index 599c262..47e4422 100644
+--- a/src/gallium/drivers/lima/ir/gp/gpir.h
++++ b/src/gallium/drivers/lima/ir/gp/gpir.h
+@@ -49,6 +49,7 @@ typedef enum {
+    gpir_op_min,
+    gpir_op_max,
+    gpir_op_abs,
++   gpir_op_not,
+ 
+    /* mul/add ops */
+    gpir_op_neg,
+diff --git a/src/gallium/drivers/lima/ir/gp/lower.c b/src/gallium/drivers/lima/ir/gp/lower.c
+index f450849..5863a7c 100644
+--- a/src/gallium/drivers/lima/ir/gp/lower.c
++++ b/src/gallium/drivers/lima/ir/gp/lower.c
+@@ -443,6 +443,39 @@ static bool gpir_lower_abs(gpir_block *block, gpir_node *node)
+    return true;
+ }
+ 
++/*
++ * There is no 'not' opcode.
++ * not(a) is lowered to add(1, -a)
++ */
++static bool gpir_lower_not(gpir_block *block, gpir_node *node)
++{
++   gpir_alu_node *alu = gpir_node_to_alu(node);
++
++   assert(alu->node.op == gpir_op_not);
++
++   node->op = gpir_op_add;
++
++   gpir_node *node_const = gpir_node_create(block, gpir_op_const);
++   gpir_const_node *c = gpir_node_to_const(node_const);
++
++   assert(c->node.op == gpir_op_const);
++
++   list_addtail(&c->node.list, &node->list);
++   c->value.f = 1.0f;
++   gpir_node_add_dep(&alu->node, &c->node, GPIR_DEP_INPUT);
++
++   alu->children_negate[1] = !alu->children_negate[0];
++   alu->children[1] = alu->children[0];
++   alu->children[0] = &c->node;
++
++   return true;
++}
++
++
++static bool (*gpir_pre_rsched_lower_funcs[gpir_op_num])(gpir_block *, gpir_node *) = {
++   [gpir_op_not] = gpir_lower_not,
++};
++
+ static bool (*gpir_post_rsched_lower_funcs[gpir_op_num])(gpir_block *, gpir_node *) = {
+    [gpir_op_neg] = gpir_lower_neg,
+    [gpir_op_rcp] = gpir_lower_complex,
+@@ -457,6 +490,14 @@ bool gpir_pre_rsched_lower_prog(gpir_compiler *comp)
+    if (!gpir_lower_viewport_transform(comp))
+       return false;
+ 
++   list_for_each_entry(gpir_block, block, &comp->block_list, list) {
++      list_for_each_entry_safe(gpir_node, node, &block->node_list, list) {
++         if (gpir_pre_rsched_lower_funcs[node->op] &&
++             !gpir_pre_rsched_lower_funcs[node->op](block, node))
++            return false;
++      }
++   }
++
+    if (!gpir_lower_const(comp))
+       return false;
+ 
+diff --git a/src/gallium/drivers/lima/ir/gp/nir.c b/src/gallium/drivers/lima/ir/gp/nir.c
+index 8a71665..bb9d9de 100644
+--- a/src/gallium/drivers/lima/ir/gp/nir.c
++++ b/src/gallium/drivers/lima/ir/gp/nir.c
+@@ -104,6 +104,7 @@ static int nir_to_gpir_opcodes[nir_num_opcodes] = {
+    [nir_op_fmul] = gpir_op_mul,
+    [nir_op_fadd] = gpir_op_add,
+    [nir_op_fneg] = gpir_op_neg,
++   [nir_op_fnot] = gpir_op_not,
+    [nir_op_fmin] = gpir_op_min,
+    [nir_op_fmax] = gpir_op_max,
+    [nir_op_frcp] = gpir_op_rcp,
+diff --git a/src/gallium/drivers/lima/ir/gp/node.c b/src/gallium/drivers/lima/ir/gp/node.c
+index c228f2c..f92cdc6 100644
+--- a/src/gallium/drivers/lima/ir/gp/node.c
++++ b/src/gallium/drivers/lima/ir/gp/node.c
+@@ -110,6 +110,11 @@ const gpir_op_info gpir_op_infos[] = {
+          GPIR_INSTR_SLOT_END
+       },
+    },
++   [gpir_op_not] = {
++      .name = "not",
++      .src_neg = {true, true, false, false},
++      .slots = (int []) { GPIR_INSTR_SLOT_ADD0, GPIR_INSTR_SLOT_ADD1, GPIR_INSTR_SLOT_END },
++   },
+    [gpir_op_eq] = {
+       .name = "eq",
+       .slots = (int []) {
+-- 
+2.0.1
+

@@ -1,0 +1,34 @@
+From 71690a575cf6f598919fd43482ef8e285dbdb101 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 10 Sep 2018 15:41:37 +0800
+Subject: [PATCH 38/47] lima: fix mtx_lock: Assertion `mtx != NULL' failed
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_context.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_context.c b/src/gallium/drivers/lima/lima_context.c
+index 632dc95..ee2b748 100644
+--- a/src/gallium/drivers/lima/lima_context.c
++++ b/src/gallium/drivers/lima/lima_context.c
+@@ -124,14 +124,14 @@ lima_context_destroy(struct pipe_context *pctx)
+ 
+    lima_state_fini(ctx);
+ 
+-   slab_destroy_child(&ctx->transfer_pool);
+-
+    if (ctx->suballocator)
+       u_suballocator_destroy(ctx->suballocator);
+ 
+    if (ctx->uploader)
+       u_upload_destroy(ctx->uploader);
+ 
++   slab_destroy_child(&ctx->transfer_pool);
++
+    for (int i = 0; i < LIMA_CTX_PLB_MAX_NUM; i++) {
+       if (ctx->plb[i])
+          lima_bo_free(ctx->plb[i]);
+-- 
+2.0.1
+

@@ -1,0 +1,143 @@
+From 25a71f99566685ff567b790560b3e39683b38095 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 6 Sep 2018 20:21:53 +0800
+Subject: [PATCH 36/47] lima: use VS_CMD for vs command stream construction
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_draw.c | 88 +++++++++++++++++++++++-------------
+ 1 file changed, 56 insertions(+), 32 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_draw.c b/src/gallium/drivers/lima/lima_draw.c
+index a943437..e180559 100644
+--- a/src/gallium/drivers/lima/lima_draw.c
++++ b/src/gallium/drivers/lima/lima_draw.c
+@@ -114,6 +114,7 @@ struct lima_render_state {
+    uint32_t varyings_address;
+ };
+ 
++/* plbu commands */
+ #define PLBU_CMD_BEGIN(max) { \
+    int i = 0, max_n = max; \
+    uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+@@ -166,6 +167,43 @@ struct lima_render_state {
+    PLBU_CMD(((count) << 24) | (start), \
+             0x00200000 | (((mode) & 0x1F) << 16) | ((start) >> 8))
+ 
++/* vs commands */
++#define VS_CMD_BEGIN(max) { \
++   int i = 0, max_n = max; \
++   uint32_t *vs_cmd = util_dynarray_enlarge(&ctx->vs_cmd_array, max_n * 4);
++
++#define VS_CMD_END() \
++   assert(i <= max_n); \
++   ctx->vs_cmd_array.size += i * 4; \
++}
++
++#define VS_CMD(v1, v2) \
++   do { \
++      vs_cmd[i++] = v1; \
++      vs_cmd[i++] = v2; \
++   } while (0)
++
++#define VS_CMD_ARRAYS_SEMAPHORE_BEGIN_1() VS_CMD(0x00028000, 0x50000000)
++#define VS_CMD_ARRAYS_SEMAPHORE_BEGIN_2() VS_CMD(0x00000001, 0x50000000)
++#define VS_CMD_ARRAYS_SEMAPHORE_END(index_draw) \
++   VS_CMD((index_draw) ? 0x00018000 : 0x00000000, 0x50000000)
++#define VS_CMD_UNIFORMS_ADDRESS(addr, size) \
++   VS_CMD(addr, 0x30000000 | ((size) << 12))
++#define VS_CMD_SHADER_ADDRESS(addr, size) \
++   VS_CMD(addr, 0x40000000 | ((size) << 12))
++#define VS_CMD_SHADER_INFO(prefetch, size) \
++   VS_CMD(((prefetch) << 20) | ((((size) >> 4) - 1) << 10), 0x10000040)
++#define VS_CMD_VARYING_ATTRIBUTE_COUNT(nv, na) \
++   VS_CMD((((nv) - 1) << 8) | (((na) - 1) << 24), 0x10000042)
++#define VS_CMD_UNKNOWN1() VS_CMD(0x00000003, 0x10000041)
++#define VS_CMD_UNKNOWN2() VS_CMD(0x00000000, 0x60000000)
++#define VS_CMD_ATTRIBUTES_ADDRESS(addr, na) \
++   VS_CMD(addr, 0x20000000 | ((na) << 17))
++#define VS_CMD_VARYINGS_ADDRESS(addr, nv) \
++   VS_CMD(addr, 0x20000008 | ((nv) << 17))
++#define VS_CMD_DRAW(num, index_draw) \
++   VS_CMD(((num) << 24) | ((index_draw) ? 1 : 0), ((num) >> 8))
++
+ static inline bool
+ lima_ctx_dirty(struct lima_context *ctx)
+ {
+@@ -728,55 +766,41 @@ lima_pipe_format_to_attrib_type(enum pipe_format format)
+ static void
+ lima_pack_vs_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+ {
+-   int i = 0, max_n = 24;
+-   uint32_t *vs_cmd = util_dynarray_enlarge(&ctx->vs_cmd_array, max_n * 4);
++   VS_CMD_BEGIN(24);
+ 
+    if (!info->index_size) {
+-      vs_cmd[i++] = 0x00028000; /* ARRAYS_SEMAPHORE_BEGIN_1 */
+-      vs_cmd[i++] = 0x50000000; /* ARRAYS_SEMAPHORE */
+-      vs_cmd[i++] = 0x00000001; /* ARRAYS_SEMAPHORE_BEGIN_2 */
+-      vs_cmd[i++] = 0x50000000; /* ARRAYS_SEMAPHORE */
++      VS_CMD_ARRAYS_SEMAPHORE_BEGIN_1();
++      VS_CMD_ARRAYS_SEMAPHORE_BEGIN_2();
+    }
+ 
+    int uniform_size = ctx->const_buffer[PIPE_SHADER_VERTEX].size + ctx->vs->constant_size + 32;
+-   vs_cmd[i++] = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_uniform);
+-   vs_cmd[i++] = 0x30000000 | (align(uniform_size, 16) << 12); /* UNIFORMS_ADDRESS */
++   VS_CMD_UNIFORMS_ADDRESS(
++      lima_ctx_buff_va(ctx, lima_ctx_buff_gp_uniform),
++      align(uniform_size, 16));
+ 
+-   vs_cmd[i++] = ctx->vs->bo->va;
+-   vs_cmd[i++] = 0x40000000 | ((ctx->vs->shader_size >> 4) << 16); /* SHADER_ADDRESS */
+-
+-   vs_cmd[i++] = (ctx->vs->prefetch << 20) | ((align(ctx->vs->shader_size, 16) / 16 - 1) << 10);
+-   vs_cmd[i++] = 0x10000040; /* SHADER_INFO */
++   VS_CMD_SHADER_ADDRESS(ctx->vs->bo->va, ctx->vs->shader_size);
++   VS_CMD_SHADER_INFO(ctx->vs->prefetch, ctx->vs->shader_size);
+ 
+    int num_varryings = ctx->vs->num_varying;
+    int num_attributes = ctx->vertex_elements->num_elements;
++   VS_CMD_VARYING_ATTRIBUTE_COUNT(num_varryings, num_attributes);
+ 
+-   vs_cmd[i++] = ((num_varryings - 1) << 8) | ((num_attributes - 1) << 24);
+-   vs_cmd[i++] = 0x10000042; /* VARYING_ATTRIBUTE_COUNT */
+-
+-   vs_cmd[i++] = 0x00000003;
+-   vs_cmd[i++] = 0x10000041; /* ?? */
++   VS_CMD_UNKNOWN1();
+ 
+-   vs_cmd[i++] = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_attribute_info);
+-   vs_cmd[i++] = 0x20000000 | (num_attributes << 17); /* ATTRIBUTES_ADDRESS */
++   VS_CMD_ATTRIBUTES_ADDRESS(
++      lima_ctx_buff_va(ctx, lima_ctx_buff_gp_attribute_info), num_attributes);
+ 
+-   vs_cmd[i++] = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_varying_info);
+-   vs_cmd[i++] = 0x20000008 | (num_varryings << 17); /* VARYINGS_ADDRESS */
++   VS_CMD_VARYINGS_ADDRESS(
++      lima_ctx_buff_va(ctx, lima_ctx_buff_gp_varying_info), num_varryings);
+ 
+    unsigned num = info->index_size ? (info->max_index - info->min_index + 1) : info->count;
+-   vs_cmd[i++] = (num << 24) | (info->index_size ? 1 : 0);
+-   vs_cmd[i++] = 0x00000000 | (num >> 8); /* DRAW */
+-
+-   vs_cmd[i++] = 0x00000000;
+-   vs_cmd[i++] = 0x60000000; /* ?? */
++   VS_CMD_DRAW(num, info->index_size);
+ 
+-   vs_cmd[i++] = info->index_size ? 0x00018000 : 0x00000000; /* ARRAYS_SEMAPHORE_NEXT : ARRAYS_SEMAPHORE_END */
+-   vs_cmd[i++] = 0x50000000; /* ARRAYS_SEMAPHORE */
++   VS_CMD_UNKNOWN2();
+ 
+-   assert(i <= max_n);
+-   ctx->vs_cmd_array.size += i * 4;
++   VS_CMD_ARRAYS_SEMAPHORE_END(info->index_size);
+ 
+-   lima_dump_command_stream_print(vs_cmd, i * 4, false, "add vs cmd\n");
++   VS_CMD_END();
+ }
+ 
+ static void
+-- 
+2.0.1
+

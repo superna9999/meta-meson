@@ -1,0 +1,29 @@
+From ccc2494a7fdfb9a4abcef25bb160c6479cdc65ff Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Fri, 12 Oct 2018 17:49:17 +0800
+Subject: [PATCH 40/47] lima: fix texture layout setting
+
+regression:
+6afdaef306 lima: seperate lima_texture_desc_set_res
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_texture.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/lima/lima_texture.c b/src/gallium/drivers/lima/lima_texture.c
+index f15c4da..3b90a8d 100644
+--- a/src/gallium/drivers/lima/lima_texture.c
++++ b/src/gallium/drivers/lima/lima_texture.c
+@@ -110,7 +110,7 @@ lima_texture_desc_set_res(struct lima_context *ctx, uint32_t *desc,
+    lima_bo_update(lima_res->bo, false, true);
+ 
+    /* attach level 0 */
+-   desc[6] = layout | (lima_res->bo->va << 24);
++   desc[6] = (lima_res->bo->va << 24) | (layout << 13);
+    desc[7] = lima_res->bo->va >> 8;
+ }
+ 
+-- 
+2.0.1
+

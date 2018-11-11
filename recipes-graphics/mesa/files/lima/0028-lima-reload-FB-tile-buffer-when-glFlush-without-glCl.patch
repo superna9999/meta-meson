@@ -1,0 +1,330 @@
+From 8d5d776f97946025619f7f2cb168edc9973ef7e4 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 21 Aug 2018 21:50:57 +0800
+Subject: [PATCH 28/47] lima: reload FB tile buffer when glFlush without
+ glClear
+
+This is the reload implementation of this use case.
+Use this method instead of the previous gp stream
+reuse method for:
+1. simplicity
+2. gp stream reuse method need more investigate on
+   max draw num for buffer overflow
+3. easier integration with the EGL_KHR_partial_update
+   implementation
+
+Shortcome is the performance maybe worse, but I don't
+know how much.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_draw.c     | 165 ++++++++++++++++++++++++++-----
+ src/gallium/drivers/lima/lima_resource.h |   1 +
+ src/gallium/drivers/lima/lima_screen.c   |  20 +++-
+ src/gallium/drivers/lima/lima_screen.h   |   4 +-
+ 4 files changed, 164 insertions(+), 26 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_draw.c b/src/gallium/drivers/lima/lima_draw.c
+index f8d8607..c57e824 100644
+--- a/src/gallium/drivers/lima/lima_draw.c
++++ b/src/gallium/drivers/lima/lima_draw.c
+@@ -31,6 +31,7 @@
+ #include "util/u_inlines.h"
+ #include "util/u_pack_color.h"
+ #include "util/hash_table.h"
++#include "util/u_upload_mgr.h"
+ 
+ #include "lima_context.h"
+ #include "lima_screen.h"
+@@ -118,6 +119,10 @@ lima_clear(struct pipe_context *pctx, unsigned buffers,
+    if (buffers & PIPE_CLEAR_STENCIL)
+       clear->stencil = stencil;
+ 
++   /* no need to reload if cleared */
++   struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
++   surf->reload = false;
++
+    ctx->dirty |= LIMA_CONTEXT_DIRTY_CLEAR;
+ }
+ 
+@@ -362,15 +367,141 @@ lima_is_scissor_zero(struct lima_context *ctx)
+       && scissor->miny == scissor->maxy;
+ }
+ 
++struct lima_render_state {
++   uint32_t blend_color_bg;
++   uint32_t blend_color_ra;
++   uint32_t alpha_blend;
++   uint32_t depth_test;
++   uint32_t depth_range;
++   uint32_t stencil_front;
++   uint32_t stencil_back;
++   uint32_t stencil_test;
++   uint32_t multi_sample;
++   uint32_t shader_address;
++   uint32_t varying_types;
++   uint32_t uniforms_address;
++   uint32_t textures_address;
++   uint32_t aux0;
++   uint32_t aux1;
++   uint32_t varyings_address;
++};
++
++static int
++lima_pack_reload_plbu_cmd(struct lima_context *ctx, uint32_t *plbu_cmd, int i)
++{
++   #define lima_reload_render_state_offset 0x0000
++   #define lima_reload_gl_pos_offset       0x0040
++   #define lima_reload_varying_offset      0x0080
++   #define lima_reload_tex_desc_offset     0x00c0
++   #define lima_reload_tex_array_offset    0x0100
++   #define lima_reload_buffer_size         0x0140
++
++   void *cpu;
++   unsigned offset;
++   struct pipe_resource *pres = NULL;
++   u_upload_alloc(ctx->uploader, 0, lima_reload_buffer_size,
++                  0x40, &offset, &pres, &cpu);
++
++   struct lima_resource *res = lima_resource(pres);
++   lima_bo_update(res->bo, false, true);
++   uint32_t va = res->bo->va + offset;
++
++   struct lima_screen *screen = lima_screen(ctx->base.screen);
++
++   uint32_t reload_shader_first_instr_size =
++      ((uint32_t *)(screen->pp_buffer->map + pp_reload_program_offset))[0] & 0x1f;
++   uint32_t reload_shader_va = screen->pp_buffer->va + pp_reload_program_offset;
++
++   struct lima_render_state reload_render_state = {
++      .alpha_blend = 0xf03b1ad2,
++      .depth_test = 0x0000000e,
++      .depth_range = 0xffff0000,
++      .stencil_front = 0x00000007,
++      .stencil_back = 0x00000007,
++      .multi_sample = 0x0000f007,
++      .shader_address = reload_shader_va | reload_shader_first_instr_size,
++      .varying_types = 0x00000001,
++      .textures_address = va + lima_reload_tex_array_offset,
++      .aux0 = 0x00004021,
++      .varyings_address = va + lima_reload_varying_offset,
++   };
++   memcpy(cpu + lima_reload_render_state_offset, &reload_render_state,
++          sizeof(reload_render_state));
++
++   struct lima_context_framebuffer *fb = &ctx->framebuffer;
++   uint32_t *td = cpu + lima_reload_tex_desc_offset;
++   lima_texture_desc_set_res(ctx, td, fb->cbuf->texture);
++   td[1] = 0x00000480;
++   td[2] |= 0x00093800;
++   td[4] = 0x00000000;
++   td[5] = 0x00000000;
++
++   uint32_t *ta = cpu + lima_reload_tex_array_offset;
++   ta[0] = va + lima_reload_tex_desc_offset;
++
++   uint32_t width = fui(fb->width);
++   uint32_t height = fui(fb->height);
++   uint32_t reload_gl_pos[] = {
++      width,      0x00000000, 0x00000000, 0x3f800000, /* 0x00000000 */
++      0x00000000, 0x00000000, 0x00000000, 0x3f800000, /* 0x00000010 */
++      0x00000000, height,     0x00000000, 0x3f800000, /* 0x00000020 */
++   };
++   memcpy(cpu + lima_reload_gl_pos_offset, reload_gl_pos,
++          sizeof(reload_gl_pos));
++
++   uint32_t reload_varying[] = {
++      width,      0x00000000, 0x00000000, 0x00000000, /* 0x00000000 */
++      0x00000000, height,     0x00000000, 0x00000000, /* 0x00000010 */
++   };
++   memcpy(cpu + lima_reload_varying_offset, reload_varying,
++          sizeof(reload_varying));
++
++   lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_READ);
++   pipe_resource_reference(&pres, NULL);
++
++   plbu_cmd[i++] = 0x00000000;
++   plbu_cmd[i++] = 0x10000107;
++
++   plbu_cmd[i++] = width;
++   plbu_cmd[i++] = 0x10000108;
++
++   plbu_cmd[i++] = 0x00000000;
++   plbu_cmd[i++] = 0x10000105;
++
++   plbu_cmd[i++] = height;
++   plbu_cmd[i++] = 0x10000106;
++
++   plbu_cmd[i++] = va + lima_reload_render_state_offset;
++   plbu_cmd[i++] = 0x80000000 | ((va + lima_reload_gl_pos_offset) >> 4);
++
++   plbu_cmd[i++] = 0x00000200;
++   plbu_cmd[i++] = 0x1000010b;
++
++   plbu_cmd[i++] = 0x00000000;
++   plbu_cmd[i++] = 0x1000010a;
++
++   plbu_cmd[i++] = screen->pp_buffer->va + pp_reload_index_offset;
++   plbu_cmd[i++] = 0x10000101;
++
++   plbu_cmd[i++] = va + lima_reload_gl_pos_offset;
++   plbu_cmd[i++] = 0x10000100;
++
++   plbu_cmd[i++] = 0x03000000;
++   plbu_cmd[i++] = 0x002f0000;
++
++   return i;
++}
++
+ static void
+ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+ {
+-   int i = 0, max_n = 40;
++   int i = 0, max_n = 40 + 20;
+    uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+ 
+    /* first draw need create a PLBU command header */
+    if (!ctx->plbu_cmd_array.size) {
+       struct lima_context_framebuffer *fb = &ctx->framebuffer;
++      struct lima_surface *surf = lima_surface(fb->cbuf);
+ 
+       plbu_cmd[i++] = 0x00000200;
+       plbu_cmd[i++] = 0x1000010B; /* PRIMITIVE_SETUP */
+@@ -387,6 +518,9 @@ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+       plbu_cmd[i++] = ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size;
+       plbu_cmd[i++] = 0x28000000 | (fb->block_w * fb->block_h - 1); /* PLBU_ARRAY_ADDRESS */
+ 
++      if (surf->reload)
++         i = lima_pack_reload_plbu_cmd(ctx, plbu_cmd, i);
++
+       plbu_cmd[i++] = fui(ctx->viewport.x);
+       plbu_cmd[i++] = 0x10000107; /* VIEWPORT_X */
+ 
+@@ -492,25 +626,6 @@ done:
+    lima_dump_command_stream_print(plbu_cmd, i * 4, false, "add plbu cmd\n");
+ }
+ 
+-struct lima_render_state {
+-   uint32_t blend_color_bg;
+-   uint32_t blend_color_ra;
+-   uint32_t alpha_blend;
+-   uint32_t depth_test;
+-   uint32_t depth_range;
+-   uint32_t stencil_front;
+-   uint32_t stencil_back;
+-   uint32_t stencil_test;
+-   uint32_t multi_sample;
+-   uint32_t shader_address;
+-   uint32_t varying_types;
+-   uint32_t uniforms_address;
+-   uint32_t textures_address;
+-   uint32_t aux0;
+-   uint32_t aux1;
+-   uint32_t varyings_address;
+-};
+-
+ static int
+ lima_blend_func(enum pipe_blend_func pipe)
+ {
+@@ -1081,7 +1196,7 @@ lima_pack_pp_frame_reg(struct lima_context *ctx, uint32_t *frame_reg,
+ }
+ 
+ static void
+-_lima_flush(struct lima_context *ctx)
++_lima_flush(struct lima_context *ctx, bool end_of_frame)
+ {
+    lima_finish_plbu_cmd(ctx);
+ 
+@@ -1180,6 +1295,10 @@ _lima_flush(struct lima_context *ctx)
+ 
+    ctx->num_draws = 0;
+    ctx->plb_index = (ctx->plb_index + 1) % lima_ctx_num_plb;
++
++   /* this surface may need reload when next draw if not end of frame */
++   struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
++   surf->reload = !end_of_frame;
+ }
+ 
+ void
+@@ -1190,7 +1309,7 @@ lima_flush(struct lima_context *ctx)
+       return;
+    }
+ 
+-   _lima_flush(ctx);
++   _lima_flush(ctx, false);
+ }
+ 
+ static void
+@@ -1208,7 +1327,7 @@ lima_pipe_flush(struct pipe_context *pctx, struct pipe_fence_handle **fence,
+    if ((flags & PIPE_FLUSH_FENCE_FD) && fence)
+       lima_submit_need_sync_fd(ctx->pp_submit);
+ 
+-   _lima_flush(ctx);
++   _lima_flush(ctx, flags & PIPE_FLUSH_END_OF_FRAME);
+ 
+    if (fence)
+       *fence = lima_fence_create(ctx, lima_submit_get_sync_fd(ctx->pp_submit));
+diff --git a/src/gallium/drivers/lima/lima_resource.h b/src/gallium/drivers/lima/lima_resource.h
+index 32202b4..c73a7a6 100644
+--- a/src/gallium/drivers/lima/lima_resource.h
++++ b/src/gallium/drivers/lima/lima_resource.h
+@@ -42,6 +42,7 @@ struct lima_resource {
+ struct lima_surface {
+    struct pipe_surface base;
+    int tiled_w, tiled_h;
++   bool reload;
+ };
+ 
+ struct lima_transfer {
+diff --git a/src/gallium/drivers/lima/lima_screen.c b/src/gallium/drivers/lima/lima_screen.c
+index 7559a08..0557370 100644
+--- a/src/gallium/drivers/lima/lima_screen.c
++++ b/src/gallium/drivers/lima/lima_screen.c
+@@ -460,11 +460,27 @@ lima_screen_create(int fd, struct renderonly *ro)
+       goto err_out3;
+ 
+    /* fs program for clear buffer? */
+-   static uint32_t pp_program[] = {
++   static const uint32_t pp_clear_program[] = {
+       0x00020425, 0x0000000c, 0x01e007cf, 0xb0000000, /* 0x00000000 */
+       0x000005f5, 0x00000000, 0x00000000, 0x00000000, /* 0x00000010 */
+    };
+-   memcpy(screen->pp_buffer->map + pp_clear_program_offset, pp_program, sizeof(pp_program));
++   memcpy(screen->pp_buffer->map + pp_clear_program_offset,
++          pp_clear_program, sizeof(pp_clear_program));
++
++   /* copy texture to framebuffer, used to reload gpu tile buffer */
++   static const uint32_t pp_reload_program[] = {
++      0x000005e6, 0xf1003c20, 0x00000000, 0x39001000, /* 0x00000000 */
++      0x00000e4e, 0x000007cf, 0x00000000, 0x00000000, /* 0x00000010 */
++   };
++   memcpy(screen->pp_buffer->map + pp_reload_program_offset,
++          pp_reload_program, sizeof(pp_reload_program));
++
++   /* 0/1/2 vertex index for reload draw */
++   static const uint32_t pp_reload_index[] = {
++      0x00020100, 0x00000000, 0x00000000, 0x00000000, /* 0x00000000 */
++   };
++   memcpy(screen->pp_buffer->map + pp_reload_index_offset,
++          pp_reload_index, sizeof(pp_reload_index));
+ 
+    /* is pp frame render state static? */
+    uint32_t *pp_frame_rsw = screen->pp_buffer->map + pp_frame_rsw_offset;
+diff --git a/src/gallium/drivers/lima/lima_screen.h b/src/gallium/drivers/lima/lima_screen.h
+index b261aa5..9de73a0 100644
+--- a/src/gallium/drivers/lima/lima_screen.h
++++ b/src/gallium/drivers/lima/lima_screen.h
+@@ -74,7 +74,9 @@ struct lima_screen {
+    struct lima_bo *pp_buffer;
+    #define pp_frame_rsw_offset       0x0000
+    #define pp_clear_program_offset   0x0040
+-   #define pp_stack_offset           0x0080
++   #define pp_reload_program_offset  0x0080
++   #define pp_reload_index_offset    0x00c0
++   #define pp_stack_offset           0x0100
+    #define pp_buffer_size            0x2000
+ };
+ 
+-- 
+2.0.1
+

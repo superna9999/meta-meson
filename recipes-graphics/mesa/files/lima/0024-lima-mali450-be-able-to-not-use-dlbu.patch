@@ -1,0 +1,50 @@
+From fcf154e0820b530c611648b875dd1d282f4bf6af Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 14 Aug 2018 22:30:10 +0800
+Subject: [PATCH 24/47] lima: mali450 be able to not use dlbu
+
+prepare for EGL_KHR_partial_update.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ include/drm-uapi/lima_drm.h          | 9 +++++++--
+ src/gallium/drivers/lima/lima_draw.c | 2 ++
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/include/drm-uapi/lima_drm.h b/include/drm-uapi/lima_drm.h
+index 77cb39a..0c17bf6 100644
+--- a/include/drm-uapi/lima_drm.h
++++ b/include/drm-uapi/lima_drm.h
+@@ -91,9 +91,14 @@ struct drm_lima_m400_pp_frame {
+ 
+ struct drm_lima_m450_pp_frame {
+ 	__u32 frame[LIMA_PP_FRAME_REG_NUM];
+-	__u32 _pad;
++	__u32 num_pp;
+ 	__u32 wb[3 * LIMA_PP_WB_REG_NUM];
+-	__u32 dlbu_regs[4];
++	__u32 use_dlbu;
++	__u32 _pad;
++	union {
++		__u32 plbu_array_address[8];
++		__u32 dlbu_regs[4];
++	};
+ 	__u32 fragment_stack_address[8];
+ };
+ 
+diff --git a/src/gallium/drivers/lima/lima_draw.c b/src/gallium/drivers/lima/lima_draw.c
+index 35572e3..fe41276 100644
+--- a/src/gallium/drivers/lima/lima_draw.c
++++ b/src/gallium/drivers/lima/lima_draw.c
+@@ -1284,6 +1284,8 @@ _lima_flush(struct lima_context *ctx, bool save_state)
+    else {
+       struct drm_lima_m450_pp_frame pp_frame = {0};
+       lima_pack_pp_frame_reg(ctx, pp_frame.frame, pp_frame.wb);
++      pp_frame.num_pp = screen->num_pp;
++      pp_frame.use_dlbu = true;
+ 
+       struct lima_context_framebuffer *fb = &ctx->framebuffer;
+       pp_frame.dlbu_regs[0] = ctx->current_plb->va;
+-- 
+2.0.1
+

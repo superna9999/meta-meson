@@ -1,0 +1,44 @@
+From 04081e805b0a35fd291eb5c97f203a37abf54cf5 Mon Sep 17 00:00:00 2001
+From: Andreas Baierl <ichgeh@imkreisrum.de>
+Date: Mon, 5 Nov 2018 18:01:27 +0100
+Subject: [PATCH 45/47] lima/pp: Fix some whitespace issues in disassembler
+
+---
+ src/gallium/drivers/lima/ir/pp/disasm.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/ir/pp/disasm.c b/src/gallium/drivers/lima/ir/pp/disasm.c
+index 1c44c46..b30f9ee 100644
+--- a/src/gallium/drivers/lima/ir/pp/disasm.c
++++ b/src/gallium/drivers/lima/ir/pp/disasm.c
+@@ -140,7 +140,7 @@ static void
+ print_dest_scalar(unsigned reg)
+ {
+    printf("$%u", reg >> 2);
+-   printf(".%c", "xyzw"[reg & 3]);
++   printf(".%c ", "xyzw"[reg & 3]);
+ }
+ 
+ static void
+@@ -436,7 +436,6 @@ print_vec4_acc(void *code, unsigned offset)
+ 
+    if (op.srcs > 1) {
+       printf(" ");
+-
+       print_vector_source(vec4_acc->arg1_source, NULL,
+                           vec4_acc->arg1_swizzle,
+                           vec4_acc->arg1_absolute,
+@@ -552,9 +551,8 @@ print_float_acc(void *code, unsigned offset)
+                        float_acc->arg0_absolute,
+                        float_acc->arg0_negate);
+ 
+-   printf(" ");
+-
+    if (op.srcs > 1) {
++      printf(" ");
+       print_source_scalar(float_acc->arg1_source, NULL,
+                           float_acc->arg1_absolute,
+                           float_acc->arg1_negate);
+-- 
+2.0.1
+

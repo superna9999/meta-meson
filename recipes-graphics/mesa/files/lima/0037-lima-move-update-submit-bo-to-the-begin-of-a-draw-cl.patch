@@ -1,0 +1,220 @@
+From 46232b81962f06174a0489d57108dc195bf08399 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sat, 8 Sep 2018 16:38:04 +0800
+Subject: [PATCH 37/47] lima: move update submit bo to the begin of a
+ draw/clear
+
+To fix the flush not called problem when user read a buffer
+before swap buffer or flush explicitly, because lima uses
+the bo recorded in submit to identify if it's dirty.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_draw.c | 163 ++++++++++++++++++-----------------
+ 1 file changed, 84 insertions(+), 79 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_draw.c b/src/gallium/drivers/lima/lima_draw.c
+index e180559..56856f5 100644
+--- a/src/gallium/drivers/lima/lima_draw.c
++++ b/src/gallium/drivers/lima/lima_draw.c
+@@ -442,57 +442,6 @@ lima_is_scissor_full_fb(struct lima_context *ctx)
+ }
+ 
+ static void
+-lima_clear(struct pipe_context *pctx, unsigned buffers,
+-           const union pipe_color_union *color, double depth, unsigned stencil)
+-{
+-   debug_checkpoint();
+-
+-   struct lima_context *ctx = lima_context(pctx);
+-   bool full_fb_clear = lima_is_scissor_full_fb(ctx);
+-
+-   if (full_fb_clear) {
+-      lima_flush(ctx);
+-
+-      /* no need to reload if cleared */
+-      if (buffers & PIPE_CLEAR_COLOR0) {
+-         struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
+-         surf->reload = false;
+-      }
+-   }
+-
+-   struct lima_context_clear *clear = &ctx->clear;
+-   clear->buffers = buffers;
+-
+-   if (buffers & PIPE_CLEAR_COLOR0) {
+-      clear->color_8pc =
+-         ((uint32_t)float_to_ubyte(color->f[3]) << 24) |
+-         ((uint32_t)float_to_ubyte(color->f[2]) << 16) |
+-         ((uint32_t)float_to_ubyte(color->f[1]) << 8) |
+-         float_to_ubyte(color->f[0]);
+-
+-      clear->color_16pc =
+-         ((uint64_t)float_to_ushort(color->f[3]) << 48) |
+-         ((uint64_t)float_to_ushort(color->f[2]) << 32) |
+-         ((uint64_t)float_to_ushort(color->f[1]) << 16) |
+-         float_to_ubyte(color->f[0]);
+-   }
+-
+-   if (buffers & PIPE_CLEAR_DEPTH)
+-      clear->depth = util_pack_z(PIPE_FORMAT_Z24X8_UNORM, depth);
+-
+-   if (buffers & PIPE_CLEAR_STENCIL)
+-      clear->stencil = stencil;
+-
+-   lima_pack_head_plbu_cmd(ctx);
+-
+-   /* partial clear */
+-   if (!full_fb_clear)
+-      lima_pack_clear_plbu_cmd(ctx);
+-
+-   ctx->dirty |= LIMA_CONTEXT_DIRTY_CLEAR;
+-}
+-
+-static void
+ hilbert_rotate(int n, int *x, int *y, int rx, int ry)
+ {
+    if (ry == 0) {
+@@ -702,6 +651,88 @@ lima_update_full_pp_stream(struct lima_context *ctx)
+    lima_submit_add_bo(ctx->pp_submit, s->bo, LIMA_SUBMIT_BO_READ);
+ }
+ 
++static void
++lima_update_submit_bo(struct lima_context *ctx)
++{
++   if (lima_ctx_dirty(ctx))
++      return;
++
++   struct lima_screen *screen = lima_screen(ctx->base.screen);
++   lima_submit_add_bo(ctx->gp_submit, ctx->plb_gp_stream, LIMA_SUBMIT_BO_READ);
++   lima_submit_add_bo(ctx->gp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_WRITE);
++   lima_submit_add_bo(ctx->gp_submit, screen->gp_buffer, LIMA_SUBMIT_BO_READ);
++
++   lima_dump_command_stream_print(
++      ctx->plb_gp_stream->map + ctx->plb_index * ctx->plb_gp_size,
++      ctx->plb_gp_size, false, "gp plb stream at va %x\n",
++      ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size);
++
++   if (ctx->damage.region)
++      lima_update_damage_pp_stream(ctx);
++   else if (ctx->plb_pp_stream)
++      lima_update_full_pp_stream(ctx);
++   else
++      ctx->pp_stream.bo = NULL;
++
++   struct lima_resource *res = lima_resource(ctx->framebuffer.cbuf->texture);
++   lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_WRITE);
++   lima_submit_add_bo(ctx->pp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_READ);
++   lima_submit_add_bo(ctx->pp_submit, screen->pp_buffer, LIMA_SUBMIT_BO_READ);
++}
++
++static void
++lima_clear(struct pipe_context *pctx, unsigned buffers,
++           const union pipe_color_union *color, double depth, unsigned stencil)
++{
++   debug_checkpoint();
++
++   struct lima_context *ctx = lima_context(pctx);
++   bool full_fb_clear = lima_is_scissor_full_fb(ctx);
++
++   if (full_fb_clear) {
++      lima_flush(ctx);
++
++      /* no need to reload if cleared */
++      if (buffers & PIPE_CLEAR_COLOR0) {
++         struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
++         surf->reload = false;
++      }
++   }
++
++   struct lima_context_clear *clear = &ctx->clear;
++   clear->buffers = buffers;
++
++   if (buffers & PIPE_CLEAR_COLOR0) {
++      clear->color_8pc =
++         ((uint32_t)float_to_ubyte(color->f[3]) << 24) |
++         ((uint32_t)float_to_ubyte(color->f[2]) << 16) |
++         ((uint32_t)float_to_ubyte(color->f[1]) << 8) |
++         float_to_ubyte(color->f[0]);
++
++      clear->color_16pc =
++         ((uint64_t)float_to_ushort(color->f[3]) << 48) |
++         ((uint64_t)float_to_ushort(color->f[2]) << 32) |
++         ((uint64_t)float_to_ushort(color->f[1]) << 16) |
++         float_to_ubyte(color->f[0]);
++   }
++
++   if (buffers & PIPE_CLEAR_DEPTH)
++      clear->depth = util_pack_z(PIPE_FORMAT_Z24X8_UNORM, depth);
++
++   if (buffers & PIPE_CLEAR_STENCIL)
++      clear->stencil = stencil;
++
++   lima_update_submit_bo(ctx);
++
++   lima_pack_head_plbu_cmd(ctx);
++
++   /* partial clear */
++   if (!full_fb_clear)
++      lima_pack_clear_plbu_cmd(ctx);
++
++   ctx->dirty |= LIMA_CONTEXT_DIRTY_CLEAR;
++}
++
+ enum lima_attrib_type {
+    LIMA_ATTRIB_FLOAT = 0x000,
+    /* todo: find out what lives here. */
+@@ -1294,32 +1325,6 @@ lima_update_varying(struct lima_context *ctx, const struct pipe_draw_info *info)
+ }
+ 
+ static void
+-lima_update_submit_bo(struct lima_context *ctx)
+-{
+-   struct lima_screen *screen = lima_screen(ctx->base.screen);
+-   lima_submit_add_bo(ctx->gp_submit, ctx->plb_gp_stream, LIMA_SUBMIT_BO_READ);
+-   lima_submit_add_bo(ctx->gp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_WRITE);
+-   lima_submit_add_bo(ctx->gp_submit, screen->gp_buffer, LIMA_SUBMIT_BO_READ);
+-
+-   lima_dump_command_stream_print(
+-      ctx->plb_gp_stream->map + ctx->plb_index * ctx->plb_gp_size,
+-      ctx->plb_gp_size, false, "gp plb stream at va %x\n",
+-      ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size);
+-
+-   if (ctx->damage.region)
+-      lima_update_damage_pp_stream(ctx);
+-   else if (ctx->plb_pp_stream)
+-      lima_update_full_pp_stream(ctx);
+-   else
+-      ctx->pp_stream.bo = NULL;
+-
+-   struct lima_resource *res = lima_resource(ctx->framebuffer.cbuf->texture);
+-   lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_WRITE);
+-   lima_submit_add_bo(ctx->pp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_READ);
+-   lima_submit_add_bo(ctx->pp_submit, screen->pp_buffer, LIMA_SUBMIT_BO_READ);
+-}
+-
+-static void
+ lima_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info)
+ {
+    debug_checkpoint();
+@@ -1345,6 +1350,8 @@ lima_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info)
+    lima_submit_add_bo(ctx->gp_submit, ctx->vs->bo, LIMA_SUBMIT_BO_READ);
+    lima_submit_add_bo(ctx->pp_submit, ctx->fs->bo, LIMA_SUBMIT_BO_READ);
+ 
++   lima_update_submit_bo(ctx);
++
+    lima_update_gp_attribute_info(ctx, info);
+ 
+    if ((ctx->dirty & LIMA_CONTEXT_DIRTY_CONST_BUFF &&
+@@ -1444,8 +1451,6 @@ lima_pack_pp_frame_reg(struct lima_context *ctx, uint32_t *frame_reg,
+ static void
+ _lima_flush(struct lima_context *ctx, bool end_of_frame)
+ {
+-   lima_update_submit_bo(ctx);
+-
+    lima_finish_plbu_cmd(ctx);
+ 
+    int vs_cmd_size = ctx->vs_cmd_array.size;
+-- 
+2.0.1
+

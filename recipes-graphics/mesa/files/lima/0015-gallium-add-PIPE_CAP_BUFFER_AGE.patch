@@ -1,0 +1,265 @@
+From 3a68637883efc883f52523b59526cfc7d875f024 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 28 Jun 2018 10:17:39 +0800
+Subject: [PATCH 15/47] gallium: add PIPE_CAP_BUFFER_AGE
+
+For gallium drivers to expose EGL/GLX_EXT_buffer_age.
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/docs/source/screen.rst                  | 1 +
+ src/gallium/drivers/etnaviv/etnaviv_screen.c        | 1 +
+ src/gallium/drivers/freedreno/freedreno_screen.c    | 1 +
+ src/gallium/drivers/i915/i915_screen.c              | 1 +
+ src/gallium/drivers/llvmpipe/lp_screen.c            | 1 +
+ src/gallium/drivers/nouveau/nv30/nv30_screen.c      | 1 +
+ src/gallium/drivers/nouveau/nv50/nv50_screen.c      | 1 +
+ src/gallium/drivers/nouveau/nvc0/nvc0_screen.c      | 1 +
+ src/gallium/drivers/r300/r300_screen.c              | 1 +
+ src/gallium/drivers/r600/r600_pipe.c                | 1 +
+ src/gallium/drivers/radeonsi/si_get.c               | 1 +
+ src/gallium/drivers/softpipe/sp_screen.c            | 1 +
+ src/gallium/drivers/svga/svga_screen.c              | 1 +
+ src/gallium/drivers/swr/swr_screen.cpp              | 1 +
+ src/gallium/drivers/v3d/v3d_screen.c                | 1 +
+ src/gallium/drivers/vc4/vc4_screen.c                | 1 +
+ src/gallium/drivers/virgl/virgl_screen.c            | 2 ++
+ src/gallium/include/pipe/p_defines.h                | 1 +
+ src/gallium/state_trackers/dri/dri_query_renderer.c | 4 +++-
+ 19 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/docs/source/screen.rst b/src/gallium/docs/source/screen.rst
+index e85246c..3d566f3 100644
+--- a/src/gallium/docs/source/screen.rst
++++ b/src/gallium/docs/source/screen.rst
+@@ -452,6 +452,7 @@ subpixel precision bias in bits during conservative rasterization.
+ * ``PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS``: True is the driver supports
+   programmable sample location through ```get_sample_pixel_grid``` and
+   ```set_sample_locations```.
++* ``PIPE_CAP_BUFFER_AGE``: True if the driver wants to expose EGL/GLX_EXT_buffer_age.
+ 
+ 
+ .. _pipe_capf:
+diff --git a/src/gallium/drivers/etnaviv/etnaviv_screen.c b/src/gallium/drivers/etnaviv/etnaviv_screen.c
+index 35707e6..cba4941 100644
+--- a/src/gallium/drivers/etnaviv/etnaviv_screen.c
++++ b/src/gallium/drivers/etnaviv/etnaviv_screen.c
+@@ -144,6 +144,7 @@ etna_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_TGSI_TEXCOORD:
+    case PIPE_CAP_VERTEX_COLOR_UNCLAMPED:
+    case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    case PIPE_CAP_NATIVE_FENCE_FD:
+       return screen->drm_version >= ETNA_DRM_VERSION_FENCE_FD;
+diff --git a/src/gallium/drivers/freedreno/freedreno_screen.c b/src/gallium/drivers/freedreno/freedreno_screen.c
+index 4d54446..50294f4 100644
+--- a/src/gallium/drivers/freedreno/freedreno_screen.c
++++ b/src/gallium/drivers/freedreno/freedreno_screen.c
+@@ -199,6 +199,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
+ 	case PIPE_CAP_TEXTURE_BARRIER:
+ 	case PIPE_CAP_INVALIDATE_BUFFER:
++	case PIPE_CAP_BUFFER_AGE:
+ 		return 1;
+ 
+ 	case PIPE_CAP_VERTEXID_NOBASE:
+diff --git a/src/gallium/drivers/i915/i915_screen.c b/src/gallium/drivers/i915/i915_screen.c
+index dda7c5b..c932ddc 100644
+--- a/src/gallium/drivers/i915/i915_screen.c
++++ b/src/gallium/drivers/i915/i915_screen.c
+@@ -205,6 +205,7 @@ i915_get_param(struct pipe_screen *screen, enum pipe_cap cap)
+    case PIPE_CAP_VERTEX_COLOR_CLAMPED:
+    case PIPE_CAP_USER_VERTEX_BUFFERS:
+    case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+ 
+    /* Unsupported features (boolean caps). */
+diff --git a/src/gallium/drivers/llvmpipe/lp_screen.c b/src/gallium/drivers/llvmpipe/lp_screen.c
+index 261bca9..dbd4317 100644
+--- a/src/gallium/drivers/llvmpipe/lp_screen.c
++++ b/src/gallium/drivers/llvmpipe/lp_screen.c
+@@ -110,6 +110,7 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_NPOT_TEXTURES:
+    case PIPE_CAP_MIXED_FRAMEBUFFER_SIZES:
+    case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    case PIPE_CAP_SM3:
+       return 1;
+diff --git a/src/gallium/drivers/nouveau/nv30/nv30_screen.c b/src/gallium/drivers/nouveau/nv30/nv30_screen.c
+index 556bd9b..8a76b5e 100644
+--- a/src/gallium/drivers/nouveau/nv30/nv30_screen.c
++++ b/src/gallium/drivers/nouveau/nv30/nv30_screen.c
+@@ -95,6 +95,7 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
+    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+    case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    /* nv35 capabilities */
+    case PIPE_CAP_DEPTH_BOUNDS_TEST:
+diff --git a/src/gallium/drivers/nouveau/nv50/nv50_screen.c b/src/gallium/drivers/nouveau/nv50/nv50_screen.c
+index cea6818..5063419 100644
+--- a/src/gallium/drivers/nouveau/nv50/nv50_screen.c
++++ b/src/gallium/drivers/nouveau/nv50/nv50_screen.c
+@@ -202,6 +202,7 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_TGSI_CLOCK:
+    case PIPE_CAP_CAN_BIND_CONST_BUFFER_AS_VERTEX:
+    case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    case PIPE_CAP_SEAMLESS_CUBE_MAP:
+       return 1; /* class_3d >= NVA0_3D_CLASS; */
+diff --git a/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c b/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c
+index daa4edb..95ce630 100644
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c
+@@ -253,6 +253,7 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_CAN_BIND_CONST_BUFFER_AS_VERTEX:
+    case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
+    case PIPE_CAP_QUERY_SO_OVERFLOW:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+       return nouveau_screen(pscreen)->vram_domain & NOUVEAU_BO_VRAM ? 1 : 0;
+diff --git a/src/gallium/drivers/r300/r300_screen.c b/src/gallium/drivers/r300/r300_screen.c
+index 046d68c..f89ed2c 100644
+--- a/src/gallium/drivers/r300/r300_screen.c
++++ b/src/gallium/drivers/r300/r300_screen.c
+@@ -111,6 +111,7 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+         case PIPE_CAP_BUFFER_MAP_PERSISTENT_COHERENT:
+         case PIPE_CAP_CLIP_HALFZ:
+         case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
++        case PIPE_CAP_BUFFER_AGE:
+             return 1;
+ 
+         case PIPE_CAP_MIN_MAP_BUFFER_ALIGNMENT:
+diff --git a/src/gallium/drivers/r600/r600_pipe.c b/src/gallium/drivers/r600/r600_pipe.c
+index ffed69a..41abe6c 100644
+--- a/src/gallium/drivers/r600/r600_pipe.c
++++ b/src/gallium/drivers/r600/r600_pipe.c
+@@ -306,6 +306,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_CAN_BIND_CONST_BUFFER_AS_VERTEX:
+ 	case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
+ 	case PIPE_CAP_ROBUST_BUFFER_ACCESS_BEHAVIOR:
++	case PIPE_CAP_BUFFER_AGE:
+ 		return 1;
+ 
+ 	case PIPE_CAP_DEVICE_RESET_STATUS_QUERY:
+diff --git a/src/gallium/drivers/radeonsi/si_get.c b/src/gallium/drivers/radeonsi/si_get.c
+index 6e80479..57d4ad3 100644
+--- a/src/gallium/drivers/radeonsi/si_get.c
++++ b/src/gallium/drivers/radeonsi/si_get.c
+@@ -187,6 +187,7 @@ static int si_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_TGSI_BALLOT:
+ 	case PIPE_CAP_TGSI_VOTE:
+ 	case PIPE_CAP_TGSI_FS_FBFETCH:
++	case PIPE_CAP_BUFFER_AGE:
+ 		return 1;
+ 
+ 	case PIPE_CAP_RESOURCE_FROM_USER_MEMORY:
+diff --git a/src/gallium/drivers/softpipe/sp_screen.c b/src/gallium/drivers/softpipe/sp_screen.c
+index 302bebf..12c3371 100644
+--- a/src/gallium/drivers/softpipe/sp_screen.c
++++ b/src/gallium/drivers/softpipe/sp_screen.c
+@@ -68,6 +68,7 @@ softpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_NPOT_TEXTURES:
+    case PIPE_CAP_MIXED_FRAMEBUFFER_SIZES:
+    case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    case PIPE_CAP_SM3:
+       return 1;
+diff --git a/src/gallium/drivers/svga/svga_screen.c b/src/gallium/drivers/svga/svga_screen.c
+index b8f936e..28714cc 100644
+--- a/src/gallium/drivers/svga/svga_screen.c
++++ b/src/gallium/drivers/svga/svga_screen.c
+@@ -192,6 +192,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_NPOT_TEXTURES:
+    case PIPE_CAP_MIXED_FRAMEBUFFER_SIZES:
+    case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+    case PIPE_CAP_MAX_DUAL_SOURCE_RENDER_TARGETS:
+       /*
+diff --git a/src/gallium/drivers/swr/swr_screen.cpp b/src/gallium/drivers/swr/swr_screen.cpp
+index 084f55d..c0a9e51 100644
+--- a/src/gallium/drivers/swr/swr_screen.cpp
++++ b/src/gallium/drivers/swr/swr_screen.cpp
+@@ -251,6 +251,7 @@ swr_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_CULL_DISTANCE:
+    case PIPE_CAP_CUBE_MAP_ARRAY:
+    case PIPE_CAP_DOUBLES:
++   case PIPE_CAP_BUFFER_AGE:
+       return 1;
+ 
+    /* MSAA support
+diff --git a/src/gallium/drivers/v3d/v3d_screen.c b/src/gallium/drivers/v3d/v3d_screen.c
+index 2f08479..db72456 100644
+--- a/src/gallium/drivers/v3d/v3d_screen.c
++++ b/src/gallium/drivers/v3d/v3d_screen.c
+@@ -110,6 +110,7 @@ v3d_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+         case PIPE_CAP_QUADS_FOLLOW_PROVOKING_VERTEX_CONVENTION:
+         case PIPE_CAP_SIGNED_VERTEX_BUFFER_OFFSET:
+         case PIPE_CAP_TGSI_CAN_READ_OUTPUTS:
++        case PIPE_CAP_BUFFER_AGE:
+                 return 1;
+ 
+         case PIPE_CAP_INDEP_BLEND_ENABLE:
+diff --git a/src/gallium/drivers/vc4/vc4_screen.c b/src/gallium/drivers/vc4/vc4_screen.c
+index 646e7fa..c1f8ab6 100644
+--- a/src/gallium/drivers/vc4/vc4_screen.c
++++ b/src/gallium/drivers/vc4/vc4_screen.c
+@@ -146,6 +146,7 @@ vc4_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+         case PIPE_CAP_GLSL_OPTIMIZE_CONSERVATIVELY:
+         case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
+         case PIPE_CAP_TEXTURE_BARRIER:
++        case PIPE_CAP_BUFFER_AGE:
+                 return 1;
+ 
+         case PIPE_CAP_NATIVE_FENCE_FD:
+diff --git a/src/gallium/drivers/virgl/virgl_screen.c b/src/gallium/drivers/virgl/virgl_screen.c
+index e17d257..76d34b0 100644
+--- a/src/gallium/drivers/virgl/virgl_screen.c
++++ b/src/gallium/drivers/virgl/virgl_screen.c
+@@ -186,6 +186,8 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
+       return 1;
+    case PIPE_CAP_TGSI_VS_LAYER_VIEWPORT:
+       return 0;
++   case PIPE_CAP_BUFFER_AGE:
++      return 1;
+    case PIPE_CAP_MAX_GEOMETRY_OUTPUT_VERTICES:
+       return vscreen->caps.caps.v2.max_geom_output_vertices;
+    case PIPE_CAP_MAX_GEOMETRY_TOTAL_OUTPUT_COMPONENTS:
+diff --git a/src/gallium/include/pipe/p_defines.h b/src/gallium/include/pipe/p_defines.h
+index a750f79..d2d785e 100644
+--- a/src/gallium/include/pipe/p_defines.h
++++ b/src/gallium/include/pipe/p_defines.h
+@@ -816,6 +816,7 @@ enum pipe_cap
+    PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE,
+    PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS,
+    PIPE_CAP_FORCE_COMPUTE_MINMAX_INDICES,
++   PIPE_CAP_BUFFER_AGE,
+ };
+ 
+ /**
+diff --git a/src/gallium/state_trackers/dri/dri_query_renderer.c b/src/gallium/state_trackers/dri/dri_query_renderer.c
+index c7bd428..e86ff5b 100644
+--- a/src/gallium/state_trackers/dri/dri_query_renderer.c
++++ b/src/gallium/state_trackers/dri/dri_query_renderer.c
+@@ -63,7 +63,9 @@ dri2_query_renderer_integer(__DRIscreen *_screen, int param,
+          return -1;
+       return 0;
+    case __DRI2_RENDERER_EXPOSE_BUFFER_AGE:
+-      value[0] = 1;
++      value[0] =
++         screen->base.screen->get_param(screen->base.screen,
++                                        PIPE_CAP_BUFFER_AGE);
+       return 0;
+    default:
+       return driQueryRendererIntegerCommon(_screen, param, value);
+-- 
+2.0.1
+

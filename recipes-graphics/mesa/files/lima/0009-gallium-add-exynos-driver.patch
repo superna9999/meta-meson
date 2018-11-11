@@ -1,0 +1,540 @@
+From a412919031c525721464447e90cc3a93fca08b6b Mon Sep 17 00:00:00 2001
+From: Simon Shields <simon@lineageos.org>
+Date: Fri, 27 Jul 2018 17:21:26 +0800
+Subject: [PATCH 09/47] gallium: add exynos driver
+
+A mesa driver for exynos is defined which will call into lima when 3D
+rendering is requested from it.
+This uses the renderonly library from mesa, which hides the buffer
+sharing details between the two drivers from the application.
+This allows applications that expect a single device node like
+/dev/dri/card0 (such as kmscube) to run unmodified on Exynos devices
+that use the exynos driver for display and have a Mali400 gpu using
+lima.
+
+This code is based off the sun4i-drm renderonly driver by
+Erico Nunes <nunes.erico@gmail.com>
+
+Signed-off-by: Simon Shields <simon@lineageos.org>
+---
+ .travis.yml                                        |  2 +-
+ Android.mk                                         |  5 +-
+ Makefile.am                                        |  2 +-
+ configure.ac                                       | 12 ++++-
+ src/gallium/Android.mk                             |  1 +
+ src/gallium/Makefile.am                            |  4 ++
+ .../auxiliary/pipe-loader/pipe_loader_drm.c        |  5 ++
+ src/gallium/auxiliary/target-helpers/drm_helper.h  | 23 +++++++++
+ .../auxiliary/target-helpers/drm_helper_public.h   |  3 ++
+ src/gallium/drivers/exynos/Android.mk              | 39 ++++++++++++++++
+ src/gallium/drivers/exynos/Automake.inc            |  9 ++++
+ src/gallium/drivers/exynos/Makefile.am             |  8 ++++
+ src/gallium/drivers/exynos/Makefile.sources        |  2 +
+ src/gallium/targets/dri/Makefile.am                |  1 +
+ src/gallium/targets/dri/target.c                   |  3 ++
+ src/gallium/winsys/exynos/drm/Android.mk           | 33 +++++++++++++
+ src/gallium/winsys/exynos/drm/Makefile.am          | 34 ++++++++++++++
+ src/gallium/winsys/exynos/drm/Makefile.sources     |  3 ++
+ src/gallium/winsys/exynos/drm/exynos_drm_public.h  | 31 +++++++++++++
+ src/gallium/winsys/exynos/drm/exynos_drm_winsys.c  | 54 ++++++++++++++++++++++
+ 20 files changed, 269 insertions(+), 5 deletions(-)
+ create mode 100644 src/gallium/drivers/exynos/Android.mk
+ create mode 100644 src/gallium/drivers/exynos/Automake.inc
+ create mode 100644 src/gallium/drivers/exynos/Makefile.am
+ create mode 100644 src/gallium/drivers/exynos/Makefile.sources
+ create mode 100644 src/gallium/winsys/exynos/drm/Android.mk
+ create mode 100644 src/gallium/winsys/exynos/drm/Makefile.am
+ create mode 100644 src/gallium/winsys/exynos/drm/Makefile.sources
+ create mode 100644 src/gallium/winsys/exynos/drm/exynos_drm_public.h
+ create mode 100644 src/gallium/winsys/exynos/drm/exynos_drm_winsys.c
+
+diff --git a/.travis.yml b/.travis.yml
+index c5ed957..6a49580 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -161,7 +161,7 @@ matrix:
+         - DRI_LOADERS="--disable-glx --disable-gbm --disable-egl"
+         - DRI_DRIVERS=""
+         - GALLIUM_ST="--enable-dri --disable-opencl --disable-xa --disable-nine --disable-xvmc --disable-vdpau --disable-va --disable-omx-bellagio --disable-gallium-osmesa"
+-        - GALLIUM_DRIVERS="i915,nouveau,pl111,r300,r600,freedreno,svga,swrast,v3d,vc4,virgl,etnaviv,imx,lima,sun4i"
++        - GALLIUM_DRIVERS="i915,nouveau,pl111,r300,r600,freedreno,svga,swrast,v3d,vc4,virgl,etnaviv,imx,lima,sun4i,exynos"
+         - VULKAN_DRIVERS=""
+         - LIBUNWIND_FLAGS="--enable-libunwind"
+       addons:
+diff --git a/Android.mk b/Android.mk
+index 36fb032..9705984 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -24,7 +24,7 @@
+ # BOARD_GPU_DRIVERS should be defined.  The valid values are
+ #
+ #   classic drivers: i915 i965
+-#   gallium drivers: swrast freedreno i915g nouveau pl111 r300g r600g radeonsi vc4 virgl vmwgfx etnaviv imx lima sun4i
++#   gallium drivers: swrast freedreno i915g nouveau pl111 r300g r600g radeonsi vc4 virgl vmwgfx etnaviv imx lima sun4i exynos
+ #
+ # The main target is libGLES_mesa.  For each classic driver enabled, a DRI
+ # module will also be built.  DRI modules will be loaded by libGLES_mesa.
+@@ -62,7 +62,8 @@ gallium_drivers := \
+ 	etnaviv.HAVE_GALLIUM_ETNAVIV \
+ 	imx.HAVE_GALLIUM_IMX \
+ 	lima.HAVE_GALLIUM_LIMA \
+-	sun4i.HAVE_GALLIUM_SUN4I
++	sun4i.HAVE_GALLIUM_SUN4I \
++	exynos.HAVE_GALLIUM_EXYNOS
+ 
+ ifeq ($(BOARD_GPU_DRIVERS),all)
+ MESA_BUILD_CLASSIC := $(filter HAVE_%, $(subst ., , $(classic_drivers)))
+diff --git a/Makefile.am b/Makefile.am
+index 9dee651..7abf2a9 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -45,7 +45,7 @@ AM_DISTCHECK_CONFIGURE_FLAGS = \
+ 	--enable-libunwind \
+ 	--with-platforms=x11,wayland,drm,surfaceless \
+ 	--with-dri-drivers=i915,i965,nouveau,radeon,r200,swrast \
+-	--with-gallium-drivers=i915,nouveau,r300,pl111,r600,radeonsi,freedreno,svga,swrast,vc4,tegra,virgl,swr,etnaviv,imx,lima,sun4i \
++	--with-gallium-drivers=i915,nouveau,r300,pl111,r600,radeonsi,freedreno,svga,swrast,vc4,tegra,virgl,swr,etnaviv,imx,lima,sun4i,exynos \
+ 	--with-vulkan-drivers=intel,radeon
+ 
+ ACLOCAL_AMFLAGS = -I m4
+diff --git a/configure.ac b/configure.ac
+index 6a7a380..0e612f0 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1366,7 +1366,7 @@ GALLIUM_DRIVERS_DEFAULT="r300,r600,svga,swrast"
+ AC_ARG_WITH([gallium-drivers],
+     [AS_HELP_STRING([--with-gallium-drivers@<:@=DIRS...@:>@],
+         [comma delimited Gallium drivers list, e.g.
+-        "i915,nouveau,r300,r600,radeonsi,freedreno,pl111,svga,swrast,swr,tegra,v3d,vc4,virgl,etnaviv,imx,lima,sun4i"
++        "i915,nouveau,r300,r600,radeonsi,freedreno,pl111,svga,swrast,swr,tegra,v3d,vc4,virgl,etnaviv,imx,lima,sun4i,exynos"
+         @<:@default=r300,r600,svga,swrast@:>@])],
+     [with_gallium_drivers="$withval"],
+     [with_gallium_drivers="$GALLIUM_DRIVERS_DEFAULT"])
+@@ -2810,6 +2810,9 @@ if test -n "$with_gallium_drivers"; then
+         xsun4i)
+             HAVE_GALLIUM_SUN4I=yes
+             ;;
++        xexynos)
++            HAVE_GALLIUM_EXYNOS=yes
++            ;;
+         *)
+             AC_MSG_ERROR([Unknown Gallium driver: $driver])
+             ;;
+@@ -2851,6 +2854,10 @@ if test "x$HAVE_GALLIUM_LIMA" != xyes -a "x$HAVE_GALLIUM_SUN4I" = xyes  ; then
+     AC_MSG_ERROR([Building with sun4i requires lima])
+ fi
+ 
++if test "x$HAVE_GALLIUM_LIMA" != xyes -a "X$HAVE_GALLIUM_EXYNOS" = xyes ; then
++    AC_MSG_ERROR([Building with exynos requires lima])
++fi
++
+ detect_old_buggy_llvm() {
+     dnl llvm-config may not give the right answer when llvm is a built as a
+     dnl single shared library, so we must work the library name out for
+@@ -2960,6 +2967,7 @@ AM_CONDITIONAL(HAVE_GALLIUM_VC4, test "x$HAVE_GALLIUM_VC4" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_VIRGL, test "x$HAVE_GALLIUM_VIRGL" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_LIMA, test "x$HAVE_GALLIUM_LIMA" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_SUN4I, test "x$HAVE_GALLIUM_SUN4I" = xyes)
++AM_CONDITIONAL(HAVE_GALLIUM_EXYNOS, test "x$HAVE_GALLIUM_EXYNOS" = xyes)
+ 
+ AM_CONDITIONAL(HAVE_GALLIUM_STATIC_TARGETS, test "x$enable_shared_pipe_drivers" = xno)
+ 
+@@ -3105,6 +3113,7 @@ AC_CONFIG_FILES([Makefile
+                  src/gallium/drivers/virgl/Makefile
+                  src/gallium/drivers/lima/Makefile
+                  src/gallium/drivers/sun4i/Makefile
++                 src/gallium/drivers/exynos/Makefile
+                  src/gallium/state_trackers/clover/Makefile
+                  src/gallium/state_trackers/dri/Makefile
+                  src/gallium/state_trackers/glx/xlib/Makefile
+@@ -3156,6 +3165,7 @@ AC_CONFIG_FILES([Makefile
+                  src/gallium/winsys/virgl/vtest/Makefile
+                  src/gallium/winsys/lima/drm/Makefile
+                  src/gallium/winsys/sun4i/drm/Makefile
++                 src/gallium/winsys/exynos/drm/Makefile
+                  src/gbm/Makefile
+                  src/gbm/main/gbm.pc
+                  src/glx/Makefile
+diff --git a/src/gallium/Android.mk b/src/gallium/Android.mk
+index d5e35b8..3486e2e 100644
+--- a/src/gallium/Android.mk
++++ b/src/gallium/Android.mk
+@@ -49,6 +49,7 @@ SUBDIRS += winsys/etnaviv/drm drivers/etnaviv drivers/renderonly
+ SUBDIRS += winsys/imx/drm
+ SUBDIRS += winsys/lima/drm drivers/lima
+ SUBDIRS += winsys/sun4i/drm drivers/sun4i
++SUBDIRS += winsys/exynos/drm drivers/exynos
+ SUBDIRS += state_trackers/dri
+ 
+ # sort to eliminate any duplicates
+diff --git a/src/gallium/Makefile.am b/src/gallium/Makefile.am
+index 539de39..0a2d1f0 100644
+--- a/src/gallium/Makefile.am
++++ b/src/gallium/Makefile.am
+@@ -107,6 +107,10 @@ if HAVE_GALLIUM_SUN4I
+ SUBDIRS += drivers/sun4i winsys/sun4i/drm
+ endif
+ 
++if HAVE_GALLIUM_EXYNOS
++SUBDIRS += drivers/exynos winsys/exynos/drm
++endif
++
+ ## the sw winsys'
+ SUBDIRS += winsys/sw/null
+ 
+diff --git a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+index 97f640a..f20614d 100644
+--- a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
++++ b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+@@ -150,6 +150,11 @@ static const struct drm_driver_descriptor driver_descriptors[] = {
+         .create_screen = pipe_sun4i_create_screen,
+         .configuration = pipe_default_configuration_query,
+     },
++    {
++        .driver_name = "exynos",
++        .create_screen = pipe_exynos_create_screen,
++        .configuration = pipe_default_configuration_query,
++    },
+ };
+ #endif
+ 
+diff --git a/src/gallium/auxiliary/target-helpers/drm_helper.h b/src/gallium/auxiliary/target-helpers/drm_helper.h
+index b10d88e..cfdae13 100644
+--- a/src/gallium/auxiliary/target-helpers/drm_helper.h
++++ b/src/gallium/auxiliary/target-helpers/drm_helper.h
+@@ -449,4 +449,27 @@ pipe_sun4i_create_screen(int fd, const struct pipe_screen_config *config)
+ 
+ #endif
+ 
++#ifdef GALLIUM_EXYNOS
++#include "exynos/drm/exynos_drm_public.h"
++
++struct pipe_screen *
++pipe_exynos_create_screen(int fd, const struct pipe_screen_config *config)
++{
++   struct pipe_screen *screen;
++
++   screen = exynos_screen_create(fd);
++   return screen ? debug_screen_wrap(screen) : NULL;
++}
++
++#else
++
++struct pipe_screen *
++pipe_exynos_create_screen(int fd, const struct pipe_screen_config *config)
++{
++   fprintf(stderr, "exynos: driver missing\n");
++   return NULL;
++}
++
++#endif
++
+ #endif /* DRM_HELPER_H */
+diff --git a/src/gallium/auxiliary/target-helpers/drm_helper_public.h b/src/gallium/auxiliary/target-helpers/drm_helper_public.h
+index 7b773e4..510fbe6 100644
+--- a/src/gallium/auxiliary/target-helpers/drm_helper_public.h
++++ b/src/gallium/auxiliary/target-helpers/drm_helper_public.h
+@@ -60,6 +60,9 @@ pipe_lima_create_screen(int fd, const struct pipe_screen_config *config);
+ struct pipe_screen *
+ pipe_sun4i_create_screen(int fd, const struct pipe_screen_config *config);
+ 
++struct pipe_screen *
++pipe_exynos_create_screen(int fd, const struct pipe_screen_config *config);
++
+ const struct drm_conf_ret *
+ pipe_default_configuration_query(enum drm_conf conf);
+ 
+diff --git a/src/gallium/drivers/exynos/Android.mk b/src/gallium/drivers/exynos/Android.mk
+new file mode 100644
+index 0000000..dbb1ec4
+--- /dev/null
++++ b/src/gallium/drivers/exynos/Android.mk
+@@ -0,0 +1,39 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included
++# in all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++LOCAL_PATH := $(call my-dir)
++
++# get C_SOURCES
++include $(LOCAL_PATH)/Makefile.sources
++
++include $(CLEAR_VARS)
++
++LOCAL_SRC_FILES := \
++	$(C_SOURCES)
++
++LOCAL_MODULE := libmesa_pipe_exynos
++
++include $(GALLIUM_COMMON_MK)
++include $(BUILD_STATIC_LIBRARY)
++
++ifneq ($(HAVE_GALLIUM_EXYNOS),)
++GALLIUM_TARGET_DRIVERS += exynos
++$(eval GALLIUM_LIBS += $(LOCAL_MODULE) libmesa_winsys_exynos)
++endif
+diff --git a/src/gallium/drivers/exynos/Automake.inc b/src/gallium/drivers/exynos/Automake.inc
+new file mode 100644
+index 0000000..a921a5a
+--- /dev/null
++++ b/src/gallium/drivers/exynos/Automake.inc
+@@ -0,0 +1,9 @@
++if HAVE_GALLIUM_EXYNOS
++
++TARGET_DRIVERS += exynos
++TARGET_CPPFLAGS += -DGALLIUM_EXYNOS
++TARGET_LIB_DEPS += \
++    $(top_builddir)/src/gallium/winsys/exynos/drm/libexynosdrm.la \
++    $(LIBDRM_LIBS)
++
++endif
+diff --git a/src/gallium/drivers/exynos/Makefile.am b/src/gallium/drivers/exynos/Makefile.am
+new file mode 100644
+index 0000000..987a6de
+--- /dev/null
++++ b/src/gallium/drivers/exynos/Makefile.am
+@@ -0,0 +1,8 @@
++include $(top_srcdir)/src/gallium/Automake.inc
++
++AM_CPPFLAGS = \
++	$(GALLIUM_CFLAGS)
++
++noinst_LTLIBRARIES = libexynos.la
++
++libexynos_la_SOURCES = $(C_SOURCES)
+diff --git a/src/gallium/drivers/exynos/Makefile.sources b/src/gallium/drivers/exynos/Makefile.sources
+new file mode 100644
+index 0000000..2039675
+--- /dev/null
++++ b/src/gallium/drivers/exynos/Makefile.sources
+@@ -0,0 +1,2 @@
++C_SOURCES :=
++
+diff --git a/src/gallium/targets/dri/Makefile.am b/src/gallium/targets/dri/Makefile.am
+index 1295641..047111b 100644
+--- a/src/gallium/targets/dri/Makefile.am
++++ b/src/gallium/targets/dri/Makefile.am
+@@ -87,6 +87,7 @@ include $(top_srcdir)/src/gallium/drivers/imx/Automake.inc
+ 
+ include $(top_srcdir)/src/gallium/drivers/lima/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/sun4i/Automake.inc
++include $(top_srcdir)/src/gallium/drivers/exynos/Automake.inc
+ 
+ include $(top_srcdir)/src/gallium/drivers/softpipe/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/llvmpipe/Automake.inc
+diff --git a/src/gallium/targets/dri/target.c b/src/gallium/targets/dri/target.c
+index c577c31..6428e66 100644
+--- a/src/gallium/targets/dri/target.c
++++ b/src/gallium/targets/dri/target.c
+@@ -96,4 +96,7 @@ DEFINE_LOADER_DRM_ENTRYPOINT(lima)
+ #if defined(GALLIUM_SUN4I)
+ DEFINE_LOADER_DRM_ENTRYPOINT(sun4i_drm)
+ #endif
++#if defined(GALLIUM_EXYNOS)
++DEFINE_LOADER_DRM_ENTRYPOINT(exynos)
++#endif
+ #endif
+diff --git a/src/gallium/winsys/exynos/drm/Android.mk b/src/gallium/winsys/exynos/drm/Android.mk
+new file mode 100644
+index 0000000..dfb577c
+--- /dev/null
++++ b/src/gallium/winsys/exynos/drm/Android.mk
+@@ -0,0 +1,33 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included
++# in all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++LOCAL_PATH := $(call my-dir)
++
++# get C_SOURCES
++include $(LOCAL_PATH)/Makefile.sources
++
++include $(CLEAR_VARS)
++
++LOCAL_SRC_FILES := $(C_SOURCES)
++
++LOCAL_MODULE := libmesa_winsys_exynos
++
++include $(GALLIUM_COMMON_MK)
++include $(BUILD_STATIC_LIBRARY)
+diff --git a/src/gallium/winsys/exynos/drm/Makefile.am b/src/gallium/winsys/exynos/drm/Makefile.am
+new file mode 100644
+index 0000000..63ed67f
+--- /dev/null
++++ b/src/gallium/winsys/exynos/drm/Makefile.am
+@@ -0,0 +1,34 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice (including the next
++# paragraph) shall be included in all copies or substantial portions of the
++# Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++# NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++include Makefile.sources
++include $(top_srcdir)/src/gallium/Automake.inc
++
++AM_CFLAGS = \
++	-I$(top_srcdir)/src/gallium/drivers \
++	-I$(top_srcdir)/src/gallium/winsys \
++	$(GALLIUM_WINSYS_CFLAGS) \
++	$(LIBDRM_CFLAGS)
++
++noinst_LTLIBRARIES = libexynosdrm.la
++
++libexynosdrm_la_SOURCES = $(C_SOURCES)
+diff --git a/src/gallium/winsys/exynos/drm/Makefile.sources b/src/gallium/winsys/exynos/drm/Makefile.sources
+new file mode 100644
+index 0000000..e7b472c
+--- /dev/null
++++ b/src/gallium/winsys/exynos/drm/Makefile.sources
+@@ -0,0 +1,3 @@
++C_SOURCES := \
++   exynos_drm_public.h \
++   exynos_drm_winsys.c
+diff --git a/src/gallium/winsys/exynos/drm/exynos_drm_public.h b/src/gallium/winsys/exynos/drm/exynos_drm_public.h
+new file mode 100644
+index 0000000..8854f6e
+--- /dev/null
++++ b/src/gallium/winsys/exynos/drm/exynos_drm_public.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (c) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#ifndef __EXYNOS_DRM_PUBLIC_H__
++#define __EXYNOS_DRM_PUBLIC_H__
++
++struct pipe_screen;
++
++struct pipe_screen *exynos_screen_create(int fd);
++
++#endif /* __EXYNOS_DRM_PUBLIC_H__ */
+diff --git a/src/gallium/winsys/exynos/drm/exynos_drm_winsys.c b/src/gallium/winsys/exynos/drm/exynos_drm_winsys.c
+new file mode 100644
+index 0000000..1fa0e55
+--- /dev/null
++++ b/src/gallium/winsys/exynos/drm/exynos_drm_winsys.c
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include "exynos_drm_public.h"
++#include "lima/drm/lima_drm_public.h"
++#include "xf86drm.h"
++
++#include "pipe/p_screen.h"
++#include "renderonly/renderonly.h"
++
++struct pipe_screen *exynos_screen_create(int fd)
++{
++   struct renderonly ro = {
++      /* Passes the lima-allocated BO through to the exynos DRM device using
++       * PRIME buffer sharing.  The lima BO must be linear, which the SCANOUT
++       * flag on allocation will have ensured.
++       */
++      .create_for_resource = renderonly_create_kms_dumb_buffer_for_resource,
++      .kms_fd = fd,
++      .gpu_fd = drmOpenWithType("lima", NULL, DRM_NODE_RENDER),
++   };
++
++   if (ro.gpu_fd < 0)
++      return NULL;
++
++   struct pipe_screen *screen = lima_drm_screen_create_renderonly(&ro);
++   if (!screen)
++      close(ro.gpu_fd);
++
++   return screen;
++}
+-- 
+2.0.1
+

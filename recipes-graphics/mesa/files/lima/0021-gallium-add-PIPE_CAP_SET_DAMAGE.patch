@@ -1,0 +1,233 @@
+From 8876217035c4968e9afde6154b27d2e399324302 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Sun, 5 Aug 2018 19:10:47 +0800
+Subject: [PATCH 21/47] gallium: add PIPE_CAP_SET_DAMAGE
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/etnaviv/etnaviv_screen.c     | 1 +
+ src/gallium/drivers/freedreno/freedreno_screen.c | 1 +
+ src/gallium/drivers/i915/i915_screen.c           | 1 +
+ src/gallium/drivers/llvmpipe/lp_screen.c         | 1 +
+ src/gallium/drivers/nouveau/nv30/nv30_screen.c   | 1 +
+ src/gallium/drivers/nouveau/nv50/nv50_screen.c   | 1 +
+ src/gallium/drivers/nouveau/nvc0/nvc0_screen.c   | 1 +
+ src/gallium/drivers/r300/r300_screen.c           | 1 +
+ src/gallium/drivers/r600/r600_pipe.c             | 1 +
+ src/gallium/drivers/radeonsi/si_get.c            | 1 +
+ src/gallium/drivers/softpipe/sp_screen.c         | 1 +
+ src/gallium/drivers/svga/svga_screen.c           | 1 +
+ src/gallium/drivers/swr/swr_screen.cpp           | 1 +
+ src/gallium/drivers/v3d/v3d_screen.c             | 1 +
+ src/gallium/drivers/vc4/vc4_screen.c             | 1 +
+ src/gallium/drivers/virgl/virgl_screen.c         | 1 +
+ src/gallium/include/pipe/p_defines.h             | 1 +
+ 17 files changed, 17 insertions(+)
+
+diff --git a/src/gallium/drivers/etnaviv/etnaviv_screen.c b/src/gallium/drivers/etnaviv/etnaviv_screen.c
+index cba4941..d8cd4d1 100644
+--- a/src/gallium/drivers/etnaviv/etnaviv_screen.c
++++ b/src/gallium/drivers/etnaviv/etnaviv_screen.c
+@@ -284,6 +284,7 @@ etna_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PACKED_UNIFORMS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+ 
+    /* Stream output. */
+diff --git a/src/gallium/drivers/freedreno/freedreno_screen.c b/src/gallium/drivers/freedreno/freedreno_screen.c
+index 50294f4..83aa9fd 100644
+--- a/src/gallium/drivers/freedreno/freedreno_screen.c
++++ b/src/gallium/drivers/freedreno/freedreno_screen.c
+@@ -367,6 +367,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+ 	case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+ 	case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++	case PIPE_CAP_SET_DAMAGE:
+ 		return 0;
+ 
+ 	case PIPE_CAP_CONTEXT_PRIORITY_MASK:
+diff --git a/src/gallium/drivers/i915/i915_screen.c b/src/gallium/drivers/i915/i915_screen.c
+index c932ddc..429b81f 100644
+--- a/src/gallium/drivers/i915/i915_screen.c
++++ b/src/gallium/drivers/i915/i915_screen.c
+@@ -336,6 +336,7 @@ i915_get_param(struct pipe_screen *screen, enum pipe_cap cap)
+    case PIPE_CAP_CONSTBUF0_FLAGS:
+    case PIPE_CAP_PACKED_UNIFORMS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+ 
+    case PIPE_CAP_MAX_VIEWPORTS:
+diff --git a/src/gallium/drivers/llvmpipe/lp_screen.c b/src/gallium/drivers/llvmpipe/lp_screen.c
+index dbd4317..498c416 100644
+--- a/src/gallium/drivers/llvmpipe/lp_screen.c
++++ b/src/gallium/drivers/llvmpipe/lp_screen.c
+@@ -373,6 +373,7 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+    }
+    /* should only get here on unhandled cases */
+diff --git a/src/gallium/drivers/nouveau/nv30/nv30_screen.c b/src/gallium/drivers/nouveau/nv30/nv30_screen.c
+index 8a76b5e..88f7a0f 100644
+--- a/src/gallium/drivers/nouveau/nv30/nv30_screen.c
++++ b/src/gallium/drivers/nouveau/nv30/nv30_screen.c
+@@ -239,6 +239,7 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+ 
+    case PIPE_CAP_VENDOR_ID:
+diff --git a/src/gallium/drivers/nouveau/nv50/nv50_screen.c b/src/gallium/drivers/nouveau/nv50/nv50_screen.c
+index 5063419..b4c70dc 100644
+--- a/src/gallium/drivers/nouveau/nv50/nv50_screen.c
++++ b/src/gallium/drivers/nouveau/nv50/nv50_screen.c
+@@ -293,6 +293,7 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+ 
+    case PIPE_CAP_VENDOR_ID:
+diff --git a/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c b/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c
+index 95ce630..0629cb4 100644
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_screen.c
+@@ -316,6 +316,7 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_CONSTBUF0_FLAGS:
+    case PIPE_CAP_PACKED_UNIFORMS:
+    case PIPE_CAP_CONSERVATIVE_RASTER_PRE_SNAP_POINTS_LINES:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+ 
+    case PIPE_CAP_VENDOR_ID:
+diff --git a/src/gallium/drivers/r300/r300_screen.c b/src/gallium/drivers/r300/r300_screen.c
+index f89ed2c..68300a0 100644
+--- a/src/gallium/drivers/r300/r300_screen.c
++++ b/src/gallium/drivers/r300/r300_screen.c
+@@ -261,6 +261,7 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+         case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+         case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+         case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++        case PIPE_CAP_SET_DAMAGE:
+             return 0;
+ 
+         /* SWTCL-only features. */
+diff --git a/src/gallium/drivers/r600/r600_pipe.c b/src/gallium/drivers/r600/r600_pipe.c
+index 41abe6c..71f84d4 100644
+--- a/src/gallium/drivers/r600/r600_pipe.c
++++ b/src/gallium/drivers/r600/r600_pipe.c
+@@ -431,6 +431,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+ 	case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+ 	case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++	case PIPE_CAP_SET_DAMAGE:
+ 		return 0;
+ 
+ 	case PIPE_CAP_DOUBLES:
+diff --git a/src/gallium/drivers/radeonsi/si_get.c b/src/gallium/drivers/radeonsi/si_get.c
+index 57d4ad3..f35041a 100644
+--- a/src/gallium/drivers/radeonsi/si_get.c
++++ b/src/gallium/drivers/radeonsi/si_get.c
+@@ -259,6 +259,7 @@ static int si_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+ 	case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+ 	case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++	case PIPE_CAP_SET_DAMAGE:
+ 		return 0;
+ 
+ 	case PIPE_CAP_FENCE_SIGNAL:
+diff --git a/src/gallium/drivers/softpipe/sp_screen.c b/src/gallium/drivers/softpipe/sp_screen.c
+index 12c3371..516252e 100644
+--- a/src/gallium/drivers/softpipe/sp_screen.c
++++ b/src/gallium/drivers/softpipe/sp_screen.c
+@@ -325,6 +325,7 @@ softpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+    case PIPE_CAP_SHADER_BUFFER_OFFSET_ALIGNMENT:
+       return 4;
+diff --git a/src/gallium/drivers/svga/svga_screen.c b/src/gallium/drivers/svga/svga_screen.c
+index 28714cc..3126176 100644
+--- a/src/gallium/drivers/svga/svga_screen.c
++++ b/src/gallium/drivers/svga/svga_screen.c
+@@ -471,6 +471,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_CONSTBUF0_FLAGS:
+    case PIPE_CAP_PACKED_UNIFORMS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+    }
+ 
+diff --git a/src/gallium/drivers/swr/swr_screen.cpp b/src/gallium/drivers/swr/swr_screen.cpp
+index c0a9e51..f3a2a71 100644
+--- a/src/gallium/drivers/swr/swr_screen.cpp
++++ b/src/gallium/drivers/swr/swr_screen.cpp
+@@ -362,6 +362,7 @@ swr_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+ 
+    case PIPE_CAP_VENDOR_ID:
+diff --git a/src/gallium/drivers/v3d/v3d_screen.c b/src/gallium/drivers/v3d/v3d_screen.c
+index db72456..705db49 100644
+--- a/src/gallium/drivers/v3d/v3d_screen.c
++++ b/src/gallium/drivers/v3d/v3d_screen.c
+@@ -273,6 +273,7 @@ v3d_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+         case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+         case PIPE_CAP_PACKED_UNIFORMS:
+         case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++        case PIPE_CAP_SET_DAMAGE:
+                 return 0;
+ 
+                 /* Geometry shader output, unsupported. */
+diff --git a/src/gallium/drivers/vc4/vc4_screen.c b/src/gallium/drivers/vc4/vc4_screen.c
+index c1f8ab6..ac00d08 100644
+--- a/src/gallium/drivers/vc4/vc4_screen.c
++++ b/src/gallium/drivers/vc4/vc4_screen.c
+@@ -301,6 +301,7 @@ vc4_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+         case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+         case PIPE_CAP_PACKED_UNIFORMS:
+         case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++        case PIPE_CAP_SET_DAMAGE:
+                 return 0;
+ 
+                 /* Stream output. */
+diff --git a/src/gallium/drivers/virgl/virgl_screen.c b/src/gallium/drivers/virgl/virgl_screen.c
+index 76d34b0..e405d64 100644
+--- a/src/gallium/drivers/virgl/virgl_screen.c
++++ b/src/gallium/drivers/virgl/virgl_screen.c
+@@ -304,6 +304,7 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE:
+    case PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS:
+    case PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS:
++   case PIPE_CAP_SET_DAMAGE:
+       return 0;
+    case PIPE_CAP_VENDOR_ID:
+       return 0x1af4;
+diff --git a/src/gallium/include/pipe/p_defines.h b/src/gallium/include/pipe/p_defines.h
+index d2d785e..74080be 100644
+--- a/src/gallium/include/pipe/p_defines.h
++++ b/src/gallium/include/pipe/p_defines.h
+@@ -817,6 +817,7 @@ enum pipe_cap
+    PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS,
+    PIPE_CAP_FORCE_COMPUTE_MINMAX_INDICES,
+    PIPE_CAP_BUFFER_AGE,
++   PIPE_CAP_SET_DAMAGE,
+ };
+ 
+ /**
+-- 
+2.0.1
+

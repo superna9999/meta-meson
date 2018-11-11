@@ -1,0 +1,547 @@
+From 5f19324b3d8f1d3bb02924b87bc7b37f321215e2 Mon Sep 17 00:00:00 2001
+From: Erico Nunes <nunes.erico@gmail.com>
+Date: Fri, 27 Jul 2018 16:54:34 +0800
+Subject: [PATCH 08/47] gallium: add sun4i driver
+
+A mesa driver for sun4i-drm is defined which will call into lima when 3D
+rendering is requested from it.
+This uses the renderonly library from mesa, which hides the buffer
+sharing details between the two drivers from the application.
+This allows applications that expect a single device node like
+/dev/dri/card0 (such as kmscube) to run unmodified on Allwinner devices
+that use the sun4i-drm driver for display and have a Mali400 gpu using
+lima.
+
+This follows the model of the vc4+pl111 drivers existing in mesa.
+The code implemented here is mostly borrowed from that particular
+implementation.
+
+The driver is called sun4i in mesa and it will intentionally generate
+sun4i-drm_dri.so.
+This is because mesa will look for a *_dri.so user space driver named
+after the corresponding kernel driver, which in this case is called
+sun4i-drm.
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+---
+ .travis.yml                                        |  2 +-
+ Android.mk                                         |  5 +-
+ Makefile.am                                        |  2 +-
+ configure.ac                                       | 12 ++++-
+ src/gallium/Android.mk                             |  1 +
+ src/gallium/Makefile.am                            |  4 ++
+ .../auxiliary/pipe-loader/pipe_loader_drm.c        |  5 ++
+ src/gallium/auxiliary/target-helpers/drm_helper.h  | 23 +++++++++
+ .../auxiliary/target-helpers/drm_helper_public.h   |  3 ++
+ src/gallium/drivers/sun4i/Android.mk               | 39 ++++++++++++++++
+ src/gallium/drivers/sun4i/Automake.inc             |  9 ++++
+ src/gallium/drivers/sun4i/Makefile.am              |  8 ++++
+ src/gallium/drivers/sun4i/Makefile.sources         |  2 +
+ src/gallium/targets/dri/Makefile.am                |  1 +
+ src/gallium/targets/dri/target.c                   |  3 ++
+ src/gallium/winsys/sun4i/drm/Android.mk            | 33 +++++++++++++
+ src/gallium/winsys/sun4i/drm/Makefile.am           | 34 ++++++++++++++
+ src/gallium/winsys/sun4i/drm/Makefile.sources      |  3 ++
+ src/gallium/winsys/sun4i/drm/sun4i_drm_public.h    | 31 +++++++++++++
+ src/gallium/winsys/sun4i/drm/sun4i_drm_winsys.c    | 54 ++++++++++++++++++++++
+ 20 files changed, 269 insertions(+), 5 deletions(-)
+ create mode 100644 src/gallium/drivers/sun4i/Android.mk
+ create mode 100644 src/gallium/drivers/sun4i/Automake.inc
+ create mode 100644 src/gallium/drivers/sun4i/Makefile.am
+ create mode 100644 src/gallium/drivers/sun4i/Makefile.sources
+ create mode 100644 src/gallium/winsys/sun4i/drm/Android.mk
+ create mode 100644 src/gallium/winsys/sun4i/drm/Makefile.am
+ create mode 100644 src/gallium/winsys/sun4i/drm/Makefile.sources
+ create mode 100644 src/gallium/winsys/sun4i/drm/sun4i_drm_public.h
+ create mode 100644 src/gallium/winsys/sun4i/drm/sun4i_drm_winsys.c
+
+diff --git a/.travis.yml b/.travis.yml
+index f31f694..c5ed957 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -161,7 +161,7 @@ matrix:
+         - DRI_LOADERS="--disable-glx --disable-gbm --disable-egl"
+         - DRI_DRIVERS=""
+         - GALLIUM_ST="--enable-dri --disable-opencl --disable-xa --disable-nine --disable-xvmc --disable-vdpau --disable-va --disable-omx-bellagio --disable-gallium-osmesa"
+-        - GALLIUM_DRIVERS="i915,nouveau,pl111,r300,r600,freedreno,svga,swrast,v3d,vc4,virgl,etnaviv,imx,lima"
++        - GALLIUM_DRIVERS="i915,nouveau,pl111,r300,r600,freedreno,svga,swrast,v3d,vc4,virgl,etnaviv,imx,lima,sun4i"
+         - VULKAN_DRIVERS=""
+         - LIBUNWIND_FLAGS="--enable-libunwind"
+       addons:
+diff --git a/Android.mk b/Android.mk
+index f457292..36fb032 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -24,7 +24,7 @@
+ # BOARD_GPU_DRIVERS should be defined.  The valid values are
+ #
+ #   classic drivers: i915 i965
+-#   gallium drivers: swrast freedreno i915g nouveau pl111 r300g r600g radeonsi vc4 virgl vmwgfx etnaviv imx lima
++#   gallium drivers: swrast freedreno i915g nouveau pl111 r300g r600g radeonsi vc4 virgl vmwgfx etnaviv imx lima sun4i
+ #
+ # The main target is libGLES_mesa.  For each classic driver enabled, a DRI
+ # module will also be built.  DRI modules will be loaded by libGLES_mesa.
+@@ -61,7 +61,8 @@ gallium_drivers := \
+ 	virgl.HAVE_GALLIUM_VIRGL \
+ 	etnaviv.HAVE_GALLIUM_ETNAVIV \
+ 	imx.HAVE_GALLIUM_IMX \
+-	lima.HAVE_GALLIUM_LIMA
++	lima.HAVE_GALLIUM_LIMA \
++	sun4i.HAVE_GALLIUM_SUN4I
+ 
+ ifeq ($(BOARD_GPU_DRIVERS),all)
+ MESA_BUILD_CLASSIC := $(filter HAVE_%, $(subst ., , $(classic_drivers)))
+diff --git a/Makefile.am b/Makefile.am
+index 46fb3c3..9dee651 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -45,7 +45,7 @@ AM_DISTCHECK_CONFIGURE_FLAGS = \
+ 	--enable-libunwind \
+ 	--with-platforms=x11,wayland,drm,surfaceless \
+ 	--with-dri-drivers=i915,i965,nouveau,radeon,r200,swrast \
+-	--with-gallium-drivers=i915,nouveau,r300,pl111,r600,radeonsi,freedreno,svga,swrast,vc4,tegra,virgl,swr,etnaviv,imx,lima \
++	--with-gallium-drivers=i915,nouveau,r300,pl111,r600,radeonsi,freedreno,svga,swrast,vc4,tegra,virgl,swr,etnaviv,imx,lima,sun4i \
+ 	--with-vulkan-drivers=intel,radeon
+ 
+ ACLOCAL_AMFLAGS = -I m4
+diff --git a/configure.ac b/configure.ac
+index bdcd625..6a7a380 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1366,7 +1366,7 @@ GALLIUM_DRIVERS_DEFAULT="r300,r600,svga,swrast"
+ AC_ARG_WITH([gallium-drivers],
+     [AS_HELP_STRING([--with-gallium-drivers@<:@=DIRS...@:>@],
+         [comma delimited Gallium drivers list, e.g.
+-        "i915,nouveau,r300,r600,radeonsi,freedreno,pl111,svga,swrast,swr,tegra,v3d,vc4,virgl,etnaviv,imx,lima"
++        "i915,nouveau,r300,r600,radeonsi,freedreno,pl111,svga,swrast,swr,tegra,v3d,vc4,virgl,etnaviv,imx,lima,sun4i"
+         @<:@default=r300,r600,svga,swrast@:>@])],
+     [with_gallium_drivers="$withval"],
+     [with_gallium_drivers="$GALLIUM_DRIVERS_DEFAULT"])
+@@ -2807,6 +2807,9 @@ if test -n "$with_gallium_drivers"; then
+             HAVE_GALLIUM_LIMA=yes
+             require_libdrm "lima"
+             ;;
++        xsun4i)
++            HAVE_GALLIUM_SUN4I=yes
++            ;;
+         *)
+             AC_MSG_ERROR([Unknown Gallium driver: $driver])
+             ;;
+@@ -2844,6 +2847,10 @@ if test "x$HAVE_GALLIUM_NOUVEAU" != xyes -a "x$HAVE_GALLIUM_TEGRA" = xyes; then
+     AC_MSG_ERROR([Building with tegra requires nouveau])
+ fi
+ 
++if test "x$HAVE_GALLIUM_LIMA" != xyes -a "x$HAVE_GALLIUM_SUN4I" = xyes  ; then
++    AC_MSG_ERROR([Building with sun4i requires lima])
++fi
++
+ detect_old_buggy_llvm() {
+     dnl llvm-config may not give the right answer when llvm is a built as a
+     dnl single shared library, so we must work the library name out for
+@@ -2952,6 +2959,7 @@ AM_CONDITIONAL(HAVE_GALLIUM_V3D, test "x$HAVE_GALLIUM_V3D" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_VC4, test "x$HAVE_GALLIUM_VC4" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_VIRGL, test "x$HAVE_GALLIUM_VIRGL" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_LIMA, test "x$HAVE_GALLIUM_LIMA" = xyes)
++AM_CONDITIONAL(HAVE_GALLIUM_SUN4I, test "x$HAVE_GALLIUM_SUN4I" = xyes)
+ 
+ AM_CONDITIONAL(HAVE_GALLIUM_STATIC_TARGETS, test "x$enable_shared_pipe_drivers" = xno)
+ 
+@@ -3096,6 +3104,7 @@ AC_CONFIG_FILES([Makefile
+                  src/gallium/drivers/vc4/Makefile
+                  src/gallium/drivers/virgl/Makefile
+                  src/gallium/drivers/lima/Makefile
++                 src/gallium/drivers/sun4i/Makefile
+                  src/gallium/state_trackers/clover/Makefile
+                  src/gallium/state_trackers/dri/Makefile
+                  src/gallium/state_trackers/glx/xlib/Makefile
+@@ -3146,6 +3155,7 @@ AC_CONFIG_FILES([Makefile
+                  src/gallium/winsys/virgl/drm/Makefile
+                  src/gallium/winsys/virgl/vtest/Makefile
+                  src/gallium/winsys/lima/drm/Makefile
++                 src/gallium/winsys/sun4i/drm/Makefile
+                  src/gbm/Makefile
+                  src/gbm/main/gbm.pc
+                  src/glx/Makefile
+diff --git a/src/gallium/Android.mk b/src/gallium/Android.mk
+index 763e9f7..d5e35b8 100644
+--- a/src/gallium/Android.mk
++++ b/src/gallium/Android.mk
+@@ -48,6 +48,7 @@ SUBDIRS += winsys/svga/drm drivers/svga
+ SUBDIRS += winsys/etnaviv/drm drivers/etnaviv drivers/renderonly
+ SUBDIRS += winsys/imx/drm
+ SUBDIRS += winsys/lima/drm drivers/lima
++SUBDIRS += winsys/sun4i/drm drivers/sun4i
+ SUBDIRS += state_trackers/dri
+ 
+ # sort to eliminate any duplicates
+diff --git a/src/gallium/Makefile.am b/src/gallium/Makefile.am
+index 2fc6353..539de39 100644
+--- a/src/gallium/Makefile.am
++++ b/src/gallium/Makefile.am
+@@ -103,6 +103,10 @@ if HAVE_GALLIUM_LIMA
+ SUBDIRS += drivers/lima winsys/lima/drm
+ endif
+ 
++if HAVE_GALLIUM_SUN4I
++SUBDIRS += drivers/sun4i winsys/sun4i/drm
++endif
++
+ ## the sw winsys'
+ SUBDIRS += winsys/sw/null
+ 
+diff --git a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+index 148ecda..97f640a 100644
+--- a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
++++ b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+@@ -145,6 +145,11 @@ static const struct drm_driver_descriptor driver_descriptors[] = {
+         .create_screen = pipe_lima_create_screen,
+         .configuration = pipe_default_configuration_query,
+     },
++    {
++        .driver_name = "sun4i-drm",
++        .create_screen = pipe_sun4i_create_screen,
++        .configuration = pipe_default_configuration_query,
++    },
+ };
+ #endif
+ 
+diff --git a/src/gallium/auxiliary/target-helpers/drm_helper.h b/src/gallium/auxiliary/target-helpers/drm_helper.h
+index 1f7d99c..b10d88e 100644
+--- a/src/gallium/auxiliary/target-helpers/drm_helper.h
++++ b/src/gallium/auxiliary/target-helpers/drm_helper.h
+@@ -426,4 +426,27 @@ pipe_lima_create_screen(int fd, const struct pipe_screen_config *config)
+ 
+ #endif
+ 
++#ifdef GALLIUM_SUN4I
++#include "sun4i/drm/sun4i_drm_public.h"
++
++struct pipe_screen *
++pipe_sun4i_create_screen(int fd, const struct pipe_screen_config *config)
++{
++   struct pipe_screen *screen;
++
++   screen = sun4i_screen_create(fd);
++   return screen ? debug_screen_wrap(screen) : NULL;
++}
++
++#else
++
++struct pipe_screen *
++pipe_sun4i_create_screen(int fd, const struct pipe_screen_config *config)
++{
++   fprintf(stderr, "sun4i-drm: driver missing\n");
++   return NULL;
++}
++
++#endif
++
+ #endif /* DRM_HELPER_H */
+diff --git a/src/gallium/auxiliary/target-helpers/drm_helper_public.h b/src/gallium/auxiliary/target-helpers/drm_helper_public.h
+index 0b88a1c..7b773e4 100644
+--- a/src/gallium/auxiliary/target-helpers/drm_helper_public.h
++++ b/src/gallium/auxiliary/target-helpers/drm_helper_public.h
+@@ -57,6 +57,9 @@ pipe_tegra_create_screen(int fd, const struct pipe_screen_config *config);
+ struct pipe_screen *
+ pipe_lima_create_screen(int fd, const struct pipe_screen_config *config);
+ 
++struct pipe_screen *
++pipe_sun4i_create_screen(int fd, const struct pipe_screen_config *config);
++
+ const struct drm_conf_ret *
+ pipe_default_configuration_query(enum drm_conf conf);
+ 
+diff --git a/src/gallium/drivers/sun4i/Android.mk b/src/gallium/drivers/sun4i/Android.mk
+new file mode 100644
+index 0000000..e9bce2e
+--- /dev/null
++++ b/src/gallium/drivers/sun4i/Android.mk
+@@ -0,0 +1,39 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included
++# in all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++LOCAL_PATH := $(call my-dir)
++
++# get C_SOURCES
++include $(LOCAL_PATH)/Makefile.sources
++
++include $(CLEAR_VARS)
++
++LOCAL_SRC_FILES := \
++	$(C_SOURCES)
++
++LOCAL_MODULE := libmesa_pipe_sun4i
++
++include $(GALLIUM_COMMON_MK)
++include $(BUILD_STATIC_LIBRARY)
++
++ifneq ($(HAVE_GALLIUM_SUN4I),)
++GALLIUM_TARGET_DRIVERS += sun4i-drm
++$(eval GALLIUM_LIBS += $(LOCAL_MODULE) libmesa_winsys_sun4i)
++endif
+diff --git a/src/gallium/drivers/sun4i/Automake.inc b/src/gallium/drivers/sun4i/Automake.inc
+new file mode 100644
+index 0000000..1193ded
+--- /dev/null
++++ b/src/gallium/drivers/sun4i/Automake.inc
+@@ -0,0 +1,9 @@
++if HAVE_GALLIUM_SUN4I
++
++TARGET_DRIVERS += sun4i-drm
++TARGET_CPPFLAGS += -DGALLIUM_SUN4I
++TARGET_LIB_DEPS += \
++    $(top_builddir)/src/gallium/winsys/sun4i/drm/libsun4idrm.la \
++    $(LIBDRM_LIBS)
++
++endif
+diff --git a/src/gallium/drivers/sun4i/Makefile.am b/src/gallium/drivers/sun4i/Makefile.am
+new file mode 100644
+index 0000000..53b81f6
+--- /dev/null
++++ b/src/gallium/drivers/sun4i/Makefile.am
+@@ -0,0 +1,8 @@
++include $(top_srcdir)/src/gallium/Automake.inc
++
++AM_CPPFLAGS = \
++	$(GALLIUM_CFLAGS)
++
++noinst_LTLIBRARIES = libsun4i.la
++
++libsun4i_la_SOURCES = $(C_SOURCES)
+diff --git a/src/gallium/drivers/sun4i/Makefile.sources b/src/gallium/drivers/sun4i/Makefile.sources
+new file mode 100644
+index 0000000..2039675
+--- /dev/null
++++ b/src/gallium/drivers/sun4i/Makefile.sources
+@@ -0,0 +1,2 @@
++C_SOURCES :=
++
+diff --git a/src/gallium/targets/dri/Makefile.am b/src/gallium/targets/dri/Makefile.am
+index 2c12560..1295641 100644
+--- a/src/gallium/targets/dri/Makefile.am
++++ b/src/gallium/targets/dri/Makefile.am
+@@ -86,6 +86,7 @@ include $(top_srcdir)/src/gallium/drivers/etnaviv/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/imx/Automake.inc
+ 
+ include $(top_srcdir)/src/gallium/drivers/lima/Automake.inc
++include $(top_srcdir)/src/gallium/drivers/sun4i/Automake.inc
+ 
+ include $(top_srcdir)/src/gallium/drivers/softpipe/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/llvmpipe/Automake.inc
+diff --git a/src/gallium/targets/dri/target.c b/src/gallium/targets/dri/target.c
+index fb00ca8..c577c31 100644
+--- a/src/gallium/targets/dri/target.c
++++ b/src/gallium/targets/dri/target.c
+@@ -93,4 +93,7 @@ DEFINE_LOADER_DRM_ENTRYPOINT(tegra);
+ 
+ #if defined(GALLIUM_LIMA)
+ DEFINE_LOADER_DRM_ENTRYPOINT(lima)
++#if defined(GALLIUM_SUN4I)
++DEFINE_LOADER_DRM_ENTRYPOINT(sun4i_drm)
++#endif
+ #endif
+diff --git a/src/gallium/winsys/sun4i/drm/Android.mk b/src/gallium/winsys/sun4i/drm/Android.mk
+new file mode 100644
+index 0000000..0dadceb
+--- /dev/null
++++ b/src/gallium/winsys/sun4i/drm/Android.mk
+@@ -0,0 +1,33 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included
++# in all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++LOCAL_PATH := $(call my-dir)
++
++# get C_SOURCES
++include $(LOCAL_PATH)/Makefile.sources
++
++include $(CLEAR_VARS)
++
++LOCAL_SRC_FILES := $(C_SOURCES)
++
++LOCAL_MODULE := libmesa_winsys_sun4i
++
++include $(GALLIUM_COMMON_MK)
++include $(BUILD_STATIC_LIBRARY)
+diff --git a/src/gallium/winsys/sun4i/drm/Makefile.am b/src/gallium/winsys/sun4i/drm/Makefile.am
+new file mode 100644
+index 0000000..ecaae46
+--- /dev/null
++++ b/src/gallium/winsys/sun4i/drm/Makefile.am
+@@ -0,0 +1,34 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice (including the next
++# paragraph) shall be included in all copies or substantial portions of the
++# Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++# NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++include Makefile.sources
++include $(top_srcdir)/src/gallium/Automake.inc
++
++AM_CFLAGS = \
++	-I$(top_srcdir)/src/gallium/drivers \
++	-I$(top_srcdir)/src/gallium/winsys \
++	$(GALLIUM_WINSYS_CFLAGS) \
++	$(LIBDRM_CFLAGS)
++
++noinst_LTLIBRARIES = libsun4idrm.la
++
++libsun4idrm_la_SOURCES = $(C_SOURCES)
+diff --git a/src/gallium/winsys/sun4i/drm/Makefile.sources b/src/gallium/winsys/sun4i/drm/Makefile.sources
+new file mode 100644
+index 0000000..f677030
+--- /dev/null
++++ b/src/gallium/winsys/sun4i/drm/Makefile.sources
+@@ -0,0 +1,3 @@
++C_SOURCES := \
++   sun4i_drm_public.h \
++   sun4i_drm_winsys.c
+diff --git a/src/gallium/winsys/sun4i/drm/sun4i_drm_public.h b/src/gallium/winsys/sun4i/drm/sun4i_drm_public.h
+new file mode 100644
+index 0000000..a2ac414
+--- /dev/null
++++ b/src/gallium/winsys/sun4i/drm/sun4i_drm_public.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (c) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#ifndef __SUN4I_DRM_PUBLIC_H__
++#define __SUN4I_DRM_PUBLIC_H__
++
++struct pipe_screen;
++
++struct pipe_screen *sun4i_screen_create(int fd);
++
++#endif /* __SUN4I_DRM_PUBLIC_H__ */
+diff --git a/src/gallium/winsys/sun4i/drm/sun4i_drm_winsys.c b/src/gallium/winsys/sun4i/drm/sun4i_drm_winsys.c
+new file mode 100644
+index 0000000..ed4419d
+--- /dev/null
++++ b/src/gallium/winsys/sun4i/drm/sun4i_drm_winsys.c
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include "sun4i_drm_public.h"
++#include "lima/drm/lima_drm_public.h"
++#include "xf86drm.h"
++
++#include "pipe/p_screen.h"
++#include "renderonly/renderonly.h"
++
++struct pipe_screen *sun4i_screen_create(int fd)
++{
++   struct renderonly ro = {
++      /* Passes the lima-allocated BO through to the sun4i DRM device using
++       * PRIME buffer sharing.  The lima BO must be linear, which the SCANOUT
++       * flag on allocation will have ensured.
++       */
++      .create_for_resource = renderonly_create_kms_dumb_buffer_for_resource,
++      .kms_fd = fd,
++      .gpu_fd = drmOpenWithType("lima", NULL, DRM_NODE_RENDER),
++   };
++
++   if (ro.gpu_fd < 0)
++      return NULL;
++
++   struct pipe_screen *screen = lima_drm_screen_create_renderonly(&ro);
++   if (!screen)
++      close(ro.gpu_fd);
++
++   return screen;
++}
+-- 
+2.0.1
+

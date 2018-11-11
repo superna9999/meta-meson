@@ -1,0 +1,119 @@
+From 053e5d4fef1e8b75e1ba8bc6c9b5f588f02391f7 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 30 Jul 2018 15:57:38 +0800
+Subject: [PATCH 12/47] lima: use WINSYS_HANDLE_* for 18.2 rebase
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_bo.c       | 20 ++++++++++----------
+ src/gallium/drivers/lima/lima_resource.c |  4 ++--
+ 2 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_bo.c b/src/gallium/drivers/lima/lima_bo.c
+index a56c6c5..4c8b829 100644
+--- a/src/gallium/drivers/lima/lima_bo.c
++++ b/src/gallium/drivers/lima/lima_bo.c
+@@ -228,7 +228,7 @@ bool lima_bo_export(struct lima_bo *bo, struct winsys_handle *handle)
+    struct lima_screen *screen = bo->screen;
+ 
+    switch (handle->type) {
+-   case DRM_API_HANDLE_TYPE_SHARED:
++   case WINSYS_HANDLE_TYPE_SHARED:
+       if (!bo->flink_name) {
+          struct drm_gem_flink flink = {
+             .handle = bo->handle,
+@@ -247,7 +247,7 @@ bool lima_bo_export(struct lima_bo *bo, struct winsys_handle *handle)
+       handle->handle = bo->flink_name;
+       return true;
+ 
+-   case DRM_API_HANDLE_TYPE_KMS:
++   case WINSYS_HANDLE_TYPE_KMS:
+       mtx_lock(&screen->bo_table_lock);
+       util_hash_table_set(screen->bo_handles,
+                           (void *)(uintptr_t)bo->handle, bo);
+@@ -256,7 +256,7 @@ bool lima_bo_export(struct lima_bo *bo, struct winsys_handle *handle)
+       handle->handle = bo->handle;
+       return true;
+ 
+-   case DRM_API_HANDLE_TYPE_FD:
++   case WINSYS_HANDLE_TYPE_FD:
+       if (drmPrimeHandleToFD(screen->fd, bo->handle, DRM_CLOEXEC,
+                              (int*)&handle->handle))
+          return false;
+@@ -283,7 +283,7 @@ struct lima_bo *lima_bo_import(struct lima_screen *screen,
+    mtx_lock(&screen->bo_table_lock);
+ 
+    /* Convert a DMA buf handle to a KMS handle now. */
+-   if (handle->type == DRM_API_HANDLE_TYPE_FD) {
++   if (handle->type == WINSYS_HANDLE_TYPE_FD) {
+       uint32_t prime_handle;
+       off_t size;
+ 
+@@ -307,12 +307,12 @@ struct lima_bo *lima_bo_import(struct lima_screen *screen,
+    }
+ 
+    switch (handle->type) {
+-   case DRM_API_HANDLE_TYPE_SHARED:
++   case WINSYS_HANDLE_TYPE_SHARED:
+       bo = util_hash_table_get(screen->bo_flink_names,
+                                (void *)(uintptr_t)h);
+       break;
+-   case DRM_API_HANDLE_TYPE_KMS:
+-   case DRM_API_HANDLE_TYPE_FD:
++   case WINSYS_HANDLE_TYPE_KMS:
++   case WINSYS_HANDLE_TYPE_FD:
+       bo = util_hash_table_get(screen->bo_handles,
+                                (void *)(uintptr_t)h);
+       break;
+@@ -329,7 +329,7 @@ struct lima_bo *lima_bo_import(struct lima_screen *screen,
+ 
+    if (!(bo = calloc(1, sizeof(*bo)))) {
+       mtx_unlock(&screen->bo_table_lock);
+-      if (handle->type == DRM_API_HANDLE_TYPE_FD)
++      if (handle->type == WINSYS_HANDLE_TYPE_FD)
+          lima_close_kms_handle(screen, h);
+       return NULL;
+    }
+@@ -338,7 +338,7 @@ struct lima_bo *lima_bo_import(struct lima_screen *screen,
+    p_atomic_set(&bo->refcnt, 1);
+ 
+    switch (handle->type) {
+-   case DRM_API_HANDLE_TYPE_SHARED:
++   case WINSYS_HANDLE_TYPE_SHARED:
+       req.name = h;
+       if (drmIoctl(screen->fd, DRM_IOCTL_GEM_OPEN, &req)) {
+          mtx_unlock(&screen->bo_table_lock);
+@@ -352,7 +352,7 @@ struct lima_bo *lima_bo_import(struct lima_screen *screen,
+       util_hash_table_set(screen->bo_flink_names,
+                           (void *)(uintptr_t)bo->flink_name, bo);
+       break;
+-   case DRM_API_HANDLE_TYPE_FD:
++   case WINSYS_HANDLE_TYPE_FD:
+       bo->handle = h;
+       bo->size = dma_buf_size;
+       break;
+diff --git a/src/gallium/drivers/lima/lima_resource.c b/src/gallium/drivers/lima/lima_resource.c
+index e56f499..c553472 100644
+--- a/src/gallium/drivers/lima/lima_resource.c
++++ b/src/gallium/drivers/lima/lima_resource.c
+@@ -64,7 +64,7 @@ lima_resource_create_scanout(struct pipe_screen *pscreen,
+    if (!scanout)
+       return NULL;
+ 
+-   assert(handle.type == DRM_API_HANDLE_TYPE_FD);
++   assert(handle.type == WINSYS_HANDLE_TYPE_FD);
+    pres = pscreen->resource_from_handle(pscreen, templat, &handle,
+                                         PIPE_HANDLE_USAGE_WRITE);
+ 
+@@ -315,7 +315,7 @@ lima_resource_get_handle(struct pipe_screen *pscreen,
+    else
+       handle->modifier = DRM_FORMAT_MOD_LINEAR;
+ 
+-   if (handle->type == DRM_API_HANDLE_TYPE_KMS && screen->ro &&
++   if (handle->type == WINSYS_HANDLE_TYPE_KMS && screen->ro &&
+        renderonly_get_handle(res->scanout, handle))
+       return TRUE;
+ 
+-- 
+2.0.1
+

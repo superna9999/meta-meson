@@ -1,0 +1,47 @@
+From 929e38a8d39bee150dd68c89e303b2ef82d533be Mon Sep 17 00:00:00 2001
+From: Erico Nunes <nunes.erico@gmail.com>
+Date: Mon, 3 Sep 2018 21:41:38 +0200
+Subject: [PATCH 31/47] lima/ir: print name of unsupported nir_op
+
+lima ppir and gpir often hit unsupported alu nir_op instructions at this
+stage of development. Printing the raw nir_op is not very helpful, since
+the list of nir_op is an unnumbered enum that is generated during the
+build, so it's annoying to figure out what is the missing
+implementation.
+Just print the name as pointed out by cwabbott some time ago on IRC.
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+---
+ src/gallium/drivers/lima/ir/gp/nir.c | 2 +-
+ src/gallium/drivers/lima/ir/pp/nir.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/ir/gp/nir.c b/src/gallium/drivers/lima/ir/gp/nir.c
+index 5dee627..8a71665 100644
+--- a/src/gallium/drivers/lima/ir/gp/nir.c
++++ b/src/gallium/drivers/lima/ir/gp/nir.c
+@@ -126,7 +126,7 @@ static bool gpir_emit_alu(gpir_block *block, nir_instr *ni)
+    int op = nir_to_gpir_opcodes[instr->op];
+ 
+    if (op < 0) {
+-      gpir_error("unsupported nir_op %d\n", instr->op);
++      gpir_error("unsupported nir_op: %s\n", nir_op_infos[instr->op].name);
+       return false;
+    }
+ 
+diff --git a/src/gallium/drivers/lima/ir/pp/nir.c b/src/gallium/drivers/lima/ir/pp/nir.c
+index 600c9c4..3c22857 100644
+--- a/src/gallium/drivers/lima/ir/pp/nir.c
++++ b/src/gallium/drivers/lima/ir/pp/nir.c
+@@ -157,7 +157,7 @@ static ppir_node *ppir_emit_alu(ppir_block *block, nir_instr *ni)
+    int op = nir_to_ppir_opcodes[instr->op];
+ 
+    if (op < 0) {
+-      ppir_error("unsupported nir_op %d\n", instr->op);
++      ppir_error("unsupported nir_op: %s\n", nir_op_infos[instr->op].name);
+       return NULL;
+    }
+ 
+-- 
+2.0.1
+

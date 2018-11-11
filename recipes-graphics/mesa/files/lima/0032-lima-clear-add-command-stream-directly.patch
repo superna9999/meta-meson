@@ -1,0 +1,671 @@
+From 66b70f02dceb7505bb3cad0553efe7532bb83f1e Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Wed, 5 Sep 2018 14:53:48 +0800
+Subject: [PATCH 32/47] lima: clear add command stream directly
+
+In order to deal with scissor clear (partial clear).
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_context.h |   2 -
+ src/gallium/drivers/lima/lima_draw.c    | 520 ++++++++++++++++++--------------
+ 2 files changed, 290 insertions(+), 232 deletions(-)
+
+diff --git a/src/gallium/drivers/lima/lima_context.h b/src/gallium/drivers/lima/lima_context.h
+index 11320c9..361c074 100644
+--- a/src/gallium/drivers/lima/lima_context.h
++++ b/src/gallium/drivers/lima/lima_context.h
+@@ -227,8 +227,6 @@ struct lima_context {
+    struct util_dynarray vs_cmd_array;
+    struct util_dynarray plbu_cmd_array;
+ 
+-   unsigned num_draws;
+-
+    struct lima_submit *gp_submit;
+    struct lima_submit *pp_submit;
+ 
+diff --git a/src/gallium/drivers/lima/lima_draw.c b/src/gallium/drivers/lima/lima_draw.c
+index 603c77d..9bc6a76 100644
+--- a/src/gallium/drivers/lima/lima_draw.c
++++ b/src/gallium/drivers/lima/lima_draw.c
+@@ -95,6 +95,223 @@ struct lima_pp_wb_reg {
+    uint32_t unused2;
+ };
+ 
++struct lima_render_state {
++   uint32_t blend_color_bg;
++   uint32_t blend_color_ra;
++   uint32_t alpha_blend;
++   uint32_t depth_test;
++   uint32_t depth_range;
++   uint32_t stencil_front;
++   uint32_t stencil_back;
++   uint32_t stencil_test;
++   uint32_t multi_sample;
++   uint32_t shader_address;
++   uint32_t varying_types;
++   uint32_t uniforms_address;
++   uint32_t textures_address;
++   uint32_t aux0;
++   uint32_t aux1;
++   uint32_t varyings_address;
++};
++
++static inline bool
++lima_ctx_dirty(struct lima_context *ctx)
++{
++   return ctx->plbu_cmd_array.size;
++}
++
++static bool
++lima_fb_need_reload(struct lima_context *ctx)
++{
++   if (ctx->damage.region) {
++      /* for EGL_KHR_partial_update we just want to reload the
++       * region not aligned to tile boundary */
++      if (!ctx->damage.aligned)
++         return true;
++   }
++   else {
++      struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
++      if (surf->reload)
++         return true;
++   }
++
++   return false;
++}
++
++static void
++lima_pack_reload_plbu_cmd(struct lima_context *ctx)
++{
++   #define lima_reload_render_state_offset 0x0000
++   #define lima_reload_gl_pos_offset       0x0040
++   #define lima_reload_varying_offset      0x0080
++   #define lima_reload_tex_desc_offset     0x00c0
++   #define lima_reload_tex_array_offset    0x0100
++   #define lima_reload_buffer_size         0x0140
++
++   void *cpu;
++   unsigned offset;
++   struct pipe_resource *pres = NULL;
++   u_upload_alloc(ctx->uploader, 0, lima_reload_buffer_size,
++                  0x40, &offset, &pres, &cpu);
++
++   struct lima_resource *res = lima_resource(pres);
++   lima_bo_update(res->bo, false, true);
++   uint32_t va = res->bo->va + offset;
++
++   struct lima_screen *screen = lima_screen(ctx->base.screen);
++
++   uint32_t reload_shader_first_instr_size =
++      ((uint32_t *)(screen->pp_buffer->map + pp_reload_program_offset))[0] & 0x1f;
++   uint32_t reload_shader_va = screen->pp_buffer->va + pp_reload_program_offset;
++
++   struct lima_render_state reload_render_state = {
++      .alpha_blend = 0xf03b1ad2,
++      .depth_test = 0x0000000e,
++      .depth_range = 0xffff0000,
++      .stencil_front = 0x00000007,
++      .stencil_back = 0x00000007,
++      .multi_sample = 0x0000f007,
++      .shader_address = reload_shader_va | reload_shader_first_instr_size,
++      .varying_types = 0x00000001,
++      .textures_address = va + lima_reload_tex_array_offset,
++      .aux0 = 0x00004021,
++      .varyings_address = va + lima_reload_varying_offset,
++   };
++   memcpy(cpu + lima_reload_render_state_offset, &reload_render_state,
++          sizeof(reload_render_state));
++
++   struct lima_context_framebuffer *fb = &ctx->framebuffer;
++   uint32_t *td = cpu + lima_reload_tex_desc_offset;
++   lima_texture_desc_set_res(ctx, td, fb->cbuf->texture);
++   td[1] = 0x00000480;
++   td[2] |= 0x00093800;
++   td[4] = 0x00000000;
++   td[5] = 0x00000000;
++
++   uint32_t *ta = cpu + lima_reload_tex_array_offset;
++   ta[0] = va + lima_reload_tex_desc_offset;
++
++   uint32_t width = fui(fb->width);
++   uint32_t height = fui(fb->height);
++   uint32_t reload_gl_pos[] = {
++      width,      0x00000000, 0x00000000, 0x3f800000, /* 0x00000000 */
++      0x00000000, 0x00000000, 0x00000000, 0x3f800000, /* 0x00000010 */
++      0x00000000, height,     0x00000000, 0x3f800000, /* 0x00000020 */
++   };
++   memcpy(cpu + lima_reload_gl_pos_offset, reload_gl_pos,
++          sizeof(reload_gl_pos));
++
++   uint32_t reload_varying[] = {
++      width,      0x00000000, 0x00000000, 0x00000000, /* 0x00000000 */
++      0x00000000, height,     0x00000000, 0x00000000, /* 0x00000010 */
++   };
++   memcpy(cpu + lima_reload_varying_offset, reload_varying,
++          sizeof(reload_varying));
++
++   lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_READ);
++   pipe_resource_reference(&pres, NULL);
++
++   int i = 0, max_n = 20;
++   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
++
++   plbu_cmd[i++] = 0x00000000;
++   plbu_cmd[i++] = 0x10000107;
++
++   plbu_cmd[i++] = width;
++   plbu_cmd[i++] = 0x10000108;
++
++   plbu_cmd[i++] = 0x00000000;
++   plbu_cmd[i++] = 0x10000105;
++
++   plbu_cmd[i++] = height;
++   plbu_cmd[i++] = 0x10000106;
++
++   plbu_cmd[i++] = va + lima_reload_render_state_offset;
++   plbu_cmd[i++] = 0x80000000 | ((va + lima_reload_gl_pos_offset) >> 4);
++
++   plbu_cmd[i++] = 0x00000200;
++   plbu_cmd[i++] = 0x1000010b;
++
++   plbu_cmd[i++] = 0x00000000;
++   plbu_cmd[i++] = 0x1000010a;
++
++   plbu_cmd[i++] = screen->pp_buffer->va + pp_reload_index_offset;
++   plbu_cmd[i++] = 0x10000101;
++
++   plbu_cmd[i++] = va + lima_reload_gl_pos_offset;
++   plbu_cmd[i++] = 0x10000100;
++
++   plbu_cmd[i++] = 0x03000000;
++   plbu_cmd[i++] = 0x002f0000;
++
++   assert(i <= max_n);
++   ctx->plbu_cmd_array.size += i * 4;
++}
++
++static void
++lima_pack_clear_plbu_cmd(struct lima_context *ctx)
++{
++   /* not implemented */
++}
++
++static void
++lima_pack_head_plbu_cmd(struct lima_context *ctx)
++{
++   /* first draw need create a PLBU command header */
++   if (lima_ctx_dirty(ctx))
++      return;
++
++   int i = 0, max_n = 10;
++   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
++   struct lima_context_framebuffer *fb = &ctx->framebuffer;
++
++   plbu_cmd[i++] = 0x00000200;
++   plbu_cmd[i++] = 0x1000010B; /* PRIMITIVE_SETUP */
++
++   plbu_cmd[i++] = (fb->shift_max << 28) | (fb->shift_h << 16) | fb->shift_w;
++   plbu_cmd[i++] = 0x1000010C; /* BLOCK_STEP */
++
++   plbu_cmd[i++] = ((fb->tiled_w - 1) << 24) | ((fb->tiled_h - 1) << 8);
++   plbu_cmd[i++] = 0x10000109; /* TILED_DIMENSIONS */
++
++   plbu_cmd[i++] = fb->block_w;
++   plbu_cmd[i++] = 0x30000000; /* PLBU_BLOCK_STRIDE */
++
++   plbu_cmd[i++] = ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size;
++   plbu_cmd[i++] = 0x28000000 | (fb->block_w * fb->block_h - 1); /* PLBU_ARRAY_ADDRESS */
++
++   assert(i <= max_n);
++   ctx->plbu_cmd_array.size += i * 4;
++
++   if (lima_fb_need_reload(ctx))
++      lima_pack_reload_plbu_cmd(ctx);
++}
++
++static bool
++lima_is_scissor_zero(struct lima_context *ctx)
++{
++   if (!ctx->rasterizer || !ctx->rasterizer->base.scissor)
++      return false;
++
++   struct pipe_scissor_state *scissor = &ctx->scissor;
++   return
++      scissor->minx == scissor->maxx
++      && scissor->miny == scissor->maxy;
++}
++
++static bool
++lima_is_scissor_full_fb(struct lima_context *ctx)
++{
++   if (!ctx->rasterizer || !ctx->rasterizer->base.scissor)
++      return true;
++
++   struct pipe_scissor_state *scissor = &ctx->scissor;
++   struct lima_context_framebuffer *fb = &ctx->framebuffer;
++   return
++      scissor->minx == 0 && scissor->maxx == fb->width &&
++      scissor->miny == 0 && scissor->maxy == fb->height;
++}
++
+ static void
+ lima_clear(struct pipe_context *pctx, unsigned buffers,
+            const union pipe_color_union *color, double depth, unsigned stencil)
+@@ -102,8 +319,19 @@ lima_clear(struct pipe_context *pctx, unsigned buffers,
+    debug_checkpoint();
+ 
+    struct lima_context *ctx = lima_context(pctx);
+-   struct lima_context_clear *clear = &ctx->clear;
++   bool full_fb_clear = lima_is_scissor_full_fb(ctx);
++
++   if (full_fb_clear) {
++      lima_flush(ctx);
+ 
++      /* no need to reload if cleared */
++      if (buffers & PIPE_CLEAR_COLOR0) {
++         struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
++         surf->reload = false;
++      }
++   }
++
++   struct lima_context_clear *clear = &ctx->clear;
+    clear->buffers = buffers;
+ 
+    if (buffers & PIPE_CLEAR_COLOR0)
+@@ -119,9 +347,11 @@ lima_clear(struct pipe_context *pctx, unsigned buffers,
+    if (buffers & PIPE_CLEAR_STENCIL)
+       clear->stencil = stencil;
+ 
+-   /* no need to reload if cleared */
+-   struct lima_surface *surf = lima_surface(ctx->framebuffer.cbuf);
+-   surf->reload = false;
++   lima_pack_head_plbu_cmd(ctx);
++
++   /* partial clear */
++   if (!full_fb_clear)
++      lima_pack_clear_plbu_cmd(ctx);
+ 
+    ctx->dirty |= LIMA_CONTEXT_DIRTY_CLEAR;
+ }
+@@ -451,196 +681,29 @@ lima_pack_vs_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+    lima_dump_command_stream_print(vs_cmd, i * 4, false, "add vs cmd\n");
+ }
+ 
+-static bool
+-lima_is_scissor_zero(struct lima_context *ctx)
+-{
+-   if (!ctx->rasterizer->base.scissor)
+-      return false;
+-
+-   struct pipe_scissor_state *scissor = &ctx->scissor;
+-   return
+-      scissor->minx == scissor->maxx
+-      && scissor->miny == scissor->maxy;
+-}
+-
+-struct lima_render_state {
+-   uint32_t blend_color_bg;
+-   uint32_t blend_color_ra;
+-   uint32_t alpha_blend;
+-   uint32_t depth_test;
+-   uint32_t depth_range;
+-   uint32_t stencil_front;
+-   uint32_t stencil_back;
+-   uint32_t stencil_test;
+-   uint32_t multi_sample;
+-   uint32_t shader_address;
+-   uint32_t varying_types;
+-   uint32_t uniforms_address;
+-   uint32_t textures_address;
+-   uint32_t aux0;
+-   uint32_t aux1;
+-   uint32_t varyings_address;
+-};
+-
+-static int
+-lima_pack_reload_plbu_cmd(struct lima_context *ctx, uint32_t *plbu_cmd, int i)
+-{
+-   #define lima_reload_render_state_offset 0x0000
+-   #define lima_reload_gl_pos_offset       0x0040
+-   #define lima_reload_varying_offset      0x0080
+-   #define lima_reload_tex_desc_offset     0x00c0
+-   #define lima_reload_tex_array_offset    0x0100
+-   #define lima_reload_buffer_size         0x0140
+-
+-   void *cpu;
+-   unsigned offset;
+-   struct pipe_resource *pres = NULL;
+-   u_upload_alloc(ctx->uploader, 0, lima_reload_buffer_size,
+-                  0x40, &offset, &pres, &cpu);
+-
+-   struct lima_resource *res = lima_resource(pres);
+-   lima_bo_update(res->bo, false, true);
+-   uint32_t va = res->bo->va + offset;
+-
+-   struct lima_screen *screen = lima_screen(ctx->base.screen);
+-
+-   uint32_t reload_shader_first_instr_size =
+-      ((uint32_t *)(screen->pp_buffer->map + pp_reload_program_offset))[0] & 0x1f;
+-   uint32_t reload_shader_va = screen->pp_buffer->va + pp_reload_program_offset;
+-
+-   struct lima_render_state reload_render_state = {
+-      .alpha_blend = 0xf03b1ad2,
+-      .depth_test = 0x0000000e,
+-      .depth_range = 0xffff0000,
+-      .stencil_front = 0x00000007,
+-      .stencil_back = 0x00000007,
+-      .multi_sample = 0x0000f007,
+-      .shader_address = reload_shader_va | reload_shader_first_instr_size,
+-      .varying_types = 0x00000001,
+-      .textures_address = va + lima_reload_tex_array_offset,
+-      .aux0 = 0x00004021,
+-      .varyings_address = va + lima_reload_varying_offset,
+-   };
+-   memcpy(cpu + lima_reload_render_state_offset, &reload_render_state,
+-          sizeof(reload_render_state));
+-
+-   struct lima_context_framebuffer *fb = &ctx->framebuffer;
+-   uint32_t *td = cpu + lima_reload_tex_desc_offset;
+-   lima_texture_desc_set_res(ctx, td, fb->cbuf->texture);
+-   td[1] = 0x00000480;
+-   td[2] |= 0x00093800;
+-   td[4] = 0x00000000;
+-   td[5] = 0x00000000;
+-
+-   uint32_t *ta = cpu + lima_reload_tex_array_offset;
+-   ta[0] = va + lima_reload_tex_desc_offset;
+-
+-   uint32_t width = fui(fb->width);
+-   uint32_t height = fui(fb->height);
+-   uint32_t reload_gl_pos[] = {
+-      width,      0x00000000, 0x00000000, 0x3f800000, /* 0x00000000 */
+-      0x00000000, 0x00000000, 0x00000000, 0x3f800000, /* 0x00000010 */
+-      0x00000000, height,     0x00000000, 0x3f800000, /* 0x00000020 */
+-   };
+-   memcpy(cpu + lima_reload_gl_pos_offset, reload_gl_pos,
+-          sizeof(reload_gl_pos));
+-
+-   uint32_t reload_varying[] = {
+-      width,      0x00000000, 0x00000000, 0x00000000, /* 0x00000000 */
+-      0x00000000, height,     0x00000000, 0x00000000, /* 0x00000010 */
+-   };
+-   memcpy(cpu + lima_reload_varying_offset, reload_varying,
+-          sizeof(reload_varying));
+-
+-   lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_READ);
+-   pipe_resource_reference(&pres, NULL);
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x10000107;
+-
+-   plbu_cmd[i++] = width;
+-   plbu_cmd[i++] = 0x10000108;
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x10000105;
+-
+-   plbu_cmd[i++] = height;
+-   plbu_cmd[i++] = 0x10000106;
+-
+-   plbu_cmd[i++] = va + lima_reload_render_state_offset;
+-   plbu_cmd[i++] = 0x80000000 | ((va + lima_reload_gl_pos_offset) >> 4);
+-
+-   plbu_cmd[i++] = 0x00000200;
+-   plbu_cmd[i++] = 0x1000010b;
+-
+-   plbu_cmd[i++] = 0x00000000;
+-   plbu_cmd[i++] = 0x1000010a;
+-
+-   plbu_cmd[i++] = screen->pp_buffer->va + pp_reload_index_offset;
+-   plbu_cmd[i++] = 0x10000101;
+-
+-   plbu_cmd[i++] = va + lima_reload_gl_pos_offset;
+-   plbu_cmd[i++] = 0x10000100;
+-
+-   plbu_cmd[i++] = 0x03000000;
+-   plbu_cmd[i++] = 0x002f0000;
+-
+-   return i;
+-}
+-
+ static void
+ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+ {
+-   int i = 0, max_n = 40 + 20;
+-   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
++   lima_pack_head_plbu_cmd(ctx);
+ 
+-   /* first draw need create a PLBU command header */
+-   if (!ctx->plbu_cmd_array.size) {
+-      struct lima_context_framebuffer *fb = &ctx->framebuffer;
+-      struct lima_surface *surf = lima_surface(fb->cbuf);
+-
+-      plbu_cmd[i++] = 0x00000200;
+-      plbu_cmd[i++] = 0x1000010B; /* PRIMITIVE_SETUP */
+-
+-      plbu_cmd[i++] = (fb->shift_max << 28) | (fb->shift_h << 16) | fb->shift_w;
+-      plbu_cmd[i++] = 0x1000010C; /* BLOCK_STEP */
+-
+-      plbu_cmd[i++] = ((fb->tiled_w - 1) << 24) | ((fb->tiled_h - 1) << 8);
+-      plbu_cmd[i++] = 0x10000109; /* TILED_DIMENSIONS */
+-
+-      plbu_cmd[i++] = fb->block_w;
+-      plbu_cmd[i++] = 0x30000000; /* PLBU_BLOCK_STRIDE */
+-
+-      plbu_cmd[i++] = ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size;
+-      plbu_cmd[i++] = 0x28000000 | (fb->block_w * fb->block_h - 1); /* PLBU_ARRAY_ADDRESS */
+-
+-      if (ctx->damage.region) {
+-         /* for EGL_KHR_partial_update we just want to reload the
+-          * region not aligned to tile boundary */
+-         if (!ctx->damage.aligned)
+-            i = lima_pack_reload_plbu_cmd(ctx, plbu_cmd, i);
+-      }
+-      else {
+-         if (surf->reload)
+-            i = lima_pack_reload_plbu_cmd(ctx, plbu_cmd, i);
+-      }
++   /* If it's zero scissor, we skip adding all other commands */
++   if (lima_is_scissor_zero(ctx))
++      return;
+ 
+-      plbu_cmd[i++] = fui(ctx->viewport.x);
+-      plbu_cmd[i++] = 0x10000107; /* VIEWPORT_X */
++   int i = 0, max_n = 30;
++   uint32_t *plbu_cmd = util_dynarray_enlarge(&ctx->plbu_cmd_array, max_n * 4);
+ 
+-      plbu_cmd[i++] = fui(ctx->viewport.width);
+-      plbu_cmd[i++] = 0x10000108; /* VIEWPORT_W */
++   plbu_cmd[i++] = fui(ctx->viewport.x);
++   plbu_cmd[i++] = 0x10000107; /* VIEWPORT_X */
+ 
+-      plbu_cmd[i++] = fui(ctx->viewport.y);
+-      plbu_cmd[i++] = 0x10000105; /* VIEWPORT_Y */
++   plbu_cmd[i++] = fui(ctx->viewport.width);
++   plbu_cmd[i++] = 0x10000108; /* VIEWPORT_W */
+ 
+-      plbu_cmd[i++] = fui(ctx->viewport.height);
+-      plbu_cmd[i++] = 0x10000106; /* VIEWPORT_H */
+-   }
++   plbu_cmd[i++] = fui(ctx->viewport.y);
++   plbu_cmd[i++] = 0x10000105; /* VIEWPORT_Y */
+ 
+-   /* If it's zero scissor, we skip adding all other commands */
+-   if (lima_is_scissor_zero(ctx))
+-      goto done;
++   plbu_cmd[i++] = fui(ctx->viewport.height);
++   plbu_cmd[i++] = 0x10000106; /* VIEWPORT_H */
+ 
+    if (!info->index_size) {
+       plbu_cmd[i++] = 0x00010002; /* ARRAYS_SEMAPHORE_BEGIN */
+@@ -723,11 +786,8 @@ lima_pack_plbu_cmd(struct lima_context *ctx, const struct pipe_draw_info *info)
+          ((info->mode & 0x1F) << 16) | (info->min_index >> 8); /* DRAW | DRAW_ELEMENTS */
+    }
+ 
+-done:
+    assert(i <= max_n);
+    ctx->plbu_cmd_array.size += i * 4;
+-
+-   lima_dump_command_stream_print(plbu_cmd, i * 4, false, "add plbu cmd\n");
+ }
+ 
+ static int
+@@ -1140,32 +1200,27 @@ lima_update_varying(struct lima_context *ctx, const struct pipe_draw_info *info)
+ static void
+ lima_update_submit_bo(struct lima_context *ctx)
+ {
+-   lima_submit_add_bo(ctx->gp_submit, ctx->vs->bo, LIMA_SUBMIT_BO_READ);
+-   lima_submit_add_bo(ctx->pp_submit, ctx->fs->bo, LIMA_SUBMIT_BO_READ);
+-
+-   if (!ctx->num_draws) {
+-      struct lima_screen *screen = lima_screen(ctx->base.screen);
+-      lima_submit_add_bo(ctx->gp_submit, ctx->plb_gp_stream, LIMA_SUBMIT_BO_READ);
+-      lima_submit_add_bo(ctx->gp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_WRITE);
+-      lima_submit_add_bo(ctx->gp_submit, screen->gp_buffer, LIMA_SUBMIT_BO_READ);
++   struct lima_screen *screen = lima_screen(ctx->base.screen);
++   lima_submit_add_bo(ctx->gp_submit, ctx->plb_gp_stream, LIMA_SUBMIT_BO_READ);
++   lima_submit_add_bo(ctx->gp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_WRITE);
++   lima_submit_add_bo(ctx->gp_submit, screen->gp_buffer, LIMA_SUBMIT_BO_READ);
+ 
+-      lima_dump_command_stream_print(
+-         ctx->plb_gp_stream->map + ctx->plb_index * ctx->plb_gp_size,
+-         ctx->plb_gp_size, false, "gp plb stream at va %x\n",
+-         ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size);
+-
+-      if (ctx->damage.region)
+-         lima_update_damage_pp_stream(ctx);
+-      else if (ctx->plb_pp_stream)
+-         lima_update_full_pp_stream(ctx);
+-      else
+-         ctx->pp_stream.bo = NULL;
++   lima_dump_command_stream_print(
++      ctx->plb_gp_stream->map + ctx->plb_index * ctx->plb_gp_size,
++      ctx->plb_gp_size, false, "gp plb stream at va %x\n",
++      ctx->plb_gp_stream->va + ctx->plb_index * ctx->plb_gp_size);
++
++   if (ctx->damage.region)
++      lima_update_damage_pp_stream(ctx);
++   else if (ctx->plb_pp_stream)
++      lima_update_full_pp_stream(ctx);
++   else
++      ctx->pp_stream.bo = NULL;
+ 
+-      struct lima_resource *res = lima_resource(ctx->framebuffer.cbuf->texture);
+-      lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_WRITE);
+-      lima_submit_add_bo(ctx->pp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_READ);
+-      lima_submit_add_bo(ctx->pp_submit, screen->pp_buffer, LIMA_SUBMIT_BO_READ);
+-   }
++   struct lima_resource *res = lima_resource(ctx->framebuffer.cbuf->texture);
++   lima_submit_add_bo(ctx->pp_submit, res->bo, LIMA_SUBMIT_BO_WRITE);
++   lima_submit_add_bo(ctx->pp_submit, ctx->plb[ctx->plb_index], LIMA_SUBMIT_BO_READ);
++   lima_submit_add_bo(ctx->pp_submit, screen->pp_buffer, LIMA_SUBMIT_BO_READ);
+ }
+ 
+ static void
+@@ -1191,7 +1246,8 @@ lima_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info)
+       ctx->fs->bo->map, ctx->fs->shader_size, false,
+       "add fs at va %x\n", ctx->fs->bo->va);
+ 
+-   lima_update_submit_bo(ctx);
++   lima_submit_add_bo(ctx->gp_submit, ctx->vs->bo, LIMA_SUBMIT_BO_READ);
++   lima_submit_add_bo(ctx->pp_submit, ctx->fs->bo, LIMA_SUBMIT_BO_READ);
+ 
+    lima_update_gp_attribute_info(ctx, info);
+ 
+@@ -1222,7 +1278,6 @@ lima_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info)
+    lima_pack_plbu_cmd(ctx, info);
+ 
+    ctx->dirty = 0;
+-   ctx->num_draws++;
+ }
+ 
+ static void
+@@ -1293,26 +1348,38 @@ lima_pack_pp_frame_reg(struct lima_context *ctx, uint32_t *frame_reg,
+ static void
+ _lima_flush(struct lima_context *ctx, bool end_of_frame)
+ {
++   lima_update_submit_bo(ctx);
++
+    lima_finish_plbu_cmd(ctx);
+ 
+    int vs_cmd_size = ctx->vs_cmd_array.size;
+    int plbu_cmd_size = ctx->plbu_cmd_array.size;
++   uint32_t vs_cmd_va = 0;
++   uint32_t plbu_cmd_va;
+ 
+-   void *vs_cmd =
+-      lima_ctx_buff_alloc(ctx, lima_ctx_buff_gp_vs_cmd, vs_cmd_size,
+-                          LIMA_CTX_BUFF_SUBMIT_GP, true);
+-   memcpy(vs_cmd, util_dynarray_begin(&ctx->vs_cmd_array), vs_cmd_size);
+-   util_dynarray_clear(&ctx->vs_cmd_array);
++   if (vs_cmd_size) {
++      void *vs_cmd =
++         lima_ctx_buff_alloc(ctx, lima_ctx_buff_gp_vs_cmd, vs_cmd_size,
++                             LIMA_CTX_BUFF_SUBMIT_GP, true);
++      memcpy(vs_cmd, util_dynarray_begin(&ctx->vs_cmd_array), vs_cmd_size);
++      util_dynarray_clear(&ctx->vs_cmd_array);
++      vs_cmd_va = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_vs_cmd);
++
++      lima_dump_command_stream_print(
++         vs_cmd, vs_cmd_size, false, "flush vs cmd at va %x\n", vs_cmd_va);
++   }
+ 
+    void *plbu_cmd =
+       lima_ctx_buff_alloc(ctx, lima_ctx_buff_gp_plbu_cmd, plbu_cmd_size,
+                           LIMA_CTX_BUFF_SUBMIT_GP, true);
+    memcpy(plbu_cmd, util_dynarray_begin(&ctx->plbu_cmd_array), plbu_cmd_size);
+    util_dynarray_clear(&ctx->plbu_cmd_array);
++   plbu_cmd_va = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_plbu_cmd);
++
++   lima_dump_command_stream_print(
++      plbu_cmd, plbu_cmd_size, false, "flush plbu cmd at va %x\n", plbu_cmd_va);
+ 
+    struct lima_screen *screen = lima_screen(ctx->base.screen);
+-   uint32_t vs_cmd_va = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_vs_cmd);
+-   uint32_t plbu_cmd_va = lima_ctx_buff_va(ctx, lima_ctx_buff_gp_plbu_cmd);
+    struct drm_lima_gp_frame gp_frame;
+    struct lima_gp_frame_reg *gp_frame_reg = (void *)gp_frame.frame;
+    gp_frame_reg->vs_cmd_start = vs_cmd_va;
+@@ -1323,12 +1390,6 @@ _lima_flush(struct lima_context *ctx, bool end_of_frame)
+    gp_frame_reg->tile_heap_end = screen->gp_buffer->va + gp_buffer_size;
+ 
+    lima_dump_command_stream_print(
+-      vs_cmd, vs_cmd_size, false, "flush vs cmd at va %x\n", vs_cmd_va);
+-
+-   lima_dump_command_stream_print(
+-      plbu_cmd, plbu_cmd_size, false, "flush plbu cmd at va %x\n", plbu_cmd_va);
+-
+-   lima_dump_command_stream_print(
+       &gp_frame, sizeof(gp_frame), false, "add gp frame\n");
+ 
+    if (!lima_submit_start(ctx->gp_submit, &gp_frame, sizeof(gp_frame)))
+@@ -1393,7 +1454,6 @@ _lima_flush(struct lima_context *ctx, bool end_of_frame)
+          fprintf(stderr, "pp submit error\n");
+    }
+ 
+-   ctx->num_draws = 0;
+    ctx->plb_index = (ctx->plb_index + 1) % lima_ctx_num_plb;
+ 
+    /* this surface may need reload when next draw if not end of frame */
+@@ -1404,7 +1464,7 @@ _lima_flush(struct lima_context *ctx, bool end_of_frame)
+ void
+ lima_flush(struct lima_context *ctx)
+ {
+-   if (!ctx->num_draws) {
++   if (!lima_ctx_dirty(ctx)) {
+       debug_printf("%s: do nothing\n", __FUNCTION__);
+       return;
+    }
+@@ -1419,7 +1479,7 @@ lima_pipe_flush(struct pipe_context *pctx, struct pipe_fence_handle **fence,
+    debug_printf("%s: flags=%x\n", __FUNCTION__, flags);
+ 
+    struct lima_context *ctx = lima_context(pctx);
+-   if (!ctx->num_draws) {
++   if (!lima_ctx_dirty(ctx)) {
+       debug_printf("%s: do nothing\n", __FUNCTION__);
+       return;
+    }
+-- 
+2.0.1
+

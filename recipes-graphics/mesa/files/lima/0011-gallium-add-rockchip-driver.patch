@@ -1,0 +1,577 @@
+From 2c8e05f4dfcc55a42f7cb8a59466f89b96d715fc Mon Sep 17 00:00:00 2001
+From: Heiko Stuebner <heiko@sntech.de>
+Date: Fri, 27 Jul 2018 17:46:16 +0800
+Subject: [PATCH 11/47] gallium: add rockchip driver
+
+A mesa driver for rockchip is defined which will call into lima when 3D
+rendering is requested from it.
+This uses the renderonly library from mesa, which hides the buffer
+sharing details between the two drivers from the application.
+This allows applications that expect a single device node like
+/dev/dri/card0 (such as kmscube) to run unmodified on Rockchip devices
+that use the rockchip-drm driver for display and have a Mali400 gpu using
+lima.
+
+This follows the model of the lima+sun4i drivers existing in mesa.
+The code implemented here is mostly borrowed from that particular
+implementation.
+
+Rockchip socs use the same drm/kms driver throughout all socs but
+multiple gpus are in use like Mali-Utgard, Mali-Midgard and also
+PowerVR and Vivante.
+To help with this the winsys part is set up to iterate through multiple
+gpus and try each until a valid one is found. Right now of course only
+the Lima-supported GPUs are implemented but it can be easily adapted
+for the other ones, once Mesa drivers are available for them.
+
+Signed-off-by: Heiko Stuebner <heiko@sntech.de>
+---
+ .travis.yml                                        |  2 +-
+ Android.mk                                         |  5 +-
+ Makefile.am                                        |  2 +-
+ configure.ac                                       | 12 +++-
+ src/gallium/Android.mk                             |  1 +
+ src/gallium/Makefile.am                            |  4 ++
+ .../auxiliary/pipe-loader/pipe_loader_drm.c        |  5 ++
+ src/gallium/auxiliary/target-helpers/drm_helper.h  | 23 +++++++
+ .../auxiliary/target-helpers/drm_helper_public.h   |  3 +
+ src/gallium/drivers/rockchip/Android.mk            | 39 +++++++++++
+ src/gallium/drivers/rockchip/Automake.inc          |  9 +++
+ src/gallium/drivers/rockchip/Makefile.am           |  8 +++
+ src/gallium/drivers/rockchip/Makefile.sources      |  1 +
+ src/gallium/targets/dri/Makefile.am                |  1 +
+ src/gallium/targets/dri/target.c                   |  3 +
+ src/gallium/winsys/rockchip/drm/Android.mk         | 33 +++++++++
+ src/gallium/winsys/rockchip/drm/Makefile.am        | 38 +++++++++++
+ src/gallium/winsys/rockchip/drm/Makefile.sources   |  3 +
+ .../winsys/rockchip/drm/rockchip_drm_public.h      | 31 +++++++++
+ .../winsys/rockchip/drm/rockchip_drm_winsys.c      | 79 ++++++++++++++++++++++
+ 20 files changed, 297 insertions(+), 5 deletions(-)
+ create mode 100644 src/gallium/drivers/rockchip/Android.mk
+ create mode 100644 src/gallium/drivers/rockchip/Automake.inc
+ create mode 100644 src/gallium/drivers/rockchip/Makefile.am
+ create mode 100644 src/gallium/drivers/rockchip/Makefile.sources
+ create mode 100644 src/gallium/winsys/rockchip/drm/Android.mk
+ create mode 100644 src/gallium/winsys/rockchip/drm/Makefile.am
+ create mode 100644 src/gallium/winsys/rockchip/drm/Makefile.sources
+ create mode 100644 src/gallium/winsys/rockchip/drm/rockchip_drm_public.h
+ create mode 100644 src/gallium/winsys/rockchip/drm/rockchip_drm_winsys.c
+
+diff --git a/.travis.yml b/.travis.yml
+index ebf36a5..25b405a 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -161,7 +161,7 @@ matrix:
+         - DRI_LOADERS="--disable-glx --disable-gbm --disable-egl"
+         - DRI_DRIVERS=""
+         - GALLIUM_ST="--enable-dri --disable-opencl --disable-xa --disable-nine --disable-xvmc --disable-vdpau --disable-va --disable-omx-bellagio --disable-gallium-osmesa"
+-        - GALLIUM_DRIVERS="i915,nouveau,pl111,r300,r600,freedreno,svga,swrast,v3d,vc4,virgl,etnaviv,imx,lima,sun4i,exynos,meson"
++        - GALLIUM_DRIVERS="i915,nouveau,pl111,r300,r600,freedreno,svga,swrast,v3d,vc4,virgl,etnaviv,imx,lima,sun4i,exynos,meson,rockchip"
+         - VULKAN_DRIVERS=""
+         - LIBUNWIND_FLAGS="--enable-libunwind"
+       addons:
+diff --git a/Android.mk b/Android.mk
+index 71cbbd0..87e6405 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -24,7 +24,7 @@
+ # BOARD_GPU_DRIVERS should be defined.  The valid values are
+ #
+ #   classic drivers: i915 i965
+-#   gallium drivers: swrast freedreno i915g nouveau pl111 r300g r600g radeonsi vc4 virgl vmwgfx etnaviv imx lima sun4i exynos meson
++#   gallium drivers: swrast freedreno i915g nouveau pl111 r300g r600g radeonsi vc4 virgl vmwgfx etnaviv imx lima sun4i exynos meson rockchip
+ #
+ # The main target is libGLES_mesa.  For each classic driver enabled, a DRI
+ # module will also be built.  DRI modules will be loaded by libGLES_mesa.
+@@ -64,7 +64,8 @@ gallium_drivers := \
+ 	lima.HAVE_GALLIUM_LIMA \
+ 	sun4i.HAVE_GALLIUM_SUN4I \
+ 	exynos.HAVE_GALLIUM_EXYNOS \
+-	meson.HAVE_GALLIUM_MESON
++	meson.HAVE_GALLIUM_MESON \
++	rockchip.HAVE_GALLIUM_ROCKCHIP
+ 
+ ifeq ($(BOARD_GPU_DRIVERS),all)
+ MESA_BUILD_CLASSIC := $(filter HAVE_%, $(subst ., , $(classic_drivers)))
+diff --git a/Makefile.am b/Makefile.am
+index 0d9270a..fb13fc9 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -45,7 +45,7 @@ AM_DISTCHECK_CONFIGURE_FLAGS = \
+ 	--enable-libunwind \
+ 	--with-platforms=x11,wayland,drm,surfaceless \
+ 	--with-dri-drivers=i915,i965,nouveau,radeon,r200,swrast \
+-	--with-gallium-drivers=i915,nouveau,r300,pl111,r600,radeonsi,freedreno,svga,swrast,vc4,tegra,virgl,swr,etnaviv,imx,lima,sun4i,exynos,meson \
++	--with-gallium-drivers=i915,nouveau,r300,pl111,r600,radeonsi,freedreno,svga,swrast,vc4,tegra,virgl,swr,etnaviv,imx,lima,sun4i,exynos,meson,rockchip \
+ 	--with-vulkan-drivers=intel,radeon
+ 
+ ACLOCAL_AMFLAGS = -I m4
+diff --git a/configure.ac b/configure.ac
+index d1fc204..8f94865 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1366,7 +1366,7 @@ GALLIUM_DRIVERS_DEFAULT="r300,r600,svga,swrast"
+ AC_ARG_WITH([gallium-drivers],
+     [AS_HELP_STRING([--with-gallium-drivers@<:@=DIRS...@:>@],
+         [comma delimited Gallium drivers list, e.g.
+-        "i915,nouveau,r300,r600,radeonsi,freedreno,pl111,svga,swrast,swr,tegra,v3d,vc4,virgl,etnaviv,imx,lima,sun4i,exynos,meson"
++        "i915,nouveau,r300,r600,radeonsi,freedreno,pl111,svga,swrast,swr,tegra,v3d,vc4,virgl,etnaviv,imx,lima,sun4i,exynos,meson,rockchip"
+         @<:@default=r300,r600,svga,swrast@:>@])],
+     [with_gallium_drivers="$withval"],
+     [with_gallium_drivers="$GALLIUM_DRIVERS_DEFAULT"])
+@@ -2816,6 +2816,9 @@ if test -n "$with_gallium_drivers"; then
+         xmeson)
+             HAVE_GALLIUM_MESON=yes
+             ;;
++        xrockchip)
++            HAVE_GALLIUM_ROCKCHIP=yes
++            ;;
+         *)
+             AC_MSG_ERROR([Unknown Gallium driver: $driver])
+             ;;
+@@ -2865,6 +2868,10 @@ if test "x$HAVE_GALLIUM_LIMA" != xyes -a "x$HAVE_GALLIUM_MESON" = xyes  ; then
+     AC_MSG_ERROR([Building with meson requires lima])
+ fi
+ 
++if test "x$HAVE_GALLIUM_LIMA" != xyes -a "x$HAVE_GALLIUM_ROCKCHIP" = xyes  ; then
++    AC_MSG_ERROR([Building with rockchip requires lima])
++fi
++
+ detect_old_buggy_llvm() {
+     dnl llvm-config may not give the right answer when llvm is a built as a
+     dnl single shared library, so we must work the library name out for
+@@ -2976,6 +2983,7 @@ AM_CONDITIONAL(HAVE_GALLIUM_LIMA, test "x$HAVE_GALLIUM_LIMA" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_SUN4I, test "x$HAVE_GALLIUM_SUN4I" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_EXYNOS, test "x$HAVE_GALLIUM_EXYNOS" = xyes)
+ AM_CONDITIONAL(HAVE_GALLIUM_MESON, test "x$HAVE_GALLIUM_MESON" = xyes)
++AM_CONDITIONAL(HAVE_GALLIUM_ROCKCHIP, test "x$HAVE_GALLIUM_ROCKCHIP" = xyes)
+ 
+ AM_CONDITIONAL(HAVE_GALLIUM_STATIC_TARGETS, test "x$enable_shared_pipe_drivers" = xno)
+ 
+@@ -3123,6 +3131,7 @@ AC_CONFIG_FILES([Makefile
+                  src/gallium/drivers/sun4i/Makefile
+                  src/gallium/drivers/exynos/Makefile
+                  src/gallium/drivers/meson/Makefile
++                 src/gallium/drivers/rockchip/Makefile
+                  src/gallium/state_trackers/clover/Makefile
+                  src/gallium/state_trackers/dri/Makefile
+                  src/gallium/state_trackers/glx/xlib/Makefile
+@@ -3176,6 +3185,7 @@ AC_CONFIG_FILES([Makefile
+                  src/gallium/winsys/sun4i/drm/Makefile
+                  src/gallium/winsys/exynos/drm/Makefile
+                  src/gallium/winsys/meson/drm/Makefile
++                 src/gallium/winsys/rockchip/drm/Makefile
+                  src/gbm/Makefile
+                  src/gbm/main/gbm.pc
+                  src/glx/Makefile
+diff --git a/src/gallium/Android.mk b/src/gallium/Android.mk
+index 1bf56f5..44ac21d 100644
+--- a/src/gallium/Android.mk
++++ b/src/gallium/Android.mk
+@@ -51,6 +51,7 @@ SUBDIRS += winsys/lima/drm drivers/lima
+ SUBDIRS += winsys/sun4i/drm drivers/sun4i
+ SUBDIRS += winsys/exynos/drm drivers/exynos
+ SUBDIRS += winsys/meson/drm drivers/meson
++SUBDIRS += winsys/rockchip/drm drivers/rockchip
+ SUBDIRS += state_trackers/dri
+ 
+ # sort to eliminate any duplicates
+diff --git a/src/gallium/Makefile.am b/src/gallium/Makefile.am
+index 85af0f7..8f5d0b4 100644
+--- a/src/gallium/Makefile.am
++++ b/src/gallium/Makefile.am
+@@ -115,6 +115,10 @@ if HAVE_GALLIUM_MESON
+ SUBDIRS += drivers/meson winsys/meson/drm
+ endif
+ 
++if HAVE_GALLIUM_ROCKCHIP
++SUBDIRS += drivers/rockchip winsys/rockchip/drm
++endif
++
+ ## the sw winsys'
+ SUBDIRS += winsys/sw/null
+ 
+diff --git a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+index e8f1457..1ae65ed 100644
+--- a/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
++++ b/src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c
+@@ -160,6 +160,11 @@ static const struct drm_driver_descriptor driver_descriptors[] = {
+         .create_screen = pipe_meson_create_screen,
+         .configuration = pipe_default_configuration_query,
+     },
++    {
++        .driver_name = "rockchip",
++        .create_screen = pipe_rockchip_create_screen,
++        .configuration = pipe_default_configuration_query,
++    },
+ };
+ #endif
+ 
+diff --git a/src/gallium/auxiliary/target-helpers/drm_helper.h b/src/gallium/auxiliary/target-helpers/drm_helper.h
+index e635d29..59ccf98 100644
+--- a/src/gallium/auxiliary/target-helpers/drm_helper.h
++++ b/src/gallium/auxiliary/target-helpers/drm_helper.h
+@@ -495,4 +495,27 @@ pipe_meson_create_screen(int fd, const struct pipe_screen_config *config)
+ 
+ #endif
+ 
++#ifdef GALLIUM_ROCKCHIP
++#include "rockchip/drm/rockchip_drm_public.h"
++
++struct pipe_screen *
++pipe_rockchip_create_screen(int fd, const struct pipe_screen_config *config)
++{
++   struct pipe_screen *screen;
++
++   screen = rockchip_screen_create(fd);
++   return screen ? debug_screen_wrap(screen) : NULL;
++}
++
++#else
++
++struct pipe_screen *
++pipe_rockchip_create_screen(int fd, const struct pipe_screen_config *config)
++{
++   fprintf(stderr, "rockchip: driver missing\n");
++   return NULL;
++}
++
++#endif
++
+ #endif /* DRM_HELPER_H */
+diff --git a/src/gallium/auxiliary/target-helpers/drm_helper_public.h b/src/gallium/auxiliary/target-helpers/drm_helper_public.h
+index 10ce35f..5ce6ebc 100644
+--- a/src/gallium/auxiliary/target-helpers/drm_helper_public.h
++++ b/src/gallium/auxiliary/target-helpers/drm_helper_public.h
+@@ -66,6 +66,9 @@ pipe_exynos_create_screen(int fd, const struct pipe_screen_config *config);
+ struct pipe_screen *
+ pipe_meson_create_screen(int fd, const struct pipe_screen_config *config);
+ 
++struct pipe_screen *
++pipe_rockchip_create_screen(int fd, const struct pipe_screen_config *config);
++
+ const struct drm_conf_ret *
+ pipe_default_configuration_query(enum drm_conf conf);
+ 
+diff --git a/src/gallium/drivers/rockchip/Android.mk b/src/gallium/drivers/rockchip/Android.mk
+new file mode 100644
+index 0000000..5948cf0
+--- /dev/null
++++ b/src/gallium/drivers/rockchip/Android.mk
+@@ -0,0 +1,39 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included
++# in all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++LOCAL_PATH := $(call my-dir)
++
++# get C_SOURCES
++include $(LOCAL_PATH)/Makefile.sources
++
++include $(CLEAR_VARS)
++
++LOCAL_SRC_FILES := \
++	$(C_SOURCES)
++
++LOCAL_MODULE := libmesa_pipe_rockchip
++
++include $(GALLIUM_COMMON_MK)
++include $(BUILD_STATIC_LIBRARY)
++
++ifneq ($(HAVE_GALLIUM_ROCKCHIP),)
++GALLIUM_TARGET_DRIVERS += rockchip
++$(eval GALLIUM_LIBS += $(LOCAL_MODULE) libmesa_winsys_rockchip)
++endif
+diff --git a/src/gallium/drivers/rockchip/Automake.inc b/src/gallium/drivers/rockchip/Automake.inc
+new file mode 100644
+index 0000000..2eb8e1c
+--- /dev/null
++++ b/src/gallium/drivers/rockchip/Automake.inc
+@@ -0,0 +1,9 @@
++if HAVE_GALLIUM_ROCKCHIP
++
++TARGET_DRIVERS += rockchip
++TARGET_CPPFLAGS += -DGALLIUM_ROCKCHIP
++TARGET_LIB_DEPS += \
++    $(top_builddir)/src/gallium/winsys/rockchip/drm/librockchipdrm.la \
++    $(LIBDRM_LIBS)
++
++endif
+diff --git a/src/gallium/drivers/rockchip/Makefile.am b/src/gallium/drivers/rockchip/Makefile.am
+new file mode 100644
+index 0000000..5fce5ea
+--- /dev/null
++++ b/src/gallium/drivers/rockchip/Makefile.am
+@@ -0,0 +1,8 @@
++include $(top_srcdir)/src/gallium/Automake.inc
++
++AM_CPPFLAGS = \
++	$(GALLIUM_CFLAGS)
++
++noinst_LTLIBRARIES = librockchip.la
++
++librockchip_la_SOURCES = $(C_SOURCES)
+diff --git a/src/gallium/drivers/rockchip/Makefile.sources b/src/gallium/drivers/rockchip/Makefile.sources
+new file mode 100644
+index 0000000..9103ca8
+--- /dev/null
++++ b/src/gallium/drivers/rockchip/Makefile.sources
+@@ -0,0 +1 @@
++C_SOURCES :=
+diff --git a/src/gallium/targets/dri/Makefile.am b/src/gallium/targets/dri/Makefile.am
+index b5323d8..ec744c4 100644
+--- a/src/gallium/targets/dri/Makefile.am
++++ b/src/gallium/targets/dri/Makefile.am
+@@ -89,6 +89,7 @@ include $(top_srcdir)/src/gallium/drivers/lima/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/sun4i/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/exynos/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/meson/Automake.inc
++include $(top_srcdir)/src/gallium/drivers/rockchip/Automake.inc
+ 
+ include $(top_srcdir)/src/gallium/drivers/softpipe/Automake.inc
+ include $(top_srcdir)/src/gallium/drivers/llvmpipe/Automake.inc
+diff --git a/src/gallium/targets/dri/target.c b/src/gallium/targets/dri/target.c
+index 3064ecb..30a4bc8 100644
+--- a/src/gallium/targets/dri/target.c
++++ b/src/gallium/targets/dri/target.c
+@@ -102,4 +102,7 @@ DEFINE_LOADER_DRM_ENTRYPOINT(exynos)
+ #if defined(GALLIUM_MESON)
+ DEFINE_LOADER_DRM_ENTRYPOINT(meson)
+ #endif
++#if defined(GALLIUM_ROCKCHIP)
++DEFINE_LOADER_DRM_ENTRYPOINT(rockchip)
++#endif
+ #endif
+diff --git a/src/gallium/winsys/rockchip/drm/Android.mk b/src/gallium/winsys/rockchip/drm/Android.mk
+new file mode 100644
+index 0000000..d98a568
+--- /dev/null
++++ b/src/gallium/winsys/rockchip/drm/Android.mk
+@@ -0,0 +1,33 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included
++# in all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++LOCAL_PATH := $(call my-dir)
++
++# get C_SOURCES
++include $(LOCAL_PATH)/Makefile.sources
++
++include $(CLEAR_VARS)
++
++LOCAL_SRC_FILES := $(C_SOURCES)
++
++LOCAL_MODULE := libmesa_winsys_rockchip
++
++include $(GALLIUM_COMMON_MK)
++include $(BUILD_STATIC_LIBRARY)
+diff --git a/src/gallium/winsys/rockchip/drm/Makefile.am b/src/gallium/winsys/rockchip/drm/Makefile.am
+new file mode 100644
+index 0000000..37ffe3f
+--- /dev/null
++++ b/src/gallium/winsys/rockchip/drm/Makefile.am
+@@ -0,0 +1,38 @@
++# Copyright (c) 2017 Lima Project
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice (including the next
++# paragraph) shall be included in all copies or substantial portions of the
++# Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++# NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++
++include Makefile.sources
++include $(top_srcdir)/src/gallium/Automake.inc
++
++AM_CFLAGS = \
++	-I$(top_srcdir)/src/gallium/drivers \
++	-I$(top_srcdir)/src/gallium/winsys \
++	$(GALLIUM_WINSYS_CFLAGS) \
++	$(LIBDRM_CFLAGS)
++
++if HAVE_GALLIUM_LIMA
++AM_CFLAGS += -DGALLIUM_LIMA
++endif
++
++noinst_LTLIBRARIES = librockchipdrm.la
++
++librockchipdrm_la_SOURCES = $(C_SOURCES)
+diff --git a/src/gallium/winsys/rockchip/drm/Makefile.sources b/src/gallium/winsys/rockchip/drm/Makefile.sources
+new file mode 100644
+index 0000000..440420d
+--- /dev/null
++++ b/src/gallium/winsys/rockchip/drm/Makefile.sources
+@@ -0,0 +1,3 @@
++C_SOURCES := \
++   rockchip_drm_public.h \
++   rockchip_drm_winsys.c
+diff --git a/src/gallium/winsys/rockchip/drm/rockchip_drm_public.h b/src/gallium/winsys/rockchip/drm/rockchip_drm_public.h
+new file mode 100644
+index 0000000..5a50a15
+--- /dev/null
++++ b/src/gallium/winsys/rockchip/drm/rockchip_drm_public.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (c) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#ifndef __ROCKCHIP_DRM_PUBLIC_H__
++#define __ROCKCHIP_DRM_PUBLIC_H__
++
++struct pipe_screen;
++
++struct pipe_screen *rockchip_screen_create(int fd);
++
++#endif /* __ROCKCHIP_DRM_PUBLIC_H__ */
+diff --git a/src/gallium/winsys/rockchip/drm/rockchip_drm_winsys.c b/src/gallium/winsys/rockchip/drm/rockchip_drm_winsys.c
+new file mode 100644
+index 0000000..ce8d7db
+--- /dev/null
++++ b/src/gallium/winsys/rockchip/drm/rockchip_drm_winsys.c
+@@ -0,0 +1,79 @@
++/*
++ * Copyright (c) 2017 Lima Project
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include "rockchip_drm_public.h"
++#include "lima/drm/lima_drm_public.h"
++#include "xf86drm.h"
++
++#include "pipe/p_screen.h"
++#include "renderonly/renderonly.h"
++
++#if defined(GALLIUM_LIMA)
++static struct pipe_screen *rockchip_screen_create_lima(int fd)
++{
++   struct renderonly ro = {
++      /* Passes the lima-allocated BO through to the rockchip DRM device using
++       * PRIME buffer sharing.  The lima BO must be linear, which the SCANOUT
++       * flag on allocation will have ensured.
++       */
++      .create_for_resource = renderonly_create_kms_dumb_buffer_for_resource,
++      .kms_fd = fd,
++      .gpu_fd = drmOpenWithType("lima", NULL, DRM_NODE_RENDER),
++   };
++
++   if (ro.gpu_fd < 0)
++      return NULL;
++
++   struct pipe_screen *screen = lima_drm_screen_create_renderonly(&ro);
++   if (!screen)
++      close(ro.gpu_fd);
++
++   return screen;
++}
++#else
++static struct pipe_screen *rockchip_screen_create_lima(int fd)
++{
++   return NULL;
++}
++#endif
++
++/*
++ * Rockchip SoCs use a plethora of 3D GPUs combined with the same
++ * KMS device. Malis from the Utgard and Midgard branches as well
++ * as PowerVR and Vivante cores.
++ * So to we try to find a suitable GPU by trying to talk to each
++ * of them one after the other.
++ */
++struct pipe_screen *rockchip_screen_create(int fd)
++{
++   struct pipe_screen *screen;
++
++   screen = rockchip_screen_create_lima(fd);
++   if (screen)
++      return screen;
++
++   return NULL;
++}
+-- 
+2.0.1
+

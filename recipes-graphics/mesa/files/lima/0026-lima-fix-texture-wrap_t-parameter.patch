@@ -1,0 +1,26 @@
+From a6f5b33713f72fcf3cef489668b361a004707dc1 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Thu, 16 Aug 2018 21:54:48 +0800
+Subject: [PATCH 26/47] lima: fix texture wrap_t parameter
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_texture.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/lima/lima_texture.c b/src/gallium/drivers/lima/lima_texture.c
+index 2ac6afa..6eda0f3 100644
+--- a/src/gallium/drivers/lima/lima_texture.c
++++ b/src/gallium/drivers/lima/lima_texture.c
+@@ -161,7 +161,7 @@ lima_update_tex_desc(struct lima_context *ctx, struct lima_sampler_state *sample
+ 
+    /* Only clamp to edge and mirror repeat are supported */
+    desc[2] &= ~0x070000;
+-   switch (sampler->base.wrap_s) {
++   switch (sampler->base.wrap_t) {
+    case PIPE_TEX_WRAP_CLAMP:
+    case PIPE_TEX_WRAP_CLAMP_TO_EDGE:
+    case PIPE_TEX_WRAP_CLAMP_TO_BORDER:
+-- 
+2.0.1
+

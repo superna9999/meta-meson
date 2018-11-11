@@ -1,0 +1,38 @@
+From a8c0e9130bdbf494e63b05f35aa9bd79df2d7dd3 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Tue, 14 Aug 2018 22:28:21 +0800
+Subject: [PATCH 13/47] lima: is_format_supported changed in 18.2
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_screen.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/lima/lima_screen.c b/src/gallium/drivers/lima/lima_screen.c
+index d1c5d05..5ce4999 100644
+--- a/src/gallium/drivers/lima/lima_screen.c
++++ b/src/gallium/drivers/lima/lima_screen.c
+@@ -245,7 +245,9 @@ static boolean
+ lima_screen_is_format_supported(struct pipe_screen *pscreen,
+                                 enum pipe_format format,
+                                 enum pipe_texture_target target,
+-                                unsigned sample_count, unsigned usage)
++                                unsigned sample_count,
++                                unsigned storage_sample_count,
++                                unsigned usage)
+ {
+    switch (target) {
+    case PIPE_BUFFER:
+@@ -256,6 +258,9 @@ lima_screen_is_format_supported(struct pipe_screen *pscreen,
+       return FALSE;
+    }
+ 
++   if (MAX2(1, sample_count) != MAX2(1, storage_sample_count))
++      return false;
++
+    /* be able to support 16, now limit to 4 */
+    if (sample_count > 1 && sample_count != 4)
+       return FALSE;
+-- 
+2.0.1
+

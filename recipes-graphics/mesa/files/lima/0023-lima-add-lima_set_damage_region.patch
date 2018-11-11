@@ -1,0 +1,93 @@
+From 08ec349386893373a9bce76dc9cdaa31f1118c2b Mon Sep 17 00:00:00 2001
+From: Qiang Yu <yuq825@gmail.com>
+Date: Mon, 6 Aug 2018 16:20:01 +0800
+Subject: [PATCH 23/47] lima: add lima_set_damage_region
+
+Signed-off-by: Qiang Yu <yuq825@gmail.com>
+---
+ src/gallium/drivers/lima/lima_context.h |  2 ++
+ src/gallium/drivers/lima/lima_screen.c  |  1 +
+ src/gallium/drivers/lima/lima_state.c   | 35 +++++++++++++++++++++++++++++++++
+ 3 files changed, 38 insertions(+)
+
+diff --git a/src/gallium/drivers/lima/lima_context.h b/src/gallium/drivers/lima/lima_context.h
+index 904d19b..3140135 100644
+--- a/src/gallium/drivers/lima/lima_context.h
++++ b/src/gallium/drivers/lima/lima_context.h
+@@ -195,6 +195,8 @@ struct lima_context {
+    struct pipe_stencil_ref stencil_ref;
+    struct lima_context_constant_buffer const_buffer[PIPE_SHADER_TYPES];
+    struct lima_texture_stateobj tex_stateobj;
++   struct pipe_scissor_state *damage_region;
++   unsigned num_damage;
+ 
+    #define LIMA_CTX_PLB_MIN_NUM  1
+    #define LIMA_CTX_PLB_MAX_NUM  4
+diff --git a/src/gallium/drivers/lima/lima_screen.c b/src/gallium/drivers/lima/lima_screen.c
+index 5ce4999..7559a08 100644
+--- a/src/gallium/drivers/lima/lima_screen.c
++++ b/src/gallium/drivers/lima/lima_screen.c
+@@ -108,6 +108,7 @@ lima_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
+    case PIPE_CAP_FORCE_COMPUTE_MINMAX_INDICES:
+    case PIPE_CAP_NATIVE_FENCE_FD:
++   case PIPE_CAP_SET_DAMAGE:
+       return 1;
+ 
+    /* Unimplemented, but for exporting OpenGL 2.0 */
+diff --git a/src/gallium/drivers/lima/lima_state.c b/src/gallium/drivers/lima/lima_state.c
+index 32ab311..d06ac6e 100644
+--- a/src/gallium/drivers/lima/lima_state.c
++++ b/src/gallium/drivers/lima/lima_state.c
+@@ -473,6 +473,39 @@ lima_set_sampler_views(struct pipe_context *pctx,
+    ctx->dirty |= LIMA_CONTEXT_DIRTY_TEXTURES;
+ }
+ 
++static boolean
++lima_set_damage_region(struct pipe_context *pctx, unsigned num_rects, int *rects)
++{
++   struct lima_context *ctx = lima_context(pctx);
++   int i;
++
++   if (ctx->damage_region)
++      ralloc_free(ctx->damage_region);
++
++   if (!num_rects) {
++      ctx->damage_region = NULL;
++      ctx->num_damage = 0;
++      return true;
++   }
++
++   ctx->damage_region = ralloc_size(ctx, sizeof(*ctx->damage_region) * num_rects);
++   if (!ctx->damage_region) {
++      ctx->num_damage = 0;
++      return false;
++   }
++
++   for (i = 0; i < num_rects; i++) {
++      struct pipe_scissor_state *r = ctx->damage_region + i;
++      r->minx = rects[i * 4];
++      r->miny = rects[i * 4 + 1];
++      r->maxx = rects[i * 4 + 2];
++      r->maxy = rects[i * 4 + 3];
++   }
++
++   ctx->num_damage = num_rects;
++   return true;
++}
++
+ void
+ lima_state_init(struct lima_context *ctx)
+ {
+@@ -509,6 +542,8 @@ lima_state_init(struct lima_context *ctx)
+    ctx->base.create_sampler_view = lima_create_sampler_view;
+    ctx->base.sampler_view_destroy = lima_sampler_view_destroy;
+    ctx->base.set_sampler_views = lima_set_sampler_views;
++
++   ctx->base.set_damage_region = lima_set_damage_region;
+ }
+ 
+ void
+-- 
+2.0.1
+

@@ -1,0 +1,58 @@
+From 102c80d6e89f51d31ecab96880a4ae7f67d64ad8 Mon Sep 17 00:00:00 2001
+From: Erico Nunes <nunes.erico@gmail.com>
+Date: Mon, 2 Apr 2018 19:01:51 +0200
+Subject: [PATCH 04/47] gallium: add a cap to force compute minmax indices
+
+pipe_draw_info has min_index and max_index fields that can be useful in
+indexed drawing, however gallium may decide to not compute them in some
+cases to avoid impacting performance if the driver won't need them.
+However, some drivers may need to always compute these values to build a
+valid command stream for indexed draw.
+Instead of reimplementing this functionality or having to explicitly
+compute those in driver specific code, this new cap can be used to
+ensure that gallium will not skip the computation.
+Drivers that set this cap will be able to rely on those values to build
+the command stream.
+
+For more details on this patch:
+https://lists.freedesktop.org/archives/mesa-dev/2018-March/189251.html
+
+Signed-off-by: Erico Nunes <nunes.erico@gmail.com>
+---
+ src/gallium/include/pipe/p_defines.h | 1 +
+ src/mesa/state_tracker/st_draw.c     | 5 ++++-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/include/pipe/p_defines.h b/src/gallium/include/pipe/p_defines.h
+index 9909b2b..a750f79 100644
+--- a/src/gallium/include/pipe/p_defines.h
++++ b/src/gallium/include/pipe/p_defines.h
+@@ -815,6 +815,7 @@ enum pipe_cap
+    PIPE_CAP_MAX_CONSERVATIVE_RASTER_SUBPIXEL_PRECISION_BIAS,
+    PIPE_CAP_CONSERVATIVE_RASTER_POST_DEPTH_COVERAGE,
+    PIPE_CAP_PROGRAMMABLE_SAMPLE_LOCATIONS,
++   PIPE_CAP_FORCE_COMPUTE_MINMAX_INDICES,
+ };
+ 
+ /**
+diff --git a/src/mesa/state_tracker/st_draw.c b/src/mesa/state_tracker/st_draw.c
+index eb52d95..3b60770 100644
+--- a/src/mesa/state_tracker/st_draw.c
++++ b/src/mesa/state_tracker/st_draw.c
+@@ -160,9 +160,12 @@ st_draw_vbo(struct gl_context *ctx,
+ 
+    if (ib) {
+       struct gl_buffer_object *bufobj = ib->obj;
++      struct pipe_screen *screen = st->pipe->screen;
++      bool needs_minmax_index = st->draw_needs_minmax_index ||
++         screen->get_param(screen, PIPE_CAP_FORCE_COMPUTE_MINMAX_INDICES);
+ 
+       /* Get index bounds for user buffers. */
+-      if (!index_bounds_valid && st->draw_needs_minmax_index) {
++      if (!index_bounds_valid && needs_minmax_index) {
+          vbo_get_minmax_indices(ctx, prims, ib, &min_index, &max_index,
+                                 nr_prims);
+       }
+-- 
+2.0.1
+
