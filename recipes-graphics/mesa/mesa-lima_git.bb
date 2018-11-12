@@ -56,6 +56,7 @@ SRC_URI = "git://gitlab.freedesktop.org/mesa/mesa.git;protocol=https;branch=18.2
            file://lima/0045-lima-pp-Fix-some-whitespace-issues-in-disassembler.patch \
            file://lima/0046-lima-pp-Fix-disassembler-shift-issue.patch \
            file://lima/0047-lima-fix-multi-triangle-index-draw-hang.patch \
+           file://lima/1.diff \
            "
 
 PV = "18.2.4+git${SRCPV}"

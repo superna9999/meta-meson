@@ -1,0 +1,13 @@
+diff --git a/src/gallium/drivers/lima/lima_resource.c b/src/gallium/drivers/lima/lima_resource.c
+index bcdc20a734..cad4fbbb0d 100644
+--- a/src/gallium/drivers/lima/lima_resource.c
++++ b/src/gallium/drivers/lima/lima_resource.c
+@@ -137,7 +137,7 @@ _lima_resource_create_with_modifiers(struct pipe_screen *pscreen,
+                                      int count)
+ {
+    struct lima_screen *screen = lima_screen(pscreen);
+-   bool should_tile = true;
++   bool should_tile = false;
+    unsigned width, height;
+ 
+    /* VBOs/PBOs are untiled (and 1 height). */
