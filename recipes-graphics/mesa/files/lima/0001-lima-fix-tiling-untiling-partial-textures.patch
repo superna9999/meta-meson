@@ -1,4 +1,4 @@
-From 30753194ce9e1ff8dcd0cdfcbe583e45e149372b Mon Sep 17 00:00:00 2001
+From b1917aa2e17cf68c717780f7f0fcefcb942c89d7 Mon Sep 17 00:00:00 2001
 From: Vasily Khoruzhick <anarsoul@gmail.com>
 Date: Mon, 12 Nov 2018 10:26:31 -0800
 Subject: [PATCH] lima: fix tiling/untiling partial textures
@@ -12,7 +12,7 @@ Signed-off-by: Vasily Khoruzhick <anarsoul@gmail.com>
  1 file changed, 8 insertions(+), 8 deletions(-)
 
 diff --git a/src/gallium/drivers/lima/lima_tiling.c b/src/gallium/drivers/lima/lima_tiling.c
-index 12e5c79f9c..0b18c10473 100644
+index 12e5c79f9c..0042c377e2 100644
 --- a/src/gallium/drivers/lima/lima_tiling.c
 +++ b/src/gallium/drivers/lima/lima_tiling.c
 @@ -51,11 +51,11 @@ lima_store_tiled_image_bpp4(void *dst, const void *src,
@@ -20,7 +20,7 @@ index 12e5c79f9c..0b18c10473 100644
                                 uint32_t src_stride)
  {
 -   for (int y = box->y; y < box->height; ++y) {
-+   for (int y = box->y, src_y = 0; y < box->height; ++y, ++src_y) {
++   for (int y = box->y, src_y = 0; src_y < box->height; ++y, ++src_y) {
        int block_y = y & ~0x0f;
        int rem_y = y & 0x0F;
        int block_start_s = block_y * dst_stride;
@@ -34,7 +34,7 @@ index 12e5c79f9c..0b18c10473 100644
                                 uint32_t bpp)
  {
 -   for (int y = box->y; y < box->height; ++y) {
-+   for (int y = box->y, src_y = 0; y < box->height; ++y, ++src_y) {
++   for (int y = box->y, src_y = 0; src_y < box->height; ++y, ++src_y) {
        int block_y = y & ~0x0f;
        int rem_y = y & 0x0F;
        int block_start_s = block_y * dst_stride;
@@ -48,7 +48,7 @@ index 12e5c79f9c..0b18c10473 100644
                                uint32_t src_stride)
  {
 -   for (int y = box->y; y < box->height; ++y) {
-+   for (int y = box->y, dest_y = 0; y < box->height; ++y, ++dest_y) {
++   for (int y = box->y, dest_y = 0; dest_y < box->height; ++y, ++dest_y) {
        int block_y = y & ~0x0f;
        int rem_y = y & 0x0F;
        int block_start_s = block_y * src_stride;
@@ -62,7 +62,7 @@ index 12e5c79f9c..0b18c10473 100644
                                uint32_t bpp)
  {
 -   for (int y = box->y; y < box->height; ++y) {
-+   for (int y = box->y, dest_y = 0; y < box->height; ++y, ++dest_y) {
++   for (int y = box->y, dest_y = 0; dest_y < box->height; ++y, ++dest_y) {
        int block_y = y & ~0x0f;
        int rem_y = y & 0x0F;
        int block_start_s = block_y * src_stride;
