@@ -1,4 +1,4 @@
-From 117fbb5f23ad0fbe451505965ba839e92f001503 Mon Sep 17 00:00:00 2001
+From 0c815d66dbaa54b53e4b54105992ce44dfe8c36f Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 13 Nov 2017 12:09:40 +0100
 Subject: [PATCH] ARM64: defconfig: enable CEC support
@@ -9,6 +9,7 @@ Turn on CONFIG_DRM_DW_HDMI_CEC as module
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>
 Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
+
 ---
  arch/arm64/configs/defconfig | 4 ++++
  1 file changed, 4 insertions(+)

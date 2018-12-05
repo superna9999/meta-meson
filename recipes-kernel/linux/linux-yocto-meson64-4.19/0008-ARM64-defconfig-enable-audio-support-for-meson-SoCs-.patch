@@ -1,4 +1,4 @@
-From aee2e32fd6713c6a620485f20d63fa5188c529f2 Mon Sep 17 00:00:00 2001
+From 93621178cb2f756c8ca8901801c2ce914ac7dc6b Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Fri, 31 Mar 2017 15:55:03 +0200
 Subject: [PATCH] ARM64: defconfig: enable audio support for meson SoCs as
@@ -8,6 +8,7 @@ Add audio support for meson SoCs. This includes the audio core
 driver and the i2s and spdif output interfaces
 
 Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>
+
 ---
  arch/arm64/configs/defconfig | 3 +++
  1 file changed, 3 insertions(+)
