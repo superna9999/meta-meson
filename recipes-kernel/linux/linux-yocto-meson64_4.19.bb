@@ -64,6 +64,8 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
            file://0021-drm-meson-Output-in-YUV444-if-sink-supports-it.patch \
            file://0022-drm-meson-Fixes-for-drm_crtc_vblank_on-off-support.patch \
            file://0023-drm-meson-Fix-an-Alpha-Primary-Plane-bug-on-Meson-GX.patch \
+           file://0001-arm64-dts-meson-Fix-IRQ-trigger-type-for-macirq.patch \
+           file://0001-drm-meson-fix-max-mode_config-height-width.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
