@@ -1,0 +1,39 @@
+From 31d0dd4d5b4c32fa89e583c34d5e94922b0e0e91 Mon Sep 17 00:00:00 2001
+From: Jerome Brunet <jbrunet@baylibre.com>
+Date: Thu, 26 Apr 2018 15:12:23 +0200
+Subject: [PATCH 18/18] arm64: defconfig: enable modules for amlogic s400 sound
+ card
+
+Compile the necessary drivers as modules, including codecs, for the
+s400 sound card.
+
+Signed-off-by: Jerome Brunet <jbrunet@baylibre.com>
+---
+ arch/arm64/configs/defconfig | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/configs/defconfig b/arch/arm64/configs/defconfig
+index c9a57d11330b..b0c3259c4965 100644
+--- a/arch/arm64/configs/defconfig
++++ b/arch/arm64/configs/defconfig
+@@ -480,6 +480,7 @@ CONFIG_SND_SOC_ROCKCHIP_I2S=m
+ CONFIG_SND_SOC_ROCKCHIP_SPDIF=m
+ CONFIG_SND_SOC_ROCKCHIP_RT5645=m
+ CONFIG_SND_SOC_RK3399_GRU_SOUND=m
++CONFIG_SND_MESON_AXG_SOUND_CARD=m
+ CONFIG_SND_SOC_SAMSUNG=y
+ CONFIG_SND_SOC_RCAR=m
+ CONFIG_SND_SOC_AK4613=m
+@@ -491,6 +492,9 @@ CONFIG_SND_SOC_RT5514_SPI=m
+ CONFIG_SND_SOC_RT5645=m
+ CONFIG_SND_SIMPLE_CARD=m
+ CONFIG_SND_AUDIO_GRAPH_CARD=m
++CONFIG_SND_SOC_ES7134=m
++CONFIG_SND_SOC_ES7241=m
++CONFIG_SND_SOC_TAS571X=m
+ CONFIG_I2C_HID=m
+ CONFIG_USB=y
+ CONFIG_USB_OTG=y
+-- 
+2.19.2
+
