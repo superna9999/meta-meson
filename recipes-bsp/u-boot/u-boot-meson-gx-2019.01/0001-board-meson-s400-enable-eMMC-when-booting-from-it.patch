@@ -1,0 +1,53 @@
+From f00c236737143a10d083e2c037468e2adcd6d002 Mon Sep 17 00:00:00 2001
+From: Jerome Brunet <jbrunet@baylibre.com>
+Date: Mon, 17 Dec 2018 14:25:45 +0100
+Subject: [PATCH] board: meson: s400: enable eMMC when booting from it
+
+---
+ board/amlogic/s400/s400.c | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/board/amlogic/s400/s400.c b/board/amlogic/s400/s400.c
+index 02a0e9286cb1..322425b13628 100644
+--- a/board/amlogic/s400/s400.c
++++ b/board/amlogic/s400/s400.c
+@@ -6,6 +6,7 @@
+ 
+ #include <common.h>
+ #include <dm.h>
++#include <fdt.h>
+ #include <environment.h>
+ #include <asm/io.h>
+ #include <asm/arch/axg.h>
+@@ -19,3 +20,28 @@ int misc_init_r(void)
+ 
+ 	return 0;
+ }
++
++/*
++ * The S400 comes in 2 flavors, NAND or eMMC
++ * Use the boot source to determine the flavor
++ */
++
++#define MESON_AXG_EMMC_PATH "/soc/bus@ffe00000/mmc@7000"
++
++static int meson_s400_check_emmc(void *fdt)
++{
++	char *boot_src = env_get("boot_source");
++	int offset;
++
++	if (boot_src && !strncmp(boot_src, "emmc", 5)) {
++		offset = fdt_path_offset(fdt, MESON_AXG_EMMC_PATH);
++		fdt_setprop(fdt, offset, "status", "okay", 5);
++	}
++
++	return 0;
++}
++
++int meson_ft_board_setup(void *blob, bd_t *bd)
++{
++	return meson_s400_check_emmc(blob);
++}
+-- 
+2.19.2
+
