@@ -49,6 +49,9 @@ deploy_axg () {
     install ${DESTDIR}/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
     # eMMC
     install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
+    # USB
+    install ${DESTDIR}/u-boot.bin.usb.bl2 ${DEPLOYDIR}/u-boot.bin.usb.bl2
+    install ${DESTDIR}/u-boot.bin.usb.tpl ${DEPLOYDIR}/u-boot.bin.usb.tpl
 }
 
 deploy_gxbb () {
@@ -92,6 +95,9 @@ deploy_gxbb () {
     install ${DESTDIR}/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
     # eMMC
     install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
+    # USB
+    install ${DESTDIR}/u-boot.bin.usb.bl2 ${DEPLOYDIR}/u-boot.bin.usb.bl2
+    install ${DESTDIR}/u-boot.bin.usb.tpl ${DEPLOYDIR}/u-boot.bin.usb.tpl
 }
 
 deploy_gxl () {
@@ -133,6 +139,9 @@ deploy_gxl () {
     install ${DESTDIR}/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
     # eMMC
     install ${DESTDIR}/u-boot.bin ${DEPLOYDIR}/u-boot.bin
+    # USB
+    install ${DESTDIR}/u-boot.bin.usb.bl2 ${DEPLOYDIR}/u-boot.bin.usb.bl2
+    install ${DESTDIR}/u-boot.bin.usb.tpl ${DEPLOYDIR}/u-boot.bin.usb.tpl
 } 
 
 deploy_odroidc2 () {
