@@ -1,0 +1,34 @@
+From 53fbf4fe0c64c9ad546c7df59079f893a81917ec Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 20 Mar 2019 16:52:34 +0000
+Subject: [PATCH] meson-g12a: disable CVBS connectors
+
+---
+ arch/arm64/boot/dts/amlogic/meson-g12a-sei510.dts  | 1 +
+ arch/arm64/boot/dts/amlogic/meson-g12a-x96-max.dts | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/amlogic/meson-g12a-sei510.dts b/arch/arm64/boot/dts/amlogic/meson-g12a-sei510.dts
+index 0b1df373d83e..c16d1b7d765c 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-g12a-sei510.dts
++++ b/arch/arm64/boot/dts/amlogic/meson-g12a-sei510.dts
+@@ -47,6 +47,7 @@
+ 
+ 	cvbs-connector {
+ 		compatible = "composite-video-connector";
++		status = "disabled";
+ 
+ 		port {
+ 			cvbs_connector_in: endpoint {
+diff --git a/arch/arm64/boot/dts/amlogic/meson-g12a-x96-max.dts b/arch/arm64/boot/dts/amlogic/meson-g12a-x96-max.dts
+index 0ef82d977fef..1a287ed63cc7 100644
+--- a/arch/arm64/boot/dts/amlogic/meson-g12a-x96-max.dts
++++ b/arch/arm64/boot/dts/amlogic/meson-g12a-x96-max.dts
+@@ -26,6 +26,7 @@
+ 
+ 	cvbs-connector {
+ 		compatible = "composite-video-connector";
++		status = "disabled";
+ 
+ 		port {
+ 			cvbs_connector_in: endpoint {
