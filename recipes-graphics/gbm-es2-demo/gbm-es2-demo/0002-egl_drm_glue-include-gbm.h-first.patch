@@ -1,0 +1,26 @@
+From 887ada8ad77b1dda151ee3320691ac59744d51a1 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 20 Mar 2019 16:13:55 +0000
+Subject: [PATCH] egl_drm_glue: include gbm.h first
+
+---
+ ged_lib/egl_drm_glue.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ged_lib/egl_drm_glue.cpp b/ged_lib/egl_drm_glue.cpp
+index 5713493..5a777df 100644
+--- a/ged_lib/egl_drm_glue.cpp
++++ b/ged_lib/egl_drm_glue.cpp
+@@ -23,11 +23,11 @@
+ 
+ #include "egl_drm_glue.h"
+ 
++#include <gbm.h>
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+ #include <GLES2/gl2.h>
+ #include <GLES2/gl2ext.h>
+-#include <gbm.h>
+ #include <sys/mman.h>
+ #include <unistd.h>
+ #include <xf86drm.h>

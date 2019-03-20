@@ -1,0 +1,20 @@
+From e078ae4db578afcc30586e9becacfeae57a1c040 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Wed, 20 Mar 2019 16:13:36 +0000
+Subject: [PATCH] Install demo
+
+---
+ demo/CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/demo/CMakeLists.txt b/demo/CMakeLists.txt
+index 3aef1b2..3232c12 100644
+--- a/demo/CMakeLists.txt
++++ b/demo/CMakeLists.txt
+@@ -38,3 +38,6 @@ file(GLOB all_SRC
+ add_executable(${PROGRAM} ${all_SRC})
+ target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
+ MESSAGE(${PROGRAM} " links " ${EXTRA_LIBS})
++
++install(TARGETS ${PROGRAM}
++	DESTINATION ${CMAKE_INSTALL_BINDIR})
