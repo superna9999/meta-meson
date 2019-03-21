@@ -15,6 +15,4 @@ IMAGE_INSTALL = "\
     ${CORE_IMAGE_EXTRA_INSTALL} \
     "
 
-IMAGE_FSTYPES += "cpio.xz.u-boot"
-
 inherit core-image
