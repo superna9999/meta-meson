@@ -1,7 +1,9 @@
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=72f855f00b364ec8bdc025e1a36b39c3"
 
-SRC_URI = "git://chromium.googlesource.com/chromiumos/platform/minigbm.git;protocol=https;branch=master"
+SRC_URI = "git://chromium.googlesource.com/chromiumos/platform/minigbm.git;protocol=https;branch=master \
+           file://0001-meson-add-support-for-AFBC-modifiers.patch \
+           "
 
 PV = "1.0+git${SRCPV}"
 SRCREV = "cc35e699f36cce0f0b3a130b0d6ce4e2a393b373"
