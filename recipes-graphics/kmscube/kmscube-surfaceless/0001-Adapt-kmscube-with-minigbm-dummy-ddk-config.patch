@@ -1,0 +1,629 @@
+From 1ea412f6cc2c87cc90cdc07d69d5bcba474494af Mon Sep 17 00:00:00 2001
+From: lingjie li <lingjie.li@amlogic.com>
+Date: Thu, 21 Mar 2019 19:43:49 +0800
+Subject: [PATCH] Adapt kmscube with minigbm+dummy(ddk) config
+
+Based on commit:d8da3dcfdfe33ee525cf562e928a5266ac69843c
+
+---
+ common.c      | 124 +++++++++++++++++++++++++++++++++++++++++++++++++-
+ common.h      |  26 +++++++++++
+ configure.ac  |   2 +-
+ cube-smooth.c |   2 +-
+ cube-tex.c    |   6 +--
+ drm-atomic.c  |  14 +++++-
+ drm-common.c  | 123 ++++++++++++++++++++++++++++++++++++++++++++-----
+ drm-legacy.c  |  26 ++++++++---
+ esUtil.h      |   3 ++
+ gst-decoder.c |   2 +-
+ 10 files changed, 302 insertions(+), 26 deletions(-)
+
+diff --git a/common.c b/common.c
+index d6d8d27..38165de 100644
+--- a/common.c
++++ b/common.c
+@@ -30,6 +30,7 @@
+ #include <string.h>
+ 
+ #include "common.h"
++#include "drm-common.h"
+ 
+ static struct gbm gbm;
+ 
+@@ -259,8 +260,112 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
+ 		return -1;
+ 	}
+ 
++	eglMakeCurrent(egl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl->context);
++
++	gl_exts = (char *) glGetString(GL_EXTENSIONS);
++	printf("OpenGL ES 2.x information:\n");
++	printf("  version: \"%s\"\n", glGetString(GL_VERSION));
++	printf("  shading language version: \"%s\"\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
++	printf("  vendor: \"%s\"\n", glGetString(GL_VENDOR));
++	printf("  renderer: \"%s\"\n", glGetString(GL_RENDERER));
++	printf("  extensions: \"%s\"\n", gl_exts);
++	printf("===================================\n");
++
++	get_proc_gl(GL_OES_EGL_image, glEGLImageTargetTexture2DOES);
++
++	return 0;
++}
++
++int init_egl_without_display(struct egl *egl, const struct gbm *gbm, int samples)
++{
++	EGLint major, minor;
++	int i;
++
++	static const EGLint context_attribs[] = {
++		EGL_CONTEXT_CLIENT_VERSION, 2,
++		EGL_NONE
++	};
++
++	const EGLint config_attribs[] = {
++		EGL_SURFACE_TYPE, EGL_DONT_CARE,
++		EGL_RED_SIZE, 1,
++		EGL_GREEN_SIZE, 1,
++		EGL_BLUE_SIZE, 1,
++		EGL_ALPHA_SIZE, 0,
++		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
++		EGL_SAMPLES, samples,
++		EGL_NONE
++	};
++	const char *egl_exts_client, *egl_exts_dpy, *gl_exts;
++
++#define get_proc_client(ext, name) do { \
++		if (has_ext(egl_exts_client, #ext)) \
++			egl->name = (void *)eglGetProcAddress(#name); \
++	} while (0)
++#define get_proc_dpy(ext, name) do { \
++		if (has_ext(egl_exts_dpy, #ext)) \
++			egl->name = (void *)eglGetProcAddress(#name); \
++	} while (0)
++
++#define get_proc_gl(ext, name) do { \
++		if (has_ext(gl_exts, #ext)) \
++			egl->name = (void *)eglGetProcAddress(#name); \
++	} while (0)
++
++	egl_exts_client = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
++	get_proc_client(EGL_EXT_platform_base, eglGetPlatformDisplayEXT);
++
++	// for use minigbm + dummy mali ddk.
++	egl->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++
++	if (!eglInitialize(egl->display, &major, &minor)) {
++		printf("failed to initialize\n");
++		return -1;
++	}
++
++	egl_exts_dpy = eglQueryString(egl->display, EGL_EXTENSIONS);
++	get_proc_dpy(EGL_KHR_image_base, eglCreateImageKHR);
++	get_proc_dpy(EGL_KHR_image_base, eglDestroyImageKHR);
++	get_proc_dpy(EGL_KHR_fence_sync, eglCreateSyncKHR);
++	get_proc_dpy(EGL_KHR_fence_sync, eglDestroySyncKHR);
++	get_proc_dpy(EGL_KHR_fence_sync, eglWaitSyncKHR);
++	get_proc_dpy(EGL_KHR_fence_sync, eglClientWaitSyncKHR);
++	get_proc_dpy(EGL_ANDROID_native_fence_sync, eglDupNativeFenceFDANDROID);
++
++	egl->modifiers_supported = has_ext(egl_exts_dpy,
++					   "EGL_EXT_image_dma_buf_import_modifiers");
++
++	printf("Using display %p with EGL version %d.%d\n",
++			egl->display, major, minor);
++
++	printf("===================================\n");
++	printf("EGL information:\n");
++	printf("  version: \"%s\"\n", eglQueryString(egl->display, EGL_VERSION));
++	printf("  vendor: \"%s\"\n", eglQueryString(egl->display, EGL_VENDOR));
++	printf("  client extensions: \"%s\"\n", egl_exts_client);
++	printf("  display extensions: \"%s\"\n", egl_exts_dpy);
++	printf("===================================\n");
++
++	if (!eglBindAPI(EGL_OPENGL_ES_API)) {
++		printf("failed to bind api EGL_OPENGL_ES_API\n");
++		return -1;
++	}
++
++	if (!egl_choose_config(egl->display, config_attribs, 0,
++                               &egl->config)) {
++		printf("failed to choose config\n");
++		return -1;
++	}
++
++	egl->context = eglCreateContext(egl->display, egl->config,
++			EGL_NO_CONTEXT, context_attribs);
++	if (egl->context == NULL) {
++		printf("failed to create context\n");
++		return -1;
++	}
++
+ 	/* connect the context to the surface */
+-	eglMakeCurrent(egl->display, egl->surface, egl->surface, egl->context);
++	eglMakeCurrent(egl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl->context);
+ 
+ 	gl_exts = (char *) glGetString(GL_EXTENSIONS);
+ 	printf("OpenGL ES 2.x information:\n");
+@@ -273,9 +378,26 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
+ 
+ 	get_proc_gl(GL_OES_EGL_image, glEGLImageTargetTexture2DOES);
+ 
++        for (i = 0; i < NUM_BUFFERS; i++) {
++                if (false == CreateFramebuffer(egl, gbm, &framebuffers[i])) {
++			printf("Create frame buffer errror\n");
++			return -1;
++                }
++        }
++
+ 	return 0;
+ }
+ 
++void egl_sync(struct egl *egl) {
++	if (egl->eglCreateSyncKHR && egl->eglClientWaitSyncKHR) {
++		EGLSyncKHR sync = egl->eglCreateSyncKHR(egl->display, EGL_SYNC_FENCE_KHR, NULL);
++		glFlush();
++		egl->eglClientWaitSyncKHR(egl->display, sync, 0, EGL_FOREVER_KHR);
++	} else {
++		glFinish();
++	}
++}
++
+ int create_program(const char *vs_src, const char *fs_src)
+ {
+ 	GLuint vertex_shader, fragment_shader, program;
+diff --git a/common.h b/common.h
+index cff2c33..305cb86 100644
+--- a/common.h
++++ b/common.h
+@@ -24,6 +24,10 @@
+ #ifndef _COMMON_H
+ #define _COMMON_H
+ 
++#ifndef __GBM__
++#define __GBM__
++#endif
++
+ #include <GLES2/gl2.h>
+ #include <GLES2/gl2ext.h>
+ #include <EGL/egl.h>
+@@ -76,6 +80,10 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformPixmapSurfaceEXT (EGLDisplay dpy,
+ #define EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT 0x344A
+ #endif
+ 
++#ifndef EGLImage
++#define EGLImage EGLImageKHR
++#endif
++
+ struct gbm {
+ 	struct gbm_device *dev;
+ 	struct gbm_surface *surface;
+@@ -119,6 +127,8 @@ static inline int __egl_check(void *ptr, const char *name)
+ #define egl_check(egl, name) __egl_check((egl)->name, #name)
+ 
+ int init_egl(struct egl *egl, const struct gbm *gbm, int samples);
++int init_egl_without_display(struct egl *egl, const struct gbm *gbm, int samples);
++void egl_sync(struct egl *egl);
+ int create_program(const char *vs_src, const char *fs_src);
+ int link_program(unsigned program);
+ 
+@@ -133,6 +143,19 @@ enum mode {
+ const struct egl * init_cube_smooth(const struct gbm *gbm, int samples);
+ const struct egl * init_cube_tex(const struct gbm *gbm, enum mode mode, int samples);
+ 
++struct gbm_bo;
++
++typedef struct _Framebuffer{
++	struct gbm_bo *bo;
++	int fd;
++	uint32_t fb_id;
++	EGLImageKHR image;
++	GLuint gl_tex;
++	GLuint gl_fb;
++} Framebuffer;
++
++bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm, Framebuffer* framebuffer);
++
+ #ifdef HAVE_GST
+ 
+ struct decoder;
+@@ -152,4 +175,7 @@ init_cube_video(const struct gbm *gbm, const char *video, int samples)
+ }
+ #endif
+ 
++#define NUM_BUFFERS  2
++extern Framebuffer framebuffers[];
++
+ #endif /* _COMMON_H */
+diff --git a/configure.ac b/configure.ac
+index 5a63afb..151630d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -36,7 +36,7 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
+ 
+ # Obtain compiler/linker options for depedencies
+ PKG_CHECK_MODULES(DRM, [libdrm >= 2.4.71])
+-PKG_CHECK_MODULES(GBM, gbm >= 13.0)
++PKG_CHECK_MODULES(GBM, gbm)
+ PKG_CHECK_MODULES(EGL, egl)
+ PKG_CHECK_MODULES(GLES2, glesv2)
+ 
+diff --git a/cube-smooth.c b/cube-smooth.c
+index 483c2ae..426dd93 100644
+--- a/cube-smooth.c
++++ b/cube-smooth.c
+@@ -222,7 +222,7 @@ const struct egl * init_cube_smooth(const struct gbm *gbm, int samples)
+ {
+ 	int ret;
+ 
+-	ret = init_egl(&gl.egl, gbm, samples);
++	ret = init_egl_without_display(&gl.egl, gbm, samples);
+ 	if (ret)
+ 		return NULL;
+ 
+diff --git a/cube-tex.c b/cube-tex.c
+index 09f18e3..7300990 100644
+--- a/cube-tex.c
++++ b/cube-tex.c
+@@ -229,7 +229,7 @@ static int get_fd_rgba(uint32_t *pstride, uint64_t *modifier)
+ 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
+ 	bo = gbm_bo_create(gl.gbm->dev, texw, texh, GBM_FORMAT_ABGR8888, GBM_BO_USE_LINEAR);
+ 
+-	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
++	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data, 0);
+ 
+ 	for (uint32_t i = 0; i < texh; i++) {
+ 		memcpy(&map[stride * i], &src[texw * 4 * i], texw * 4);
+@@ -264,7 +264,7 @@ static int get_fd_y(uint32_t *pstride, uint64_t *modifier)
+ 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
+ 	bo = gbm_bo_create(gl.gbm->dev, texw, texh, GBM_FORMAT_R8, GBM_BO_USE_LINEAR);
+ 
+-	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
++	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data, 0);
+ 
+ 	for (uint32_t i = 0; i < texh; i++) {
+ 		memcpy(&map[stride * i], &src[texw * i], texw);
+@@ -299,7 +299,7 @@ static int get_fd_uv(uint32_t *pstride, uint64_t *modifier)
+ 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
+ 	bo = gbm_bo_create(gl.gbm->dev, texw/2, texh/2, GBM_FORMAT_GR88, GBM_BO_USE_LINEAR);
+ 
+-	map = gbm_bo_map(bo, 0, 0, texw/2, texh/2, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
++	map = gbm_bo_map(bo, 0, 0, texw/2, texh/2, GBM_BO_TRANSFER_WRITE, &stride, &map_data, 0);
+ 
+ 	for (uint32_t i = 0; i < texh/2; i++) {
+ 		memcpy(&map[stride * i], &src[texw * i], texw);
+diff --git a/drm-atomic.c b/drm-atomic.c
+index 82531d3..5a2f91d 100644
+--- a/drm-atomic.c
++++ b/drm-atomic.c
+@@ -173,6 +173,7 @@ static EGLSyncKHR create_fence(const struct egl *egl, int fd)
+ 	return fence;
+ }
+ 
++static int front_buffer_ = 0;
+ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
+ {
+ 	struct gbm_bo *bo = NULL;
+@@ -211,6 +212,9 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
+ 			egl->eglWaitSyncKHR(egl->display, kms_fence, 0);
+ 		}
+ 
++		egl_sync(egl);
++		Framebuffer* back_fb = &framebuffers[front_buffer_];
++		glBindFramebuffer(GL_FRAMEBUFFER, back_fb->gl_fb);
+ 		egl->draw(i++);
+ 
+ 		/* insert fence to be singled in cmdstream.. this fence will be
+@@ -219,7 +223,7 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
+ 		gpu_fence = create_fence(egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
+ 		assert(gpu_fence);
+ 
+-		eglSwapBuffers(egl->display, egl->surface);
++	//	eglSwapBuffers(egl->display, egl->surface);
+ 
+ 		/* after swapbuffers, gpu_fence should be flushed, so safe
+ 		 * to get fd:
+@@ -228,6 +232,7 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
+ 		egl->eglDestroySyncKHR(egl->display, gpu_fence);
+ 		assert(drm.kms_in_fence_fd != -1);
+ 
++/*
+ 		next_bo = gbm_surface_lock_front_buffer(gbm->surface);
+ 		if (!next_bo) {
+ 			printf("Failed to lock frontbuffer\n");
+@@ -239,6 +244,8 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
+ 			return -1;
+ 		}
+ 
++		*/
++
+ 		if (kms_fence) {
+ 			EGLint status;
+ 
+@@ -261,16 +268,19 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
+ 		 * Here you could also update drm plane layers if you want
+ 		 * hw composition
+ 		 */
+-		ret = drm_atomic_commit(fb->fb_id, flags);
++		ret = drm_atomic_commit(framebuffers[front_buffer_].fb_id, flags);
+ 		if (ret) {
+ 			printf("failed to commit: %s\n", strerror(errno));
+ 			return -1;
+ 		}
++                front_buffer_ = (front_buffer_ + 1)%NUM_BUFFERS;
+ 
+ 		/* release last buffer to render on again: */
++		/*
+ 		if (bo)
+ 			gbm_surface_release_buffer(gbm->surface, bo);
+ 		bo = next_bo;
++		*/
+ 
+ 		/* Allow a modeset change for the first commit only. */
+ 		flags &= ~(DRM_MODE_ATOMIC_ALLOW_MODESET);
+diff --git a/drm-common.c b/drm-common.c
+index 136fe69..08f2bcc 100644
+--- a/drm-common.c
++++ b/drm-common.c
+@@ -27,21 +27,12 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
+ 
+ #include "common.h"
+ #include "drm-common.h"
+ 
+-WEAK uint64_t
+-gbm_bo_get_modifier(struct gbm_bo *bo);
+-
+-WEAK int
+-gbm_bo_get_plane_count(struct gbm_bo *bo);
+-
+-WEAK uint32_t
+-gbm_bo_get_stride_for_plane(struct gbm_bo *bo, int plane);
+-
+-WEAK uint32_t
+-gbm_bo_get_offset(struct gbm_bo *bo, int plane);
++Framebuffer framebuffers[NUM_BUFFERS];
+ 
+ static void
+ drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+@@ -55,6 +46,7 @@ drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+ 	free(fb);
+ }
+ 
++
+ struct drm_fb * drm_fb_get_from_bo(struct gbm_bo *bo)
+ {
+ 	int drm_fd = gbm_device_get_fd(gbm_bo_get_device(bo));
+@@ -253,3 +245,112 @@ int init_drm(struct drm *drm, const char *device)
+ 
+ 	return 0;
+ }
++
++bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm,Framebuffer* framebuffer)
++{
++	struct gbm_bo* bo;
++	uint32_t width, height, format,
++		 strides[4] = {0}, handles[4] = {0},
++		 offsets[4] = {0}, flags = 0;
++	int ret = -1;
++	bo = gbm_bo_create(gbm->dev, gbm->width, gbm->height, GBM_FORMAT_XRGB8888 ,
++					GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
++	if (!bo) {
++		fprintf(stderr, "failed to create a gbm buffer.\n");
++		return false;
++	}
++	framebuffer->bo = bo;
++	framebuffer->fd = gbm_bo_get_fd(bo);
++	if (framebuffer->fd <= 0) {
++		fprintf(stderr, "failed to get fb for bo: %d", framebuffer->fd);
++		return false;
++	}
++
++	width = gbm_bo_get_width(bo);
++	height = gbm_bo_get_height(bo);
++	format = gbm_bo_get_format(bo);
++
++	if (gbm_bo_get_modifier && gbm_bo_get_plane_count &&
++	    gbm_bo_get_stride_for_plane && gbm_bo_get_offset) {
++
++		uint64_t modifiers[4] = {0};
++		modifiers[0] = gbm_bo_get_modifier(bo);
++		const int num_planes = gbm_bo_get_plane_count(bo);
++		for (int i = 0; i < num_planes; i++) {
++			strides[i] = gbm_bo_get_stride_for_plane(bo, i);
++			handles[i] = gbm_bo_get_handle(bo).u32;
++			offsets[i] = gbm_bo_get_offset(bo, i);
++			modifiers[i] = modifiers[0];
++		}
++
++		if (modifiers[0]) {
++			flags = DRM_MODE_FB_MODIFIERS;
++			printf("Using modifier %" PRIx64 "\n", modifiers[0]);
++		}
++
++		ret = drmModeAddFB2WithModifiers(gbm_device_get_fd(gbm_bo_get_device(bo)), width, height,
++				format, handles, strides, offsets,
++				modifiers, &framebuffer->fb_id, flags);
++	}
++
++	if (ret) {
++		if (flags)
++			fprintf(stderr, "Modifiers failed!\n");
++
++		memcpy(handles, (uint32_t [4]){gbm_bo_get_handle(bo).u32,0,0,0}, 16);
++		memcpy(strides, (uint32_t [4]){gbm_bo_get_stride(bo),0,0,0}, 16);
++		memset(offsets, 0, 16);
++		ret = drmModeAddFB2(gbm_device_get_fd(gbm_bo_get_device(bo)), width, height, format,
++				handles, strides, offsets, &framebuffer->fb_id, 0);
++	}
++
++	if (ret) {
++		printf("failed to create fb: %s\n", strerror(errno));
++		return false;
++	}
++
++	const EGLint khr_image_attrs[] = {EGL_DMA_BUF_PLANE0_FD_EXT,
++		framebuffer->fd,
++		EGL_WIDTH,
++		gbm->width,
++		EGL_HEIGHT,
++		gbm->height,
++		EGL_LINUX_DRM_FOURCC_EXT,
++		format,
++		EGL_DMA_BUF_PLANE0_PITCH_EXT,
++		strides[0],
++		EGL_DMA_BUF_PLANE0_OFFSET_EXT,
++		offsets[0],
++		EGL_NONE, EGL_NONE,	/* modifier lo */
++		EGL_NONE, EGL_NONE,	/* modifier hi */
++		EGL_NONE};
++
++	framebuffer->image =
++		egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL/* no client buffer */, khr_image_attrs);
++	if (framebuffer->image == EGL_NO_IMAGE_KHR) {
++		fprintf(stderr, "failed to make image from buffer object.\n");
++		return false;
++	}
++
++	glGenTextures(1, &(framebuffer->gl_tex));
++	glBindTexture(GL_TEXTURE_2D, framebuffer->gl_tex);
++
++	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, framebuffer->image);
++	glBindTexture(GL_TEXTURE_2D, 0);
++
++	glGenFramebuffers(1, &(framebuffer->gl_fb));
++	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer->gl_fb);
++	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
++			framebuffer->gl_tex, 0);
++
++	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++		fprintf(stderr,
++				"failed framebuffer check for created target buffer: %x\n",
++				glCheckFramebufferStatus(GL_FRAMEBUFFER));
++		glDeleteFramebuffers(1, &(framebuffer->gl_fb));
++		glDeleteTextures(1, &(framebuffer->gl_tex));
++		return false;
++	}
++
++	return true;
++}
+diff --git a/drm-legacy.c b/drm-legacy.c
+index fd98a38..d5b5b9d 100644
+--- a/drm-legacy.c
++++ b/drm-legacy.c
+@@ -30,15 +30,25 @@
+ #include "drm-common.h"
+ 
+ static struct drm drm;
++static int front_buffer_ = 0;
++static struct egl* g_egl = NULL;
+ 
+ static void page_flip_handler(int fd, unsigned int frame,
+ 		  unsigned int sec, unsigned int usec, void *data)
+ {
+ 	/* suppress 'unused parameter' warnings */
+ 	(void)fd, (void)frame, (void)sec, (void)usec;
++        static int i = 0;
+ 
+ 	int *waiting_for_flip = data;
+ 	*waiting_for_flip = 0;
++        Framebuffer* back_fb = &framebuffers[front_buffer_];
++        egl_sync(g_egl);
++        glBindFramebuffer(GL_FRAMEBUFFER, back_fb->gl_fb);
++       // callback_(back_fb.gl_fb, sec * 1000000 + usec);
++	g_egl->draw(i++);
++        //EGLSyncFence();
++
+ }
+ 
+ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
+@@ -52,7 +62,8 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
+ 	struct drm_fb *fb;
+ 	uint32_t i = 0;
+ 	int ret;
+-
++        g_egl = egl;
++/*
+ 	eglSwapBuffers(egl->display, egl->surface);
+ 	bo = gbm_surface_lock_front_buffer(gbm->surface);
+ 	fb = drm_fb_get_from_bo(bo);
+@@ -60,9 +71,10 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
+ 		fprintf(stderr, "Failed to get a new framebuffer BO\n");
+ 		return -1;
+ 	}
++ */
+ 
+ 	/* set mode: */
+-	ret = drmModeSetCrtc(drm.fd, drm.crtc_id, fb->fb_id, 0, 0,
++	ret = drmModeSetCrtc(drm.fd, drm.crtc_id, framebuffers[front_buffer_].fb_id, 0, 0,
+ 			&drm.connector_id, 1, drm.mode);
+ 	if (ret) {
+ 		printf("failed to set mode: %s\n", strerror(errno));
+@@ -72,7 +84,7 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
+ 	while (1) {
+ 		struct gbm_bo *next_bo;
+ 		int waiting_for_flip = 1;
+-
++/*
+ 		egl->draw(i++);
+ 
+ 		eglSwapBuffers(egl->display, egl->surface);
+@@ -82,13 +94,14 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
+ 			fprintf(stderr, "Failed to get a new framebuffer BO\n");
+ 			return -1;
+ 		}
++ */
+ 
+ 		/*
+ 		 * Here you could also update drm plane layers if you want
+ 		 * hw composition
+ 		 */
+ 
+-		ret = drmModePageFlip(drm.fd, drm.crtc_id, fb->fb_id,
++		ret = drmModePageFlip(drm.fd, drm.crtc_id, framebuffers[front_buffer_].fb_id,
+ 				DRM_MODE_PAGE_FLIP_EVENT, &waiting_for_flip);
+ 		if (ret) {
+ 			printf("failed to queue page flip: %s\n", strerror(errno));
+@@ -113,10 +126,11 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
+ 			}
+ 			drmHandleEvent(drm.fd, &evctx);
+ 		}
++                front_buffer_ = (front_buffer_ + 1)%NUM_BUFFERS;
+ 
+ 		/* release last buffer to render on again: */
+-		gbm_surface_release_buffer(gbm->surface, bo);
+-		bo = next_bo;
++		//gbm_surface_release_buffer(gbm->surface, bo);
++		//bo = next_bo;
+ 	}
+ 
+ 	return 0;
+diff --git a/esUtil.h b/esUtil.h
+index c2d7c1d..b773f82 100644
+--- a/esUtil.h
++++ b/esUtil.h
+@@ -42,6 +42,9 @@
+ ///
+ //  Includes
+ //
++#ifndef __GBM__
++#define __GBM__
++#endif
+ #include <GLES2/gl2.h>
+ #include <EGL/egl.h>
+ 
+diff --git a/gst-decoder.c b/gst-decoder.c
+index 2d6d581..58e9bce 100644
+--- a/gst-decoder.c
++++ b/gst-decoder.c
+@@ -344,7 +344,7 @@ buf_to_fd(const struct gbm *gbm, int size, void *ptr)
+ 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
+ 	bo = gbm_bo_create(gbm->dev, size, 1, GBM_FORMAT_R8, GBM_BO_USE_LINEAR);
+ 
+-	map = gbm_bo_map(bo, 0, 0, size, 1, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
++	map = gbm_bo_map(bo, 0, 0, size, 1, GBM_BO_TRANSFER_WRITE, &stride, &map_data, 0);
+ 
+ 	memcpy(map, ptr, size);
+ 

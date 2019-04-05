@@ -12,6 +12,7 @@ IMAGE_INSTALL = "\
     kernel-module-mali-bifrost \
     gbm-es2-demo \
     libdrm-tests \
+    kmscube-surfaceless \
     ${CORE_IMAGE_EXTRA_INSTALL} \
     "
 
