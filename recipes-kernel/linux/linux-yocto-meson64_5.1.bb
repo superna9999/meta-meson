@@ -4,7 +4,7 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
-SRCREV_meson = "d5716f48ad45131a840a95444a2f7de863f90392"
+SRCREV_meson = "bfcae01c91ecea645bda1949172056ecafd6b785"
 LINUX_VERSION = "5.1-rc1"
 	
 # Linux stable tree
