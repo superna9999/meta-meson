@@ -1,0 +1,140 @@
+From bf71603e927975384965e817983187d0eefdf1a3 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Tue, 9 Apr 2019 09:05:46 +0000
+Subject: [PATCH] Add support for AFBC modifiers
+
+---
+ common.c     |  5 +++--
+ common.h     |  1 +
+ drm-common.c | 39 ++++++++++++++++++++++++++++++++-------
+ 3 files changed, 36 insertions(+), 9 deletions(-)
+
+diff --git a/common.c b/common.c
+index 38165de..c252da6 100644
+--- a/common.c
++++ b/common.c
+@@ -55,9 +55,9 @@ const struct gbm * init_gbm(int drm_fd, int w, int h, uint64_t modifier)
+ 	}
+ 
+ 	if (!gbm.surface) {
+-		if (modifier != DRM_FORMAT_MOD_LINEAR) {
++		if (gbm_surface_create_with_modifiers &&
++		    modifier != DRM_FORMAT_MOD_LINEAR) {
+ 			fprintf(stderr, "Modifiers requested but support isn't available\n");
+-			return NULL;
+ 		}
+ 		gbm.surface = gbm_surface_create(gbm.dev, w, h,
+ 						gbm.format,
+@@ -72,6 +72,7 @@ const struct gbm * init_gbm(int drm_fd, int w, int h, uint64_t modifier)
+ 
+ 	gbm.width = w;
+ 	gbm.height = h;
++	gbm.modifier = modifier;
+ 
+ 	return &gbm;
+ }
+diff --git a/common.h b/common.h
+index 305cb86..76b0e38 100644
+--- a/common.h
++++ b/common.h
+@@ -88,6 +88,7 @@ struct gbm {
+ 	struct gbm_device *dev;
+ 	struct gbm_surface *surface;
+ 	uint32_t format;
++	uint64_t modifier;
+ 	int width, height;
+ };
+ 
+diff --git a/drm-common.c b/drm-common.c
+index 08f2bcc..17bad6c 100644
+--- a/drm-common.c
++++ b/drm-common.c
+@@ -34,6 +34,10 @@
+ 
+ Framebuffer framebuffers[NUM_BUFFERS];
+ 
++#define DRM_FORMAT_MOD_VENDOR_AMLOGIC    0x09
++#define DRM_FORMAT_MOD_MESON_AFBC	fourcc_mod_code(AMLOGIC, 1)
++#define DRM_FORMAT_MOD_MESON_AFBC_WB	fourcc_mod_code(AMLOGIC, 2)
++
+ static void
+ drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+ {
+@@ -248,16 +252,27 @@ int init_drm(struct drm *drm, const char *device)
+ 
+ bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm,Framebuffer* framebuffer)
+ {
+-	struct gbm_bo* bo;
++	struct gbm_bo* bo = NULL;
+ 	uint32_t width, height, format,
+ 		 strides[4] = {0}, handles[4] = {0},
+ 		 offsets[4] = {0}, flags = 0;
++	uint64_t modifiers[4] = {0};
+ 	int ret = -1;
+-	bo = gbm_bo_create(gbm->dev, gbm->width, gbm->height, GBM_FORMAT_XRGB8888 ,
+-					GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
++
++	if (gbm->modifier != DRM_FORMAT_MOD_LINEAR) {
++		bo = gbm_bo_create_with_modifiers(gbm->dev, gbm->width, gbm->height, GBM_FORMAT_XRGB8888,
++						  &gbm->modifier, 1);
++		if (!bo)
++			fprintf(stderr, "failed to create a gbm buffer with modifiers.\n");
++	}
++
+ 	if (!bo) {
+-		fprintf(stderr, "failed to create a gbm buffer.\n");
+-		return false;
++		bo = gbm_bo_create(gbm->dev, gbm->width, gbm->height, GBM_FORMAT_XRGB8888 ,
++						GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
++		if (!bo) {
++			fprintf(stderr, "failed to create a gbm buffer.\n");
++			return false;
++		}
+ 	}
+ 	framebuffer->bo = bo;
+ 	framebuffer->fd = gbm_bo_get_fd(bo);
+@@ -273,7 +288,6 @@ bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm,Framebuffer* frame
+ 	if (gbm_bo_get_modifier && gbm_bo_get_plane_count &&
+ 	    gbm_bo_get_stride_for_plane && gbm_bo_get_offset) {
+ 
+-		uint64_t modifiers[4] = {0};
+ 		modifiers[0] = gbm_bo_get_modifier(bo);
+ 		const int num_planes = gbm_bo_get_plane_count(bo);
+ 		for (int i = 0; i < num_planes; i++) {
+@@ -288,9 +302,12 @@ bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm,Framebuffer* frame
+ 			printf("Using modifier %" PRIx64 "\n", modifiers[0]);
+ 		}
+ 
++		/*
+ 		ret = drmModeAddFB2WithModifiers(gbm_device_get_fd(gbm_bo_get_device(bo)), width, height,
+ 				format, handles, strides, offsets,
+ 				modifiers, &framebuffer->fb_id, flags);
++		*/
++		ret = 1;
+ 	}
+ 
+ 	if (ret) {
+@@ -309,7 +326,7 @@ bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm,Framebuffer* frame
+ 		return false;
+ 	}
+ 
+-	const EGLint khr_image_attrs[] = {EGL_DMA_BUF_PLANE0_FD_EXT,
++	EGLint khr_image_attrs[] = {EGL_DMA_BUF_PLANE0_FD_EXT,
+ 		framebuffer->fd,
+ 		EGL_WIDTH,
+ 		gbm->width,
+@@ -325,6 +342,14 @@ bool CreateFramebuffer(struct egl *egl, const struct gbm *gbm,Framebuffer* frame
+ 		EGL_NONE, EGL_NONE,	/* modifier hi */
+ 		EGL_NONE};
+ 
++	if (modifiers[0] != DRM_FORMAT_MOD_LINEAR) {
++		modifiers[0] = DRM_FORMAT_MOD_MESON_AFBC;
++		khr_image_attrs[12] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
++		khr_image_attrs[13] = modifiers[0] & 0xfffffffful;
++		khr_image_attrs[14] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
++		khr_image_attrs[15] = modifiers[0] >> 32;
++	}
++
+ 	framebuffer->image =
+ 		egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL/* no client buffer */, khr_image_attrs);
+ 	if (framebuffer->image == EGL_NO_IMAGE_KHR) {
