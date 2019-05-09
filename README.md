@@ -81,6 +81,9 @@ Available S905X machines are :
  - khadas-vim : complete bootable .wic sdcard image with mainline U-boot
  - khadas-vim-sdboot : .wic image to be booted using vendor u-boot
  - hwacom-amazetv : .wic image to be booted using vendor u-boot
+ - amlogic-p241: .wic image to be booted using vendor u-boot
+ - amlogic-p281: .wic image to be booted using vendor u-boot
+ - oranth-tx3-mini: .wic image to be booted using vendor u-boot
  - amlogic-s905x (all S905X machines) : generic non-bootable .wic image to be customized
 
 Available S912 machines are :
@@ -94,7 +97,7 @@ Available S9xxx machines are :
  - amlogic-s9xxx (all S905 and S905X and S912 machines) : generic non-bootable .wic image to be customized
 
 Experimental A113d machine :
- - amlogic-s400 : non-bootable .wic image, no sdcard on the board, u-boot should be added and flashed to eMMC
+ - amlogic-s400 : complete bootable .wic eMMC image with mainline U-boot 
 
 ## Selecting Image type
 
