@@ -11,6 +11,7 @@ LINUX_VERSION = "5.1-rc1"
 SRC_URI = "git://github.com/superna9999/linux.git;protocol=https;branch=amlogic/v5.1/g12a-integ-5.1-bcmdhd;name=meson \
            file://defconfig \
            file://0001-meson-g12a-disable-CVBS-connectors.patch \
+           file://0001-arm64-dts-meson-g12a-update-cma-reserved-memory-to-5.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
