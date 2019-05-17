@@ -1,0 +1,29 @@
+From 02e6765b128f9927bb0b2a99a9f6d60c8dcffdc2 Mon Sep 17 00:00:00 2001
+From: Loys Ollivier <lollivier@baylibre.com>
+Date: Fri, 17 May 2019 14:24:49 +0200
+Subject: [PATCH] s400: set default sink/source to alsa default
+
+The s400 platform has default alsa configurations for input and output
+stream with correct sample rate and format.
+Configure pulseaudio to use them by default.
+
+Signed-off-by: Loys Ollivier <lollivier@baylibre.com>
+---
+ src/daemon/default.pa.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/daemon/default.pa.in b/src/daemon/default.pa.in
+index 14b6a6f969e4..98a92f808bf0 100755
+--- a/src/daemon/default.pa.in
++++ b/src/daemon/default.pa.in
+@@ -37,8 +37,8 @@ load-module module-switch-on-port-available
+ ### (it's probably better to not load these drivers manually, but instead
+ ### use module-udev-detect -- see below -- for doing this automatically)
+ ifelse(@HAVE_ALSA@, 1, [dnl
+-#load-module module-alsa-sink
+-#load-module module-alsa-source device=hw:1,0
++load-module module-alsa-sink device=lineout
++load-module module-alsa-source device=linein
+ ])dnl
+ ifelse(@HAVE_OSS_OUTPUT@, 1, [dnl
+ #load-module module-oss device="/dev/dsp" sink_name=output source_name=input
