@@ -7,7 +7,7 @@ SRC_URI = "git://github.com/Elyotna/ffmpeg-drm.git;protocol=https"
 
 S = "${WORKDIR}/git"
 
-SRCREV="6fcfdf5c20a586ec6e8b002bcc44034243c55abf"
+SRCREV="1e98f0d811400bea763d99c424e52e12c94b5900"
 DEPENDS = "libdrm libav"
 
 inherit meson
