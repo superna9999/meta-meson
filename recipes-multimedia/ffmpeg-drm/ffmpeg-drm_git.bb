@@ -3,11 +3,11 @@ LICENSE = "Apache-2.0"
 
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-SRC_URI = "git://github.com/Elyotna/ffmpeg-drm.git;protocol=https"
+SRC_URI = "git://github.com/superna9999/ffmpeg-drm.git;protocol=https;branch=disable-all-other-planes-for-pr"
 
 S = "${WORKDIR}/git"
 
-SRCREV="1e98f0d811400bea763d99c424e52e12c94b5900"
+SRCREV="f85998d0049b5ae9719e5a3a0a04bf52440d2065"
 DEPENDS = "libdrm libav"
 
 inherit meson
