@@ -12,10 +12,6 @@ if [ -z "$BITBAKE_CMD" ] ; then
 	BITBAKE_CMD="core-image-base"
 fi
 
-export LC_ALL=en_US.UTF-8
-export LANG=en_US.UTF-8
-export LANGUAGE=en_US.UTF-8
-
 (
     cd $1
 
@@ -27,6 +23,6 @@ export LANGUAGE=en_US.UTF-8
     for machine in meta-meson/conf/machine/*.conf ; do
         echo "Running '$BITBAKE_CMD' for '$name'"
 	    name="$(basename $machine | cut -d. -f1)"
-	    LANG=en_US.UTF-8 MACHINE="$name" bitbake $BITBAKE_CMD
+	    MACHINE="$name" bitbake $BITBAKE_CMD
     done
 )

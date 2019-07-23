@@ -25,6 +25,14 @@ job:
   # -----------
     - apt-get install -qq git
 
+
+  # Setup system
+  # -----------
+    - apt-get install locales
+    - locale-gen en_US.UTF-8
+    - update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+
   # Create and initialize the build environment
   # -------------------------------------------
     - rm -rf /tmp/build_env
