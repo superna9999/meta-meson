@@ -18,7 +18,7 @@ job:
     - apt-get install -qq socat
     - apt-get install -qq libsdl1.2-dev
     - apt-get install -qq xterm
-    - apt-get install -qq python2.7
+    - apt-get install -qq python2.7 python-minimal
     
   # Install git
   # -----------
