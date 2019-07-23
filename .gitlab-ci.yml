@@ -7,24 +7,11 @@ job:
 
   # Install OE dependencies
   # -----------------------
-    - apt-get install -qq gawk
-    - apt-get install -qq wget
-    - apt-get install -qq git-core
-    - apt-get install -qq diffstat
-    - apt-get install -qq unzip
-    - apt-get install -qq texinfo
-    - apt-get install -qq gcc-multilib
-    - apt-get install -qq build-essential
-    - apt-get install -qq chrpath
-    - apt-get install -qq socat
-    - apt-get install -qq libsdl1.2-dev
-    - apt-get install -qq xterm
-    - apt-get install -qq python2.7 python-minimal
+    - apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib build-essential chrpath socat libsdl1.2-dev xterm python2.7 python-minimal cpio
     
   # Install git
   # -----------
     - apt-get install -qq git
-
 
   # Setup system
   # -----------
