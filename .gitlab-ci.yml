@@ -33,4 +33,4 @@ job:
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
-    - scripts/build.sh /tmp/build_env
+    - bash scripts/build.sh /tmp/build_env
