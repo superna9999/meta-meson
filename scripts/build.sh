@@ -15,7 +15,7 @@ fi
 (
     cd $1
 
-    PATH="/usr/sbin:/usr/bin:/sbin:/bin" source ./oe-init-build-env
+    . ./oe-init-build-env $PWD/build
 
     echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
     echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> conf/local.conf
