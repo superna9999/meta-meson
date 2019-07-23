@@ -3,7 +3,7 @@ image: debian:stable
 job:
   tags: [ 'yocto' ]
   before_script:
-    - sudo apt-get update -qq
+    - apt-get update -qq
   # Install OE dependencies
   # -----------------------
     - apt-get install -qq gawk
