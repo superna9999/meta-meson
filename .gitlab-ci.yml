@@ -1,36 +1,36 @@
 image: debian:stable
 
 job:
-  script:
-  - sudo apt-get update -qq
-
+  tags: [ 'yocto' ]
+  before_script:
+    - sudo apt-get update -qq
   # Install OE dependencies
   # -----------------------
-  - apt-get install -qq gawk
-  - apt-get install -qq wget
-  - apt-get install -qq git-core
-  - apt-get install -qq diffstat
-  - apt-get install -qq unzip
-  - apt-get install -qq texinfo
-  - apt-get install -qq gcc-multilib
-  - apt-get install -qq build-essential
-  - apt-get install -qq chrpath
-  - apt-get install -qq socat
-  - apt-get install -qq libsdl1.2-dev
-  - apt-get install -qq xterm
-
+    - apt-get install -qq gawk
+    - apt-get install -qq wget
+    - apt-get install -qq git-core
+    - apt-get install -qq diffstat
+    - apt-get install -qq unzip
+    - apt-get install -qq texinfo
+    - apt-get install -qq gcc-multilib
+    - apt-get install -qq build-essential
+    - apt-get install -qq chrpath
+    - apt-get install -qq socat
+    - apt-get install -qq libsdl1.2-dev
+    - apt-get install -qq xterm
   # Install git
   # -----------
-  - apt-get install -qq git
+    - apt-get install -qq git
 
   # Create and initialize the build environment
   # -------------------------------------------
-  - rm -rf /tmp/build_env
-  - git clone git://github.com/openembedded/openembedded-core --branch=master --depth=1 /tmp/build_env
-  - git clone git://github.com/openembedded/bitbake --branch=master --depth=1 /tmp/build_env/bitbake
-  - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
+    - rm -rf /tmp/build_env
+    - git clone git://github.com/openembedded/openembedded-core --branch=master --depth=1 /tmp/build_env
+    - git clone git://github.com/openembedded/bitbake --branch=master --depth=1 /tmp/build_env/bitbake
+    - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
-  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p200 bitbake core-image-base | tee -a world.log
-  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p212 bitbake core-image-base | tee -a world.log
-  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=libretech-cc bitbake core-image-base | tee -a world.log
-  - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=khadas-vim bitbake core-image-base | tee -a world.log
+  script:
+    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p200 bitbake core-image-base | tee -a world.log
+    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p212 bitbake core-image-base | tee -a world.log
+    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=libretech-cc bitbake core-image-base | tee -a world.log
+    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=khadas-vim bitbake core-image-base | tee -a world.log
