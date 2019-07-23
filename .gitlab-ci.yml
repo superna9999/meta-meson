@@ -6,22 +6,22 @@ job:
 
   # Install OE dependencies
   # -----------------------
-  - sudo apt-get install -qq gawk
-  - sudo apt-get install -qq wget
-  - sudo apt-get install -qq git-core
-  - sudo apt-get install -qq diffstat
-  - sudo apt-get install -qq unzip
-  - sudo apt-get install -qq texinfo
-  - sudo apt-get install -qq gcc-multilib
-  - sudo apt-get install -qq build-essential
-  - sudo apt-get install -qq chrpath
-  - sudo apt-get install -qq socat
-  - sudo apt-get install -qq libsdl1.2-dev
-  - sudo apt-get install -qq xterm
+  - apt-get install -qq gawk
+  - apt-get install -qq wget
+  - apt-get install -qq git-core
+  - apt-get install -qq diffstat
+  - apt-get install -qq unzip
+  - apt-get install -qq texinfo
+  - apt-get install -qq gcc-multilib
+  - apt-get install -qq build-essential
+  - apt-get install -qq chrpath
+  - apt-get install -qq socat
+  - apt-get install -qq libsdl1.2-dev
+  - apt-get install -qq xterm
 
   # Install git
   # -----------
-  - sudo apt-get install -qq git
+  - apt-get install -qq git
 
   # Create and initialize the build environment
   # -------------------------------------------
