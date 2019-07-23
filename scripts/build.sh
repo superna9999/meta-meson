@@ -16,7 +16,8 @@ fi
     cd $1
 
     . ./oe-init-build-env $PWD/build
-
+    
+    touch conf/sanity.conf
     echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
     echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> conf/local.conf
 
