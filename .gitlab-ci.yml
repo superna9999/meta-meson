@@ -4,6 +4,7 @@ job:
   tags: [ 'yocto' ]
   before_script:
     - apt-get update -qq
+
   # Install OE dependencies
   # -----------------------
     - apt-get install -qq gawk
@@ -32,7 +33,4 @@ job:
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
-    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p200 bitbake core-image-base | tee -a world.log
-    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p212 bitbake core-image-base | tee -a world.log
-    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=libretech-cc bitbake core-image-base | tee -a world.log
-    - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=khadas-vim bitbake core-image-base | tee -a world.log
+    - scripts/build.sh /tmp/build_env
