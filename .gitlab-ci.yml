@@ -30,7 +30,6 @@ job:
   - git clone git://github.com/openembedded/bitbake --branch=master --depth=1 /tmp/build_env/bitbake
   - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
-script:
   - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p200 bitbake core-image-base | tee -a world.log
   - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=amlogic-p212 bitbake core-image-base | tee -a world.log
   - PATH="/usr/sbin:/usr/bin:/sbin:/bin" . /tmp/build_env/oe-init-build-env && echo "BBLAYERS +=\"/tmp/build_env/meta-meson\"" >> $(pwd)/conf/bblayers.conf && echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> $(pwd)/conf/local.conf && MACHINE=libretech-cc bitbake core-image-base | tee -a world.log
