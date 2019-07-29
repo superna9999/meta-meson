@@ -75,6 +75,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
 	   file://0016-arm64-dts-meson-s400-fix-emmc-maximum-rate.patch \
 	   file://0017-ASoC-meson-fix-do_div-warning-in-spdifin.patch \
 	   file://0018-arm64-defconfig-enable-modules-for-amlogic-s400-soun.patch \
+           file://0001-arm64-dts-meson-add-libretech-aml-s805x-ac-board.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
