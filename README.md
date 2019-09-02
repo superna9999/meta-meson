@@ -4,6 +4,8 @@ Now Amlogic SoCs of the Meson family are supported upstream :
  - Meson8b : s805
  - Meson-GX : s905 (GXBB) s905x/S905d (GXL) s912 (GXM)
  - Meson AXG : a113d
+ - Meson G12A : S905X2, S905D2, S905Y2
+ - Meson G12B : S922X, A311D
 
 This Yocto/Openembedded will help building images for these SoCs using the lastest uptream linux branch.
 
@@ -73,6 +75,7 @@ Available S905D machines are :
  - amlogic-s905d (all S905D machines) : generic non-bootable .wic image to be customized
 
 Available S905X machines are :
+ - libretech-ac : complete bootable .wic sdcard image using already flashed u-boot on SPI
  - libretech-cc : complete bootable .wic sdcard image with mainline U-boot
  - libretech-cc-sdboot : .wic image to be booted using vendor u-boot
  - amlogic-p212 : complete bootable .wic sdcard image with mainline U-boot
@@ -93,11 +96,22 @@ Available S912 machines are :
  - khadas-vim2 : .wic image to be booted using vendor u-boot
  - amlogic-s912 (all S912 machines) : generic non-bootable .wic image to be customized
 
+Available A113d machine :
+ - amlogic-s400 : complete bootable .wic eMMC image with mainline U-boot
+
+Available S905X2 machines are :
+ - amlogic-u200: .wic image to be booted using vendor u-boot
+ - amediatech-x96-max: .wic image to be booted using vendor u-boot
+ - seirobotics-sei510: .wic image to be booted using vendor u-boot
+
+Available S922X machines are :
+ - hardkernel-odroidn2: .wic image to be booted using vendor u-boot
+
+Available A311D machines are :
+ - khadas-vim3: .wic image to be booted using vendor u-boot
+
 Available S9xxx machines are :
  - amlogic-s9xxx (all S905 and S905X and S912 machines) : generic non-bootable .wic image to be customized
-
-Experimental A113d machine :
- - amlogic-s400 : complete bootable .wic eMMC image with mainline U-boot 
 
 ## Selecting Image type
 
