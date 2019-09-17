@@ -2,6 +2,8 @@ image: /baylibre/amlogic/meta-meson-runner:xenial-20190720-02Aug2019
 
 build-initrd:
   tags: [ 'yocto' ]
+  
+  before_script:
   # Create and initialize the build environment
   # -------------------------------------------
     - rm -rf /tmp/build_env
