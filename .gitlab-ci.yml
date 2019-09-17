@@ -29,7 +29,7 @@ build-docker:
       --pull
       --cache-from $CI_REGISTRY_IMAGE:latest
       --tag $CI_REGISTRY_IMAGE:IMAGE_TAG
-      scripts/Dockerfile
+      scripts/
     - docker push $CI_REGISTRY_IMAGE:IMAGE_TAG
 
 build-initrd:
