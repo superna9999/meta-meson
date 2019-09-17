@@ -2,18 +2,17 @@
 
 set -ex
 
-if [ -z "$1" ] ; then
-	echo "Usage: $0 <path to base build path> [bitbake cmd]"
+if [ "$#" -lt 3 ] ; then
+	echo "Usage: $0 <path to base build path> <machine> <target>"
 	exit 1
 fi
 
-BITBAKE_CMD="$2"
-if [ -z "$BITBAKE_CMD" ] ; then
-	BITBAKE_CMD="core-image-base"
-fi
+BUILD_PATH=$1
+OE_MACHINE=$2
+BITBAKE_CMD=$3
 
 (
-    cd $1
+    cd $BUILD_PATH
     BASEDIR=$PWD
 
     . ./oe-init-build-env $PWD/build
@@ -24,9 +23,6 @@ fi
     echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
     echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> conf/local.conf
 
-    for machine in $BASEDIR/meta-meson/conf/machine/*.conf ; do
-        echo "Running '$BITBAKE_CMD' for '$name'"
-	    name="$(basename $machine | cut -d. -f1)"
-	    MACHINE="$name" bitbake $BITBAKE_CMD
-    done
+    echo "Running '$BITBAKE_CMD' for '$OE_MACHINE'"
+	MACHINE="$OE_MACHINE" bitbake $BITBAKE_CMD
 )
