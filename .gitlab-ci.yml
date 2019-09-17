@@ -37,7 +37,7 @@ build-initrd:
 
   script:
     - bash scripts/build.sh /tmp/build_env libretech-cc amlogic-image-headless-initrd
-    - cp -ar /tmp/build_env/builld/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
+    - cp -ar /tmp/build_env/build/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
 
   artifacts:
     when: always
