@@ -14,7 +14,6 @@ before_script:
   - echo -n $CI_JOB_TOKEN | docker login -u gitlab-ci-token --password-stdin $CI_REGISTRY
 
 build-docker:
-  tags: [ 'yocto' ]
   stage: docker
   script:
     # fetches the latest image (not failing if image is not found)
