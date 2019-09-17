@@ -1,25 +1,7 @@
-image: ubuntu:bionic
+image: /baylibre/amlogic/meta-meson-runner:xenial-20190720-02Aug2019
 
-job:
+build-initrd:
   tags: [ 'yocto' ]
-  before_script:
-    - apt-get update -qq
-
-  # Install OE dependencies
-  # -----------------------
-    - apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib build-essential chrpath socat libsdl1.2-dev xterm python2.7 python-minimal cpio
-    
-  # Install git
-  # -----------
-    - apt-get install -qq git
-
-  # Setup system
-  # -----------
-    - apt-get install locales
-    - locale-gen en_US.UTF-8
-    - update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-    - export LANG=en_US.UTF-8
-
   # Create and initialize the build environment
   # -------------------------------------------
     - rm -rf /tmp/build_env
@@ -28,4 +10,4 @@ job:
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
-    - bash scripts/build.sh /tmp/build_env
+    - bash scripts/build.sh /tmp/build_env amlogic-image-headless-initrd
