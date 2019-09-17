@@ -14,16 +14,17 @@ fi
 
 (
     cd $1
+    BASEDIR=$PWD
 
     . ./oe-init-build-env $PWD/build
     
-    cp ../meta/conf/local.conf.sample conf/local.conf
+    cp $BASEDIR/meta/conf/local.conf.sample conf/local.conf
     
     touch conf/sanity.conf
     echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
     echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> conf/local.conf
 
-    for machine in meta-meson/conf/machine/*.conf ; do
+    for machine in $BASEDIR/meta-meson/conf/machine/*.conf ; do
         echo "Running '$BITBAKE_CMD' for '$name'"
 	    name="$(basename $machine | cut -d. -f1)"
 	    MACHINE="$name" bitbake $BITBAKE_CMD
