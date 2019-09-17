@@ -9,12 +9,15 @@ image: docker:latest
 stages:
   - docker
   - initrd
+  - test
   
 before_script:
   - echo -n $CI_JOB_TOKEN | docker login -u gitlab-ci-token --password-stdin $CI_REGISTRY
 
 build-docker:
   stage: docker
+  variables:
+    GIT_STRATEGY: none
   script:
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
     - >
@@ -24,7 +27,8 @@ build-docker:
     - docker push $CI_REGISTRY_IMAGE:$IMAGE_TAG
 
 build-initrd:
-  tags: [ 'yocto' ]
+  tags: 
+    - yocto
   stage: initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   
@@ -43,3 +47,47 @@ build-initrd:
     when: always
     paths:
       - results/
+
+.test:
+  stage: test
+  tags:
+    - yocto
+  image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - scripts/generate_lava.py
+        --template scripts/meta-meson.yml.jinja2
+        --base-artifacts-url $CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/results
+        --device-type ${DEVICE_TYPE}
+        --kernel-image-name ${KERNEL_IMAGE_NAME}
+        --dtb-name ${DTB_NAME}
+        --ramdisk-name ${RAMDISK_NAME}
+        --ramdisk-compression ${RAMDISK_COMP}
+        --boot-method ${BOOT_METHOD}
+        --tags "${LAVA_TAGS}"
+        > results/meta-meson.yml
+    - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson.yml`
+    - echo $lava_job_id
+    - lavacli jobs logs $lava_job_id
+    - lavacli jobs show $lava_job_id
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+test:libretech-cc:
+  extends: .test
+  tags:
+    - lava-meson-gxl-s905x-libretech-cc
+  needs: build-initrd
+  dependencies:
+    - build-initrd
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
+    KERNEL_IMAGE_NAME: "libretech-cc/Image"
+    DTB_NAME: "libretech-cc/meson-gxl-s905x-libretech-cc.dtb"
+    RAMDISK_NAME: "libretech-cc/amlogic-image-headless-initrd-libretech-cc.cpio.xz"
+    RAMDISK_COMP: "xz"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
