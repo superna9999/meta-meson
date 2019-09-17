@@ -21,3 +21,5 @@ RUN update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 
 # Use en_US.UTF-8 locale
 ENV LANG=en_US.UTF-8
+
+USER=yocto

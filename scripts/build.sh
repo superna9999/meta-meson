@@ -19,7 +19,6 @@ BITBAKE_CMD=$3
     
     cp $BASEDIR/meta/conf/local.conf.sample conf/local.conf
     
-    touch conf/sanity.conf
     echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
     echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> conf/local.conf
 

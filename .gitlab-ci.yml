@@ -1,5 +1,5 @@
 variables:
-  IMAGE_TAG: "2019-09-17-1"
+  IMAGE_TAG: "2019-09-17-2"
 
 services:
   - docker:dind
