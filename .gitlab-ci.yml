@@ -14,7 +14,6 @@ before_script:
   - echo -n $CI_JOB_TOKEN | docker login -u gitlab-ci-token --password-stdin $CI_REGISTRY
 
 build-docker:
-  tags: [ 'yocto' ]
   stage: docker
   script:
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
