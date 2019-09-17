@@ -23,5 +23,5 @@ BITBAKE_CMD=$3
     echo "DISTRO_FEATURES_append = \" wayland opengl \"" >> conf/local.conf
 
     echo "Running '$BITBAKE_CMD' for '$OE_MACHINE'"
-	MACHINE="$OE_MACHINE" bitbake $BITBAKE_CMD
+	MACHINE="$OE_MACHINE" bitbake --quiet $BITBAKE_CMD
 )
