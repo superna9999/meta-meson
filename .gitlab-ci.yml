@@ -16,8 +16,6 @@ before_script:
 
 build-docker:
   stage: docker
-  variables:
-    GIT_STRATEGY: none
   script:
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
     - >
@@ -53,8 +51,6 @@ build-initrd:
   tags:
     - yocto
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
-  variables:
-    GIT_STRATEGY: none
   script:
     - scripts/generate_lava.py
         --template scripts/meta-meson.yml.jinja2
