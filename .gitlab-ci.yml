@@ -17,11 +17,8 @@ build-docker:
   stage: docker
   script:
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
-    - docker pull $CI_REGISTRY_IMAGE:latest || true
     - >
       docker build
-      --pull
-      --cache-from $CI_REGISTRY_IMAGE:latest
       --tag $CI_REGISTRY_IMAGE:$IMAGE_TAG
       scripts/
     - docker push $CI_REGISTRY_IMAGE:$IMAGE_TAG

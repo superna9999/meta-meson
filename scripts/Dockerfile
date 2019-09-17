@@ -23,5 +23,6 @@ RUN update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
 # Add and use the yocto user
+RUN useradd -c 'yocto user' -m -d /home/yocto -s /bin/bash yocto
 USER yocto
-RUN useradd -ms /bin/bash yocto
+ENV HOME /home/yocto
