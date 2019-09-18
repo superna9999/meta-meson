@@ -1,11 +1,6 @@
 variables:
   IMAGE_TAG: "2019-09-17-3"
 
-services:
-  - docker:dind
-
-image: docker:latest
-
 stages:
   - docker
   - initrd
@@ -16,6 +11,9 @@ before_script:
 
 build-docker:
   stage: docker
+  image: docker:stable
+  services:
+    - docker:18-dind
   tags: 
     - yocto
   script:
