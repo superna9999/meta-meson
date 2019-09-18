@@ -16,6 +16,8 @@ before_script:
 
 build-docker:
   stage: docker
+  tags: 
+    - yocto
   script:
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
     - >
