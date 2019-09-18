@@ -14,6 +14,10 @@ RUN apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib b
 # Install git
 RUN apt-get install -qq git
 
+# Install lavacli
+RUN apt-get install -qq python3-pip
+RUN pip3 install lavacli
+
 # Setup system
 RUN apt-get install locales
 RUN locale-gen en_US.UTF-8
