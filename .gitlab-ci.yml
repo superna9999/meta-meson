@@ -47,8 +47,10 @@ build:initrd:
     paths:
       - results/
 
-.build-test:
+.gen-test:
   stage: test
+  tags:
+    - yocto
   needs: ["build:initrd"]
   dependencies:
     - build:initrd
@@ -86,10 +88,8 @@ build:initrd:
     paths:
       - results/
 
-build-test:libretech-cc:
-  extends: .build-test
-  tags:
-    - lava-meson-gxl-s905x-libretech-cc
+gen-test:libretech-cc:
+  extends: .gen-test
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
     KERNEL_IMAGE_NAME: "libretech-cc/Image"
@@ -101,9 +101,9 @@ build-test:libretech-cc:
 
 run-test:libretech-cc:
   extends: .run-test
-  needs: ["build-test:libretech-cc"]
+  needs: ["gen-test:libretech-cc"]
   dependencies:
-    - build-test:libretech-cc
+    - gen-test:libretech-cc
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
