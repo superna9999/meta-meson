@@ -47,7 +47,7 @@ build:initrd:
     paths:
       - results/
 
-.gen-test:
+.gen:
   stage: test
   tags:
     - yocto
@@ -72,7 +72,7 @@ build:initrd:
     paths:
       - results/
 
-.run-test:
+.run:
   stage: test
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   script:
@@ -88,8 +88,8 @@ build:initrd:
     paths:
       - results/
 
-gen-test:libretech-cc:
-  extends: .gen-test
+gen:libretech-cc:
+  extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
     KERNEL_IMAGE_NAME: "libretech-cc/Image"
@@ -99,11 +99,11 @@ gen-test:libretech-cc:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-run-test:libretech-cc:
-  extends: .run-test
-  needs: ["gen-test:libretech-cc"]
+run:libretech-cc:
+  extends: .run
+  needs: ["gen:libretech-cc"]
   dependencies:
-    - gen-test:libretech-cc
+    - gen:libretech-cc
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
