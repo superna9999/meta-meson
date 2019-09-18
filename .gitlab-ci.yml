@@ -61,9 +61,9 @@ build:initrd:
         --template scripts/meta-meson.yml.jinja2
         --base-artifacts-url $CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/results
         --device-type ${DEVICE_TYPE}
-        --kernel-image-name ${KERNEL_IMAGE_NAME}
-        --dtb-name ${DTB_NAME}
-        --ramdisk-name ${RAMDISK_NAME}
+        --kernel-image-name "$MACHINE/`readlink results/$MACHINE/${KERNEL_IMAGE_NAME}`"
+        --dtb-name "$MACHINE/`readlink results/$MACHINE/${DTB_NAME}`"
+        --ramdisk-name "$MACHINE/`readlink results/$MACHINE/${RAMDISK_NAME}`"
         --ramdisk-compression ${RAMDISK_COMP}
         --boot-method ${BOOT_METHOD}
         --tags "${LAVA_TAGS}"
@@ -76,6 +76,7 @@ build:initrd:
 .run:
   stage: run
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
+  needs: ["gen:$MACHINE"]
   script:
     - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson-$DEVICE_TYPE.yml`
     - echo $lava_job_id
@@ -93,17 +94,18 @@ gen:libretech-cc:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
-    KERNEL_IMAGE_NAME: "libretech-cc/Image"
-    DTB_NAME: "libretech-cc/meson-gxl-s905x-libretech-cc.dtb"
-    RAMDISK_NAME: "libretech-cc/amlogic-image-headless-initrd-libretech-cc.cpio.xz"
+    MACHINE: libretech-cc
+    KERNEL_IMAGE_NAME: "Image"
+    DTB_NAME: "meson-gxl-s905x-libretech-cc.dtb"
+    RAMDISK_NAME: "amlogic-image-headless-initrd-libretech-cc.cpio.xz"
     RAMDISK_COMP: "xz"
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
 run:libretech-cc:
   extends: .run
-  needs: ["gen:libretech-cc"]
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
+    MACHINE: libretech-cc
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
