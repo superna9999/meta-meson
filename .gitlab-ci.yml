@@ -64,11 +64,14 @@ build:initrd:
         --ramdisk-compression ${RAMDISK_COMP}
         --boot-method ${BOOT_METHOD}
         --tags "${LAVA_TAGS}"
-        > results/meta-meson.yml
-    - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson.yml`
+        > results/meta-meson-$DEVICE_TYPE.yml
+    - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson-$DEVICE_TYPE.yml`
     - echo $lava_job_id
-    - lavacli jobs logs $lava_job_id
+    - lavacli jobs logs $lava_job_id | grep -a -v "{'case':" | tee results/$DEVICE_TYPE.log
     - lavacli jobs show $lava_job_id
+    - result=`lavacli results $lava_job_id | grep fail`
+    - echo $result
+    - [[ -z "$result" ]]
   artifacts:
     when: always
     paths:
