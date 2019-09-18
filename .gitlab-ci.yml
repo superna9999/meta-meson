@@ -5,18 +5,22 @@ stages:
   - docker
   - initrd
   - test
-  
-before_script:
-  - echo -n $CI_JOB_TOKEN | docker login -u gitlab-ci-token --password-stdin $CI_REGISTRY
 
 build-docker:
   stage: docker
   image: docker:stable
+  variables:
+   DOCKER_HOST: tcp://docker:2375/
+   DOCKER_DRIVER: overlay2
   services:
-    - docker:18-dind
+    - docker:dind
   tags: 
     - yocto
+  before_script:
+    - docker info
   script:
+    #- docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD" 
+    - export REGISTRY_NAME="$DOCKER_USERNAME/$CI_PROJECT_NAME"
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
     - >
       docker build
