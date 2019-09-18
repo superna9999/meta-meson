@@ -1,15 +1,5 @@
 variables:
   IMAGE_TAG: "2019-09-17-3"
-  DOCKER_HOST: tcp://docker:2375/
-  DOCKER_DRIVER: overlay2
-  DOCKER_TLS_CERTDIR: ""
-
-services:
-  - docker:dind
-
-before_script:
-
-image: docker:stable
 
 stages:
   - docker
@@ -20,6 +10,13 @@ build-docker:
   stage: docker
   tags: 
     - yocto
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+  image: docker:stable
+  services:
+    - docker:dind
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
