@@ -20,11 +20,10 @@ build:docker:
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
-    - >
-      docker build
-      --tag $CI_REGISTRY_IMAGE:$IMAGE_TAG
-      scripts/
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build --cache-from $CI_REGISTRY_IMAGE:latest --tag $CI_REGISTRY_IMAGE:$IMAGE_TAG --tag $CI_REGISTRY_IMAGE:latest scripts/
     - docker push $CI_REGISTRY_IMAGE:$IMAGE_TAG
+    - docker push $CI_REGISTRY_IMAGE:latest
 
 build:initrd:
   tags: 
