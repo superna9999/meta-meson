@@ -7,7 +7,6 @@ services:
   - docker:dind
 
 before_script:
-  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
 image: docker:stable
 
@@ -21,6 +20,7 @@ build-docker:
   tags: 
     - yocto
   script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
     - >
       docker build
