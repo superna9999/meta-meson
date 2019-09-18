@@ -19,7 +19,7 @@ build-docker:
   before_script:
     - docker info
   script:
-    #- docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD" 
+    - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"  $CI_REGISTRY
     - export REGISTRY_NAME="$DOCKER_USERNAME/$CI_PROJECT_NAME"
     - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
     - >
