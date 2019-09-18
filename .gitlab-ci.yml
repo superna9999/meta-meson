@@ -47,7 +47,7 @@ build:initrd:
     paths:
       - results/
 
-.test:
+.build-test:
   stage: test
   needs: ["build:initrd"]
   dependencies:
@@ -65,6 +65,15 @@ build:initrd:
         --boot-method ${BOOT_METHOD}
         --tags "${LAVA_TAGS}"
         > results/meta-meson-$DEVICE_TYPE.yml
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+.run-test:
+  stage: test
+  image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
+  script:
     - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson-$DEVICE_TYPE.yml`
     - echo $lava_job_id
     - lavacli jobs logs $lava_job_id | grep -a -v "{'case':" | tee results/$DEVICE_TYPE.log
@@ -77,8 +86,8 @@ build:initrd:
     paths:
       - results/
 
-test:libretech-cc:
-  extends: .test
+build-test:libretech-cc:
+  extends: .build-test
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
@@ -89,3 +98,13 @@ test:libretech-cc:
     RAMDISK_COMP: "xz"
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
+
+run-test:libretech-cc:
+  extends: .run-test
+  needs: ["build-test:libretech-cc"]
+  dependencies:
+    - build-test:libretech-cc
+  tags:
+    - lava-meson-gxl-s905x-libretech-cc
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
