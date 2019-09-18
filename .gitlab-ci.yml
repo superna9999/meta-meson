@@ -71,7 +71,7 @@ build:initrd:
     - lavacli jobs show $lava_job_id
     - result=`lavacli results $lava_job_id | grep fail`
     - echo $result
-    - [[ -z "$result" ]]
+    - '[[ -z "$result" ]]'
   artifacts:
     when: always
     paths:
