@@ -4,7 +4,8 @@ variables:
 stages:
   - docker
   - initrd
-  - test
+  - gen
+  - run
 
 build:docker:
   stage: docker
@@ -48,7 +49,7 @@ build:initrd:
       - results/
 
 .gen:
-  stage: test
+  stage: gen
   tags:
     - yocto
   needs: ["build:initrd"]
@@ -73,7 +74,7 @@ build:initrd:
       - results/
 
 .run:
-  stage: test
+  stage: run
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   script:
     - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson-$DEVICE_TYPE.yml`
@@ -102,8 +103,6 @@ gen:libretech-cc:
 run:libretech-cc:
   extends: .run
   needs: ["gen:libretech-cc"]
-  dependencies:
-    - gen:libretech-cc
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
