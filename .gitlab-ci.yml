@@ -52,6 +52,9 @@ build-initrd:
   stage: test
   tags:
     - yocto
+  needs: build-initrd
+  dependencies:
+    - build-initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   script:
     - scripts/generate_lava.py
@@ -69,18 +72,15 @@ build-initrd:
     - echo $lava_job_id
     - lavacli jobs logs $lava_job_id
     - lavacli jobs show $lava_job_id
-  artifacts:
-    when: always
-    paths:
-      - results/
+#  artifacts:
+#    when: always
+#    paths:
+#      - results/
 
-test-libretech-cc:
+libretech-cc:
   extends: .test
   tags:
     - lava-meson-gxl-s905x-libretech-cc
-  needs: build-initrd
-  dependencies:
-    - build-initrd
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
     KERNEL_IMAGE_NAME: "libretech-cc/Image"
