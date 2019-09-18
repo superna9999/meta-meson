@@ -54,8 +54,7 @@ build:initrd:
     - build:initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   script:
-    - chmod +x scripts/generate_lava.py
-    - scripts/generate_lava.py
+    - python3 scripts/generate_lava.py
         --template scripts/meta-meson.yml.jinja2
         --base-artifacts-url $CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/results
         --device-type ${DEVICE_TYPE}
