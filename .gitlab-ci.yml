@@ -76,7 +76,6 @@ build:initrd:
 .run:
   stage: run
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
-  needs: ["gen:$MACHINE"]
   script:
     - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson-$DEVICE_TYPE.yml`
     - echo $lava_job_id
@@ -104,8 +103,8 @@ gen:libretech-cc:
 
 run:libretech-cc:
   extends: .run
+  needs: ["gen:libretech-cc"]
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
-    MACHINE: libretech-cc
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
