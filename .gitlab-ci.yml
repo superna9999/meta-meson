@@ -74,7 +74,7 @@ build-initrd:
     paths:
       - results/
 
-test:libretech-cc:
+test-libretech-cc:
   extends: .test
   tags:
     - lava-meson-gxl-s905x-libretech-cc
