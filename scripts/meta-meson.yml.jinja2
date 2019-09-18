@@ -2,7 +2,7 @@ job_name: meta-meson
 device_type: {{ device_type }}
 timeouts:
   job:
-    minutes: 20
+    minutes: 40
   action:
     minutes: 10
   actions:
@@ -19,7 +19,7 @@ tags:
 actions:
 - deploy:
     timeout:
-      minutes: 10
+      minutes: 30
     to: tftp
     kernel:
       url: {{ base_artifacts_url }}/{{ kernel_image_name }}
