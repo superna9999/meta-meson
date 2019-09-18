@@ -94,7 +94,7 @@ libretech-cc:
   stage: test
   tags:
     - lava-meson-gxl-s905x-libretech-cc
-  needs: build-initrd
+  needs: ["build-initrd"]
   dependencies:
     - build-initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
