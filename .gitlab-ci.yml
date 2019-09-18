@@ -71,19 +71,3 @@ build-initrd:
     when: always
     paths:
       - results/
-
-test:libretech-cc:
-  extends: .test
-  tags:
-    - lava-meson-gxl-s905x-libretech-cc
-  needs: build-initrd
-  dependencies:
-    - build-initrd
-  variables:
-    DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
-    KERNEL_IMAGE_NAME: "libretech-cc/Image"
-    DTB_NAME: "libretech-cc/meson-gxl-s905x-libretech-cc.dtb"
-    RAMDISK_NAME: "libretech-cc/amlogic-image-headless-initrd-libretech-cc.cpio.xz"
-    RAMDISK_COMP: "xz"
-    BOOT_METHOD: "u-boot"
-    LAVA_TAGS: ""
