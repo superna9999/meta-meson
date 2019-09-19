@@ -44,7 +44,7 @@ build:initrd:
     - bash scripts/build.sh /tmp/build_env libretech-cc $YOCTO_IMAGE
 #   - bash scripts/build.sh /tmp/build_env libretech-ac $YOCTO_IMAGE
     - bash scripts/build.sh /tmp/build_env khadas-vim $YOCTO_IMAGE
-    - bash scripts/build.sh /tmp/build_env khadas-vim2 $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env khadas-vim2 $YOCTO_IMAGE
     - bash scripts/build.sh /tmp/build_env hardkernel-odroidc2 $YOCTO_IMAGE
     - cp -ar /tmp/build_env/build/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
 
@@ -130,17 +130,17 @@ gen:khadas-vim:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:khadas-vim2:
-  extends: .gen
-  variables:
-    DEVICE_TYPE: "meson-gxm-khadas-vim2"
-    MACHINE: khadas-vim2
-    KERNEL_IMAGE_NAME: "Image"
-    DTB_NAME: "meson-gxm-khadas-vim2.dtb"
-    RAMDISK_NAME: "$YOCTO_IMAGE-khadas-vim2.cpio.xz"
-    RAMDISK_COMP: "xz"
-    BOOT_METHOD: "u-boot"
-    LAVA_TAGS: ""
+# gen:khadas-vim2:
+#   extends: .gen
+#   variables:
+#     DEVICE_TYPE: "meson-gxm-khadas-vim2"
+#     MACHINE: khadas-vim2
+#     KERNEL_IMAGE_NAME: "Image"
+#     DTB_NAME: "meson-gxm-khadas-vim2.dtb"
+#     RAMDISK_NAME: "$YOCTO_IMAGE-khadas-vim2.cpio.xz"
+#     RAMDISK_COMP: "xz"
+#     BOOT_METHOD: "u-boot"
+#     LAVA_TAGS: ""
 
 run:libretech-cc:
   extends: .run
@@ -172,12 +172,12 @@ run:khadas-vim:
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
 
-run:khadas-vim2:
-  extends: .run
-  needs: ["gen:khadas-vim2"]
-  dependencies:
-    - gen:khadas-vim2
-  tags:
-    - lava-meson-gxm-khadas-vim2
-  variables:
-    DEVICE_TYPE: "meson-gxm-khadas-vim2"
+# run:khadas-vim2:
+#   extends: .run
+#   needs: ["gen:khadas-vim2"]
+#   dependencies:
+#     - gen:khadas-vim2
+#   tags:
+#     - lava-meson-gxm-khadas-vim2
+#   variables:
+#     DEVICE_TYPE: "meson-gxm-khadas-vim2"
