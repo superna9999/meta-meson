@@ -109,6 +109,8 @@ gen:libretech-cc:
 run:libretech-cc:
   extends: .run
   needs: ["gen:libretech-cc"]
+  dependencies:
+    - gen:libretech-cc
   tags:
     - lava-meson-gxl-s905x-libretech-cc
   variables:

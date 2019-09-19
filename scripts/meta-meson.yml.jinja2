@@ -4,9 +4,9 @@ device_type: {{ device_type }}
 
 timeouts:
   job:
-    minutes: 40
+    minutes: 45
   action:
-    minutes: 10
+    minutes: 40
   actions:
     power-off:
       seconds: 30
@@ -37,11 +37,11 @@ actions:
     os: oe
 - boot:
     timeout:
-      minutes: 5
+      minutes: 10
     method: {{ boot_method }}
     commands: ramdisk
     prompts:
-      - '~#'
+      - 'root@(.*)#'
     auto_login:
       login_prompt: 'login:'
       username: root
