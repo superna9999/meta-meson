@@ -45,7 +45,7 @@ build:initrd:
 #   - bash scripts/build.sh /tmp/build_env libretech-ac $YOCTO_IMAGE
     - bash scripts/build.sh /tmp/build_env khadas-vim $YOCTO_IMAGE
 #   - bash scripts/build.sh /tmp/build_env khadas-vim2 $YOCTO_IMAGE
-    - bash scripts/build.sh /tmp/build_env hardkernel-odroidc2 $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env hardkernel-odroidc2 $YOCTO_IMAGE
     - cp -ar /tmp/build_env/build/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
 
   artifacts:
@@ -106,17 +106,17 @@ gen:libretech-cc:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:hardkernel-odroidc2:
-  extends: .gen
-  variables:
-    DEVICE_TYPE: "meson-gxbb-odroidc2"
-    MACHINE: libretech-cc
-    KERNEL_IMAGE_NAME: "Image"
-    DTB_NAME: "meson-gxbb-odroidc2.dtb"
-    RAMDISK_NAME: "$YOCTO_IMAGE-hardkernel-odroidc2.cpio.xz"
-    RAMDISK_COMP: "xz"
-    BOOT_METHOD: "u-boot"
-    LAVA_TAGS: ""
+# gen:hardkernel-odroidc2:
+#   extends: .gen
+#   variables:
+#     DEVICE_TYPE: "meson-gxbb-odroidc2"
+#     MACHINE: hardkernel-odroidc2
+#     KERNEL_IMAGE_NAME: "Image"
+#     DTB_NAME: "meson-gxbb-odroidc2.dtb"
+#     RAMDISK_NAME: "$YOCTO_IMAGE-hardkernel-odroidc2.cpio.xz"
+#     RAMDISK_COMP: "xz"
+#     BOOT_METHOD: "u-boot"
+#     LAVA_TAGS: ""
 
 gen:khadas-vim:
   extends: .gen
@@ -152,15 +152,15 @@ run:libretech-cc:
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
 
-run:hardkernel-odroidc2:
-  extends: .run
-  needs: ["gen:hardkernel-odroidc2"]
-  dependencies:
-    - gen:hardkernel-odroidc2
-  tags:
-    - lava-meson-gxbb-odroidc2
-  variables:
-    DEVICE_TYPE: "meson-gxbb-odroidc2"
+# run:hardkernel-odroidc2:
+#   extends: .run
+#   needs: ["gen:hardkernel-odroidc2"]
+#   dependencies:
+#     - gen:hardkernel-odroidc2
+#   tags:
+#     - lava-meson-gxbb-odroidc2
+#   variables:
+#     DEVICE_TYPE: "meson-gxbb-odroidc2"
 
 run:khadas-vim:
   extends: .run
