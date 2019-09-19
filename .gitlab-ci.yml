@@ -32,7 +32,6 @@ build:initrd:
     - yocto
   stage: initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
-  timeout: 2h
   
   before_script:
     - mkdir -p results
