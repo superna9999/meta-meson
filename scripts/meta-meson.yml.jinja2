@@ -1,5 +1,7 @@
 job_name: meta-meson
+
 device_type: {{ device_type }}
+
 timeouts:
   job:
     minutes: 40
@@ -8,14 +10,17 @@ timeouts:
   actions:
     power-off:
       seconds: 30
+
 priority: medium
 visibility: public
+
 {% if tags %}
 tags:
 {% for tag in tags %}
   - {{ tag }}
 {% endfor %}
 {% endif %}
+
 actions:
 - deploy:
     timeout:
@@ -36,4 +41,8 @@ actions:
     method: {{ boot_method }}
     commands: ramdisk
     prompts:
-      - '#' 
+      - '/ #'
+
+auto_login:
+  login_prompt: 'login:'
+  username: root
