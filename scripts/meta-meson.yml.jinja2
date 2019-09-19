@@ -1,0 +1,47 @@
+job_name: meta-meson
+
+device_type: {{ device_type }}
+
+timeouts:
+  job:
+    minutes: 45
+  action:
+    minutes: 40
+  actions:
+    power-off:
+      seconds: 30
+
+priority: medium
+visibility: public
+
+{% if tags %}
+tags:
+{% for tag in tags %}
+  - {{ tag }}
+{% endfor %}
+{% endif %}
+
+actions:
+- deploy:
+    timeout:
+      minutes: 30
+    to: tftp
+    kernel:
+      url: {{ base_artifacts_url }}/{{ kernel_image_name }}
+      type: image
+    ramdisk:
+      url: {{ base_artifacts_url }}/{{ ramdisk_name }}
+      compression: {{ ramdisk_compression }}
+    dtb:
+      url: {{ base_artifacts_url }}/{{ dtb_name }}
+    os: oe
+- boot:
+    timeout:
+      minutes: 10
+    method: {{ boot_method }}
+    commands: ramdisk
+    prompts:
+      - 'root@(.*)#'
+    auto_login:
+      login_prompt: 'login:'
+      username: root

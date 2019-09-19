@@ -1,0 +1,184 @@
+variables:
+  IMAGE_TAG: "2019-09-17-3"
+  YOCTO_IMAGE: "amlogic-image-headless-initrd"
+
+stages:
+  - docker
+  - initrd
+  - gen
+  - run
+
+build:docker:
+  stage: docker
+  tags: 
+    - yocto
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+  image: docker:stable
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$IMAGE_TAG && exit 0 || true
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build --cache-from $CI_REGISTRY_IMAGE:latest --tag $CI_REGISTRY_IMAGE:$IMAGE_TAG --tag $CI_REGISTRY_IMAGE:latest scripts/
+    - docker push $CI_REGISTRY_IMAGE:$IMAGE_TAG
+    - docker push $CI_REGISTRY_IMAGE:latest
+
+build:initrd:
+  tags: 
+    - yocto
+  stage: initrd
+  image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
+  
+  before_script:
+    - mkdir -p results
+    - rm -rf /tmp/build_env
+    - git clone git://github.com/openembedded/openembedded-core --branch=warrior --depth=1 /tmp/build_env
+    - git clone git://github.com/openembedded/bitbake --branch=1.42 --depth=1 /tmp/build_env/bitbake
+    - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
+
+  script:
+    - bash scripts/prepare.sh /tmp/build_env
+    - bash scripts/build.sh /tmp/build_env libretech-cc $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env libretech-ac $YOCTO_IMAGE
+    - bash scripts/build.sh /tmp/build_env khadas-vim $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env khadas-vim2 $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env hardkernel-odroidc2 $YOCTO_IMAGE
+    - cp -ar /tmp/build_env/build/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
+
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+.gen:
+  stage: gen
+  tags:
+    - yocto
+  needs: ["build:initrd"]
+  dependencies:
+    - build:initrd
+  image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
+  script:
+    - python3 scripts/generate_lava.py
+        --template scripts/meta-meson.yml.jinja2
+        --base-artifacts-url $CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/results
+        --device-type ${DEVICE_TYPE}
+        --kernel-image-name "$MACHINE/`readlink results/$MACHINE/${KERNEL_IMAGE_NAME}`"
+        --dtb-name "$MACHINE/`readlink results/$MACHINE/${DTB_NAME}`"
+        --ramdisk-name "$MACHINE/`readlink results/$MACHINE/${RAMDISK_NAME}`"
+        --ramdisk-compression ${RAMDISK_COMP}
+        --boot-method ${BOOT_METHOD}
+        --tags "${LAVA_TAGS}"
+        > results/meta-meson-$DEVICE_TYPE.yml
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+.run:
+  stage: run
+  image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
+  script:
+    - lava_job_id=`lavacli jobs submit $CI_PROJECT_DIR/results/meta-meson-$DEVICE_TYPE.yml`
+    - echo $lava_job_id
+    - lavacli jobs logs $lava_job_id | grep -a -v "{'case':" | tee results/$DEVICE_TYPE.log
+    - lavacli jobs show $lava_job_id
+    - lavacli results $lava_job_id
+    - status=`lavacli jobs show $lava_job_id | grep Finished | wc -l`
+    - '[[ "$status" -gt 0 ]]'
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+gen:libretech-cc:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
+    MACHINE: libretech-cc
+    KERNEL_IMAGE_NAME: "Image"
+    DTB_NAME: "meson-gxl-s905x-libretech-cc.dtb"
+    RAMDISK_NAME: "$YOCTO_IMAGE-libretech-cc.cpio.xz"
+    RAMDISK_COMP: "xz"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
+# gen:hardkernel-odroidc2:
+#   extends: .gen
+#   variables:
+#     DEVICE_TYPE: "meson-gxbb-odroidc2"
+#     MACHINE: hardkernel-odroidc2
+#     KERNEL_IMAGE_NAME: "Image"
+#     DTB_NAME: "meson-gxbb-odroidc2.dtb"
+#     RAMDISK_NAME: "$YOCTO_IMAGE-hardkernel-odroidc2.cpio.xz"
+#     RAMDISK_COMP: "xz"
+#     BOOT_METHOD: "u-boot"
+#     LAVA_TAGS: ""
+
+gen:khadas-vim:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
+    MACHINE: khadas-vim
+    KERNEL_IMAGE_NAME: "Image"
+    DTB_NAME: "meson-gxl-s905x-khadas-vim.dtb"
+    RAMDISK_NAME: "$YOCTO_IMAGE-khadas-vim.cpio.xz"
+    RAMDISK_COMP: "xz"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
+# gen:khadas-vim2:
+#   extends: .gen
+#   variables:
+#     DEVICE_TYPE: "meson-gxm-khadas-vim2"
+#     MACHINE: khadas-vim2
+#     KERNEL_IMAGE_NAME: "Image"
+#     DTB_NAME: "meson-gxm-khadas-vim2.dtb"
+#     RAMDISK_NAME: "$YOCTO_IMAGE-khadas-vim2.cpio.xz"
+#     RAMDISK_COMP: "xz"
+#     BOOT_METHOD: "u-boot"
+#     LAVA_TAGS: ""
+
+run:libretech-cc:
+  extends: .run
+  needs: ["gen:libretech-cc"]
+  dependencies:
+    - gen:libretech-cc
+  tags:
+    - lava-meson-gxl-s905x-libretech-cc
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
+
+# run:hardkernel-odroidc2:
+#   extends: .run
+#   needs: ["gen:hardkernel-odroidc2"]
+#   dependencies:
+#     - gen:hardkernel-odroidc2
+#   tags:
+#     - lava-meson-gxbb-odroidc2
+#   variables:
+#     DEVICE_TYPE: "meson-gxbb-odroidc2"
+
+run:khadas-vim:
+  extends: .run
+  needs: ["gen:khadas-vim"]
+  dependencies:
+    - gen:khadas-vim
+  tags:
+    - lava-meson-gxl-s905x-khadas-vim
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
+
+# run:khadas-vim2:
+#   extends: .run
+#   needs: ["gen:khadas-vim2"]
+#   dependencies:
+#     - gen:khadas-vim2
+#   tags:
+#     - lava-meson-gxm-khadas-vim2
+#   variables:
+#     DEVICE_TYPE: "meson-gxm-khadas-vim2"
