@@ -1,6 +1,6 @@
 variables:
   IMAGE_TAG: "2019-09-17-3"
-  YOCTO_IMAGE: "core-image-minimal"
+  YOCTO_IMAGE: "amlogic-image-headless-initrd"
 
 stages:
   - docker

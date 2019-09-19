@@ -21,9 +21,6 @@ BITBAKE_CMD=$3
     
     echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
 
-    echo "BB_NUMBER_THREADS = \"2\"" >> conf/local.conf
-    echo "IMAGE_FSTYPES = \"cpio.xz\"" >> conf/local.conf
-
     echo "Running '$BITBAKE_CMD' for '$OE_MACHINE'"
 	MACHINE="$OE_MACHINE" bitbake --quiet $BITBAKE_CMD
 )
