@@ -1,5 +1,6 @@
 variables:
   IMAGE_TAG: "2019-09-17-3"
+  YOCTO_IMAGE: "core-image-minimal"
 
 stages:
   - docker
@@ -40,7 +41,11 @@ build:initrd:
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
-    - bash scripts/build.sh /tmp/build_env libretech-cc amlogic-image-headless-initrd
+    - bash scripts/build.sh /tmp/build_env libretech-cc $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env libretech-ac $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env khadas-vim $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env khadas-vim2 $YOCTO_IMAGE
+#   - bash scripts/build.sh /tmp/build_env hardkernel-odroidc2 $YOCTO_IMAGE
     - cp -ar /tmp/build_env/build/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
 
   artifacts:
