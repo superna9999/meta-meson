@@ -11,7 +11,7 @@ COMPATIBLE_MACHINE_amlogic-q201 = "amlogic-q201"
 
 PROVIDES =+ "u-boot"
 
-DEPENDS += "bc-native dtc-native"
+DEPENDS += "bc-native"
 
 do_deploy_append () {
     install ${S}/fip/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
