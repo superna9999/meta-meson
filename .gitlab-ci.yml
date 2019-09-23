@@ -1,6 +1,10 @@
 variables:
-  IMAGE_TAG: "2019-09-17-3"
+  IMAGE_TAG: "2019-09-23-1"
   YOCTO_IMAGE: "amlogic-image-headless-initrd"
+  MACHINE_NAME: "amlogic-s9xxx"
+  IMAGE_NAME: "uImage"
+  IMAGE_TYPE: "uimage"
+  RAMDISK_COMP: "xz"
 
 stages:
   - docker
@@ -42,12 +46,8 @@ build:initrd:
 
   script:
     - bash scripts/prepare.sh /tmp/build_env
-    - bash scripts/build.sh /tmp/build_env libretech-cc $YOCTO_IMAGE
-#   - bash scripts/build.sh /tmp/build_env libretech-ac $YOCTO_IMAGE
-    - bash scripts/build.sh /tmp/build_env khadas-vim $YOCTO_IMAGE
-#   - bash scripts/build.sh /tmp/build_env khadas-vim2 $YOCTO_IMAGE
-#   - bash scripts/build.sh /tmp/build_env hardkernel-odroidc2 $YOCTO_IMAGE
-    - cp -ar /tmp/build_env/build/tmp*/deploy/images/* $CI_PROJECT_DIR/results/
+    - bash scripts/build.sh /tmp/build_env $MACHINE_NAME $YOCTO_IMAGE
+    - cp -ar /tmp/build_env/build/tmp*/deploy/images/$MACHINE_NAME/* $CI_PROJECT_DIR/results/
 
   artifacts:
     when: always
@@ -65,12 +65,13 @@ build:initrd:
   script:
     - python3 scripts/generate_lava.py
         --template scripts/meta-meson.yml.jinja2
-        --info "$CI_PIPELINE_URL for $MACHINE at $CI_COMMIT_REF_NAME"
+        --info "$CI_PIPELINE_URL for $DEVICE_TYPE at $CI_COMMIT_REF_NAME"
         --base-artifacts-url $CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/results
         --device-type ${DEVICE_TYPE}
-        --kernel-image-name "$MACHINE/`readlink results/$MACHINE/${KERNEL_IMAGE_NAME}`"
-        --dtb-name "$MACHINE/`readlink results/$MACHINE/${DTB_NAME}`"
-        --ramdisk-name "$MACHINE/`readlink results/$MACHINE/${RAMDISK_NAME}`"
+        --kernel-image-name "`readlink results/${IMAGE_NAME}`"
+        --kernel-image-type ${IMAGE_TYPE}
+        --dtb-name "`readlink results/${DTB_NAME}`"
+        --ramdisk-name "`readlink results/${YOCTO_IMAGE}-${MACHINE_NAME}.cpio.${RAMDISK_COMP}`"
         --ramdisk-compression ${RAMDISK_COMP}
         --boot-method ${BOOT_METHOD}
         --tags "${LAVA_TAGS}"
@@ -96,57 +97,76 @@ build:initrd:
     paths:
       - results/
 
+gen:libretech-ac:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxl-s805x-libretech-ac"
+    DTB_NAME: "meson-gxl-s805x-libretech-ac.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
 gen:libretech-cc:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
-    MACHINE: libretech-cc
-    KERNEL_IMAGE_NAME: "Image"
     DTB_NAME: "meson-gxl-s905x-libretech-cc.dtb"
-    RAMDISK_NAME: "$YOCTO_IMAGE-libretech-cc.cpio.xz"
-    RAMDISK_COMP: "xz"
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-# gen:hardkernel-odroidc2:
-#   extends: .gen
-#   variables:
-#     DEVICE_TYPE: "meson-gxbb-odroidc2"
-#     MACHINE: hardkernel-odroidc2
-#     KERNEL_IMAGE_NAME: "Image"
-#     DTB_NAME: "meson-gxbb-odroidc2.dtb"
-#     RAMDISK_NAME: "$YOCTO_IMAGE-hardkernel-odroidc2.cpio.xz"
-#     RAMDISK_COMP: "xz"
-#     BOOT_METHOD: "u-boot"
-#     LAVA_TAGS: ""
+gen:hardkernel-odroidc2:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxbb-odroidc2"
+    DTB_NAME: "meson-gxbb-odroidc2.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
 
 gen:khadas-vim:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
-    MACHINE: khadas-vim
-    KERNEL_IMAGE_NAME: "Image"
     DTB_NAME: "meson-gxl-s905x-khadas-vim.dtb"
-    RAMDISK_NAME: "$YOCTO_IMAGE-khadas-vim.cpio.xz"
-    RAMDISK_COMP: "xz"
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-# gen:khadas-vim2:
-#   extends: .gen
-#   variables:
-#     DEVICE_TYPE: "meson-gxm-khadas-vim2"
-#     MACHINE: khadas-vim2
-#     KERNEL_IMAGE_NAME: "Image"
-#     DTB_NAME: "meson-gxm-khadas-vim2.dtb"
-#     RAMDISK_NAME: "$YOCTO_IMAGE-khadas-vim2.cpio.xz"
-#     RAMDISK_COMP: "xz"
-#     BOOT_METHOD: "u-boot"
-#     LAVA_TAGS: ""
+gen:khadas-vim2:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxm-khadas-vim2"
+    DTB_NAME: "meson-gxm-khadas-vim2.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: "panfrost"
+
+gen:amlogic-p230:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905d-p230"
+    DTB_NAME: "meson-gxl-s905d-p230.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
+gen:amlogic-p241:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-gxl-s805x-p241"
+    DTB_NAME: "meson-gxl-s805x-p241.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
+run:libretech-ac:
+  extends: .run
+  needs: ["build:initrd", "gen:libretech-ac"]
+  dependencies:
+    - gen:libretech-ac
+  tags:
+    - lava-meson-gxl-s805x-libretech-ac
+  variables:
+    DEVICE_TYPE: "meson-gxl-s805x-libretech-ac"
+  allow_failure: true
 
 run:libretech-cc:
   extends: .run
-  needs: ["gen:libretech-cc"]
+  needs: ["build:initrd", "gen:libretech-cc"]
   dependencies:
     - gen:libretech-cc
   tags:
@@ -154,19 +174,20 @@ run:libretech-cc:
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
 
-# run:hardkernel-odroidc2:
-#   extends: .run
-#   needs: ["gen:hardkernel-odroidc2"]
-#   dependencies:
-#     - gen:hardkernel-odroidc2
-#   tags:
-#     - lava-meson-gxbb-odroidc2
-#   variables:
-#     DEVICE_TYPE: "meson-gxbb-odroidc2"
+run:hardkernel-odroidc2:
+  extends: .run
+  needs: ["build:initrd", "gen:hardkernel-odroidc2"]
+  dependencies:
+    - gen:hardkernel-odroidc2
+  tags:
+    - lava-meson-gxbb-odroidc2
+  variables:
+    DEVICE_TYPE: "meson-gxbb-odroidc2"
+  allow_failure: true
 
 run:khadas-vim:
   extends: .run
-  needs: ["gen:khadas-vim"]
+  needs: ["build:initrd", "gen:khadas-vim"]
   dependencies:
     - gen:khadas-vim
   tags:
@@ -174,12 +195,34 @@ run:khadas-vim:
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
 
-# run:khadas-vim2:
-#   extends: .run
-#   needs: ["gen:khadas-vim2"]
-#   dependencies:
-#     - gen:khadas-vim2
-#   tags:
-#     - lava-meson-gxm-khadas-vim2
-#   variables:
-#     DEVICE_TYPE: "meson-gxm-khadas-vim2"
+run:khadas-vim2:
+  extends: .run
+  needs: ["build:initrd", "gen:khadas-vim2"]
+  dependencies:
+    - gen:khadas-vim2
+  tags:
+    - lava-meson-gxm-khadas-vim2
+  variables:
+    DEVICE_TYPE: "meson-gxm-khadas-vim2"
+
+run:amlogic-p230:
+  extends: .run
+  needs: ["build:initrd", "gen:amlogic-p230"]
+  dependencies:
+    - gen:amlogic-p230
+  tags:
+    - lava-meson-gxl-s905d-p230
+  variables:
+    DEVICE_TYPE: "meson-gxl-s905d-p230"
+  allow_failure: true
+
+run:amlogic-p241:
+  extends: .run
+  needs: ["build:initrd", "gen:amlogic-p241"]
+  dependencies:
+    - gen:amlogic-p241
+  tags:
+    - lava-meson-gxl-s805x-p241
+  variables:
+    DEVICE_TYPE: "meson-gxl-s805x-p241"
+  allow_failure: true
