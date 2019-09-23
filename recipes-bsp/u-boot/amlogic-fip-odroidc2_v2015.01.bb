@@ -4,11 +4,13 @@ PROVIDES = "amlogic-fip"
 LICENSE = "Proprietary"
 LIC_FILES_CHKSUM = "file://fip/bl2_fix.sh;md5=c7864e97af857505ef162eac95c799d0"
 
-SRC_URI = "https://github.com/hardkernel/u-boot/archive/odroidc2-v2015.01.tar.gz"
-SRC_URI[md5sum] = "c61ff317c13d05b28d73dc6c309b46f1"
-SRC_URI[sha256sum] = "db9048119246031dc54bab448c4b270d3633016d2b4da101e420fd3131b221d2"
+UBOOT_GIT_REV = "95264d19d04930f67f10f162df70de447659329"
 
-S = "${WORKDIR}/u-boot-odroidc2-v2015.01/"
+SRC_URI = "https://github.com/hardkernel/u-boot/archive/${UBOOT_GIT_REV}.tar.gz"
+SRC_URI[md5sum] = "76ea3b34010b56640e8f1deaf28b29c3"
+SRC_URI[sha256sum] = "440cbb4f48251383b1eeef7306d891b502aaf48e2c923833992e1e901ea230bf"
+
+S = "${WORKDIR}/u-boot-${UBOOT_GIT_REV}/"
 
 inherit deploy
 

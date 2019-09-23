@@ -1,7 +1,7 @@
 require recipes-bsp/u-boot/u-boot.inc
 require u-boot-khadas-vim-common_${PV}.inc
 
-DEPENDS += "bc-native dtc-native"
+DEPENDS += "bc-native"
 
 PROVIDES =+ "u-boot"
 
