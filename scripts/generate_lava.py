@@ -5,6 +5,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--template")
+parser.add_argument("--info")
 parser.add_argument("--base-artifacts-url")
 parser.add_argument("--device-type")
 parser.add_argument("--kernel-image-name")
@@ -19,6 +20,7 @@ env = Environment(loader = FileSystemLoader('.'), trim_blocks=True, lstrip_block
 template = env.get_template(args.template)
 
 values = {}
+values['info'] = args.info
 values['base_artifacts_url'] = args.base_artifacts_url
 values['device_type'] = args.device_type
 values['kernel_image_name'] = args.kernel_image_name
