@@ -121,6 +121,14 @@ gen:hardkernel-odroidc2:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
+gen:hardkernel-odroid-n2:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-g12b-odroid-n2"
+    DTB_NAME: "meson-g12b-odroid-n2.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
 gen:khadas-vim:
   extends: .gen
   variables:
@@ -150,6 +158,22 @@ gen:amlogic-p241:
   variables:
     DEVICE_TYPE: "meson-gxl-s805x-p241"
     DTB_NAME: "meson-gxl-s805x-p241.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
+gen:seirobotics-sei510:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-g12a-sei510"
+    DTB_NAME: "meson-g12a-sei510.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
+gen:amediatech-x96-max:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-g12a-x96-max"
+    DTB_NAME: "meson-g12a-x96-max.dtb"
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
@@ -183,6 +207,17 @@ run:hardkernel-odroidc2:
     - lava-meson-gxbb-odroidc2
   variables:
     DEVICE_TYPE: "meson-gxbb-odroidc2"
+  allow_failure: true
+
+run:hardkernel-odroid-n2:
+  extends: .run
+  needs: ["build:initrd", "gen:hardkernel-odroid-n2"]
+  dependencies:
+    - gen:hardkernel-odroid-n2
+  tags:
+    - lava-meson-g12b-odroid-n2
+  variables:
+    DEVICE_TYPE: "meson-g12b-odroid-n2"
   allow_failure: true
 
 run:khadas-vim:
@@ -225,4 +260,26 @@ run:amlogic-p241:
     - lava-meson-gxl-s805x-p241
   variables:
     DEVICE_TYPE: "meson-gxl-s805x-p241"
+  allow_failure: true
+
+run:seirobotics-sei510:
+  extends: .run
+  needs: ["build:initrd", "gen:seirobotics-sei510"]
+  dependencies:
+    - gen:seirobotics-sei510
+  tags:
+    - lava-meson-g12a-sei510
+  variables:
+    DEVICE_TYPE: "meson-g12a-sei510"
+  allow_failure: true
+
+run:amediatech-x96-max:
+  extends: .run
+  needs: ["build:initrd", "gen:amediatech-x96-max"]
+  dependencies:
+    - gen:amediatech-x96-max
+  tags:
+    - lava-meson-g12a-x96-max
+  variables:
+    DEVICE_TYPE: "meson-g12a-x96-max"
   allow_failure: true
