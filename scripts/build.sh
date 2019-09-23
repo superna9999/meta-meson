@@ -16,9 +16,5 @@ BASEDIR=$PWD
 
 . ./oe-init-build-env $PWD/build
     
-cp $BASEDIR/meta/conf/local.conf.sample conf/local.conf
-    
-echo "BBLAYERS +=\"$1/meta-meson\"" >> conf/bblayers.conf
-
 echo "Running '$BITBAKE_CMD' for '$OE_MACHINE'"
 MACHINE="$OE_MACHINE" bitbake --quiet $BITBAKE_CMD
