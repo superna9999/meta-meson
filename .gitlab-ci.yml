@@ -65,6 +65,7 @@ build:initrd:
   script:
     - python3 scripts/generate_lava.py
         --template scripts/meta-meson.yml.jinja2
+        --info "$CI_PIPELINE_URL for $MACHINE at $CI_COMMIT_REF_NAME"
         --base-artifacts-url $CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/results
         --device-type ${DEVICE_TYPE}
         --kernel-image-name "$MACHINE/`readlink results/$MACHINE/${KERNEL_IMAGE_NAME}`"
