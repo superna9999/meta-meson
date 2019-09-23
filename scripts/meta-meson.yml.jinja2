@@ -28,7 +28,7 @@ actions:
     to: tftp
     kernel:
       url: {{ base_artifacts_url }}/{{ kernel_image_name }}
-      type: image
+      type: {{ kernel_image_type }}
     ramdisk:
       url: {{ base_artifacts_url }}/{{ ramdisk_name }}
       compression: {{ ramdisk_compression }}

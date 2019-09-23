@@ -6,6 +6,7 @@ LABEL Description=" This image is for building meta-meson inside a container"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Update packages
+RUN dpkg --add-architecture i386
 RUN apt-get update -qq
 
 # Install OE dependencies
@@ -18,8 +19,11 @@ RUN apt-get install -qq git
 RUN apt-get install -qq python3-pip
 RUN pip3 install lavacli
 
+# Add missing libz for linaro gcc
+RUN apt-get install -qq zlib1g:i386
+
 # Setup system
-RUN apt-get install locales
+RUN apt-get install -qq locales
 RUN locale-gen en_US.UTF-8
 RUN update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 
