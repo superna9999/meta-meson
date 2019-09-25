@@ -114,13 +114,13 @@ gen:libretech-cc:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:hardkernel-odroidc2:
-  extends: .gen
-  variables:
-    DEVICE_TYPE: "meson-gxbb-odroidc2"
-    DTB_NAME: "meson-gxbb-odroidc2.dtb"
-    BOOT_METHOD: "u-boot"
-    LAVA_TAGS: ""
+#gen:hardkernel-odroidc2:
+#  extends: .gen
+#  variables:
+#    DEVICE_TYPE: "meson-gxbb-odroidc2"
+#    DTB_NAME: "meson-gxbb-odroidc2.dtb"
+#    BOOT_METHOD: "u-boot"
+#    LAVA_TAGS: ""
 
 gen:hardkernel-odroid-n2:
   extends: .gen
@@ -199,16 +199,16 @@ run:libretech-cc:
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
 
-run:hardkernel-odroidc2:
-  extends: .run
-  needs: ["build:initrd", "gen:hardkernel-odroidc2"]
-  dependencies:
-    - gen:hardkernel-odroidc2
-  tags:
-    - lava-meson-gxbb-odroidc2
-  variables:
-    DEVICE_TYPE: "meson-gxbb-odroidc2"
-  allow_failure: true
+#run:hardkernel-odroidc2:
+#  extends: .run
+#  needs: ["build:initrd", "gen:hardkernel-odroidc2"]
+#  dependencies:
+#    - gen:hardkernel-odroidc2
+#  tags:
+#    - lava-meson-gxbb-odroidc2
+#  variables:
+#    DEVICE_TYPE: "meson-gxbb-odroidc2"
+#  allow_failure: true
 
 run:hardkernel-odroid-n2:
   extends: .run
