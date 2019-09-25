@@ -91,7 +91,8 @@ build:initrd:
     - lavacli jobs show $lava_job_id
     - lavacli results $lava_job_id
     - status=`lavacli jobs show $lava_job_id | grep Finished | wc -l`
-    - '[[ "$status" -gt 0 ]]'
+    - fails=`lavacli results $lava_job_id | grep fail | wc -l`
+    - '[[ "$status" -gt 0 ]] && [[ "$fails" -eq 0 ]]'
   artifacts:
     when: always
     paths:
