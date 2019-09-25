@@ -90,9 +90,12 @@ build:initrd:
     - lavacli jobs logs $lava_job_id | grep -a -v "{'case':" | tee results/$DEVICE_TYPE.log
     - lavacli jobs show $lava_job_id
     - lavacli results $lava_job_id
-    - status=`lavacli jobs show $lava_job_id | grep Finished | wc -l`
-    - fails=`lavacli results $lava_job_id | grep fail | wc -l`
-    - '[[ "$status" -gt 0 ]] && [[ "$fails" -eq 0 ]]'
+    - status=`lavacli jobs show $lava_job_id | grep -c Finished` || echo Failed
+    - echo status $status
+    - '[[ "$status" -gt 0 ]]'
+    - fails=`lavacli results $lava_job_id | grep -c fail` || echo Success
+    - echo fails $fails
+    - '[[ "$fails" -eq 0 ]]'
   artifacts:
     when: always
     paths:
