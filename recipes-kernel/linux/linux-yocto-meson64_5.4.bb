@@ -6,8 +6,8 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
 DEPENDS += "rsync-native"
 
-SRCREV_meson = "36b6fcd80ddd03b1f3d8453cfbeb466a39bf0f2d"
-LINUX_VERSION = "5.4-rc1"
+SRCREV_meson = "a9e4990fa2c2b7defc47a0053371e5691d80fcdb"
+LINUX_VERSION = "5.4-rc8+media+vdec"
 
 # Linux stable tree
 SRC_URI = "git://github.com/superna9999/linux.git;protocol=https;branch=amlogic/v5.6/vdec-g12a;name=meson \
