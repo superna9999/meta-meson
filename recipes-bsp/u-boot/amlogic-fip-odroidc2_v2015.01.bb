@@ -4,11 +4,11 @@ PROVIDES = "amlogic-fip"
 LICENSE = "Proprietary"
 LIC_FILES_CHKSUM = "file://fip/bl2_fix.sh;md5=c7864e97af857505ef162eac95c799d0"
 
-UBOOT_GIT_REV = "95264d19d04930f67f10f162df70de447659329"
+UBOOT_GIT_REV = "95264d19d04930f67f10f162df70de447659329d"
 
 SRC_URI = "https://github.com/hardkernel/u-boot/archive/${UBOOT_GIT_REV}.tar.gz"
-SRC_URI[md5sum] = "76ea3b34010b56640e8f1deaf28b29c3"
-SRC_URI[sha256sum] = "440cbb4f48251383b1eeef7306d891b502aaf48e2c923833992e1e901ea230bf"
+SRC_URI[md5sum] = "abd2efb3da04104ccad3af83a677e351"
+SRC_URI[sha256sum] = "15fa9539af6c88d930ddda4c5b6e1661f16516030bd3b849370212e307529060"
 
 S = "${WORKDIR}/u-boot-${UBOOT_GIT_REV}/"
 
