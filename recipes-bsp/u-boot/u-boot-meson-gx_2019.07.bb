@@ -24,7 +24,7 @@ deploy_axg () {
 			 ${FIPDIR}/bl301.bin \
 			 ${DESTDIR}/bl301_zero.bin \
 			 ${DESTDIR}/bl30_new.bin bl30
-    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+    ${RECIPE_SYSROOT_NATIVE}/usr/bin/python-native/python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
 				  ${DESTDIR}/bl2_acs.bin \
 				  ${FIPDIR}/acs.bin 0
     ${FIPDIR}/blx_fix.sh ${DESTDIR}/bl2_acs.bin \
@@ -75,7 +75,7 @@ deploy_gxbb () {
 			 --bl33 ${DESTDIR}/bl33.bin \
 			 ${DESTDIR}/fip.bin
 
-    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+    ${RECIPE_SYSROOT_NATIVE}/usr/bin/python-native/python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
 				  ${DESTDIR}/bl2_acs.bin \
 				  ${FIPDIR}/acs.bin 0
 
@@ -115,7 +115,7 @@ deploy_gxl () {
 			 ${FIPDIR}/bl301.bin \
 			 ${DESTDIR}/bl301_zero.bin \
 			 ${DESTDIR}/bl30_new.bin bl30
-    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+    ${RECIPE_SYSROOT_NATIVE}/usr/bin/python-native/python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
 				  ${DESTDIR}/bl2_acs.bin \
 				  ${FIPDIR}/acs.bin 0
     ${FIPDIR}/blx_fix.sh ${DESTDIR}/bl2_acs.bin \
