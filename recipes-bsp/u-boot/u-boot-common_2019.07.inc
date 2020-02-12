@@ -12,3 +12,4 @@ SRCREV = "75551c8bfc9545e31ec2ce238cac3857904007b8"
 SRC_URI = "git://git.denx.de/u-boot.git"
 
 S = "${WORKDIR}/git"
+B = "${WORKDIR}/build"
