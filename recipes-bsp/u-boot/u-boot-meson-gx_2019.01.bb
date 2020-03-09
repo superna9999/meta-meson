@@ -1,13 +1,17 @@
 require u-boot-common_${PV}.inc
 require recipes-bsp/u-boot/u-boot.inc
 
-DEPENDS += "bison-native bc-native dtc-native python-native amlogic-fip"
+DEPENDS += "bison-native bc-native dtc-native python3-native amlogic-fip"
 
 PROVIDES = "u-boot"
 
 SRC_URI_append_meson-axg = " \
 	file://0001-board-meson-s400-enable-eMMC-when-booting-from-it.patch \
-	"
+"
+
+SRC_URI_append = " \
+	file://acs_tool.py \
+"
 
 deploy_axg () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
@@ -24,7 +28,7 @@ deploy_axg () {
 			 ${FIPDIR}/bl301.bin \
 			 ${DESTDIR}/bl301_zero.bin \
 			 ${DESTDIR}/bl30_new.bin bl30
-    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+    python3 ${WORKDIR}/acs_tool.py ${FIPDIR}/bl2.bin \
 				  ${DESTDIR}/bl2_acs.bin \
 				  ${FIPDIR}/acs.bin 0
     ${FIPDIR}/blx_fix.sh ${DESTDIR}/bl2_acs.bin \
@@ -75,7 +79,7 @@ deploy_gxbb () {
 			 --bl33 ${DESTDIR}/bl33.bin \
 			 ${DESTDIR}/fip.bin
 
-    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+    python3 ${WORKDIR}/acs_tool.py ${FIPDIR}/bl2.bin \
 				  ${DESTDIR}/bl2_acs.bin \
 				  ${FIPDIR}/acs.bin 0
 
@@ -115,7 +119,7 @@ deploy_gxl () {
 			 ${FIPDIR}/bl301.bin \
 			 ${DESTDIR}/bl301_zero.bin \
 			 ${DESTDIR}/bl30_new.bin bl30
-    python ${FIPDIR}/acs_tool.pyc ${FIPDIR}/bl2.bin \
+    python3 ${WORKDIR}/acs_tool.py ${FIPDIR}/bl2.bin \
 				  ${DESTDIR}/bl2_acs.bin \
 				  ${FIPDIR}/acs.bin 0
     ${FIPDIR}/blx_fix.sh ${DESTDIR}/bl2_acs.bin \
