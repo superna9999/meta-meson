@@ -16,8 +16,6 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
            file://0002-FROMLIST-dt-bindings-thermal-Add-DT-bindings-documen.patch \
            file://0003-FROMLIST-thermal-amlogic-Add-thermal-driver-to-suppo.patch \
            file://0004-FROMLIST-arm64-dts-amlogic-g12-add-temperature-senso.patch \
-           file://0005-FROMLIST-arm64-dts-meson-sei510-Add-minimal-thermal-.patch \
-           file://0006-FROMLIST-arm64-dts-amlogic-odroid-n2-add-minimal-the.patch \
            file://0007-FROMLIST-MAINTAINERS-add-entry-for-Amlogic-Thermal-d.patch \
            file://0008-FROMLIST-reset-dt-bindings-meson-update-arb-bindings.patch \
            file://0009-FROMLIST-reset-meson-audio-arb-add-sm1-support.patch \
