@@ -1,4 +1,4 @@
-From f00c236737143a10d083e2c037468e2adcd6d002 Mon Sep 17 00:00:00 2001
+From afeaee10d8c6e669cfa3e21e7e5d62156a2a6f67 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Mon, 17 Dec 2018 14:25:45 +0100
 Subject: [PATCH] board: meson: s400: enable eMMC when booting from it
@@ -8,7 +8,7 @@ Subject: [PATCH] board: meson: s400: enable eMMC when booting from it
  1 file changed, 26 insertions(+)
 
 diff --git a/board/amlogic/s400/s400.c b/board/amlogic/s400/s400.c
-index 02a0e9286cb1..322425b13628 100644
+index bdb4eca883..524f21277b 100644
 --- a/board/amlogic/s400/s400.c
 +++ b/board/amlogic/s400/s400.c
 @@ -6,6 +6,7 @@
@@ -16,10 +16,10 @@ index 02a0e9286cb1..322425b13628 100644
  #include <common.h>
  #include <dm.h>
 +#include <fdt.h>
- #include <environment.h>
  #include <asm/io.h>
  #include <asm/arch/axg.h>
-@@ -19,3 +20,28 @@ int misc_init_r(void)
+ #include <asm/arch/sm.h>
+@@ -18,3 +19,28 @@ int misc_init_r(void)
  
  	return 0;
  }
@@ -48,6 +48,3 @@ index 02a0e9286cb1..322425b13628 100644
 +{
 +	return meson_s400_check_emmc(blob);
 +}
--- 
-2.19.2
-
