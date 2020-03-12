@@ -2,10 +2,15 @@
 # Linux Support for 32bit Amlogic Meson SoCs
 #
 
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
+
 KERNEL_CLASSES = "kernel-uimage-meson"
 
 # Linux stable tree
-SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=git;nocheckout=1;branch=linux-5.4.y;name=meson"
+SRC_URI = " \
+	git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=git;nocheckout=1;branch=linux-5.4.y;name=meson \
+	file://defconfig \
+"
 
 # tag: v5.4.24
 SRCREV_meson = "cff670b3eb68257029e2977a6bfeac7d9b829e9a"
