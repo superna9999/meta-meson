@@ -5,6 +5,7 @@ LICENSE = "GPLv2+"
 PE = "1"
 
 S = "${WORKDIR}/git"
+B = "${WORKDIR}/build"
 
 LIC_FILES_CHKSUM = "file://Licenses/README;md5=c7383a594871c03da76b3707929d2919"
 
@@ -19,6 +20,7 @@ SRC_URI = "git://github.com/khadas/u-boot.git;branch=khadas-vims-nougat-multios 
            file://0002-fix-build-error-under-gcc6.patch \
            file://0003-fix-s3c-udc-otg-build.patch \
            file://0004-remove-warnings-errors.patch \
+	   file://acs_tool.py \
            "
 
 EXTRA_OEMAKE = 'CROSS_COMPILE=aarch64-linux-gnu- V=1'
@@ -28,4 +30,8 @@ do_compile_prepend() {
 	export PATH=${S}/../gcc-arm-none-eabi-4_9-2015q3/bin:$PATH
 	export PATH=${S}/../gcc-linaro-aarch64-linux-gnu-4.9-2014.09_linux/bin:$PATH
 	(cd ${S} ; ln -s ${B} build)
+	[ -e ${S}/fip/acs_tool.pyc ] && rm ${S}/fip/acs_tool.pyc
+	cp ${WORKDIR}/acs_tool.py ${S}/fip/
+	sed -i "s,python,python3," ${S}/Makefile
+	sed -i "s,acs_tool.pyc,acs_tool.py," ${S}/Makefile
 }
