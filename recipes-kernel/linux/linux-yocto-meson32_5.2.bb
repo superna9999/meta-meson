@@ -2,10 +2,16 @@
 # Linux Support for 32bit Amlogic Meson SoCs
 #
 
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
+
 KERNEL_CLASSES = "kernel-uimage-meson"
 
 # Linux stable tree
-SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=git;nocheckout=1;branch=linux-5.2.y;name=meson"
+SRC_URI = " \
+	git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;protocol=git;nocheckout=1;branch=linux-5.2.y;name=meson \
+	file://0001-UPSTREAM-drm-rcar-du-Fix-build-error.patch \
+"
+
 
 # tag: v4.20.3
 SRCREV_meson = "c3915fe1bf1235dbf3b0bced734c960202915bd5"
