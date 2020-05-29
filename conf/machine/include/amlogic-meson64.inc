@@ -6,10 +6,12 @@ KERNEL_IMAGETYPE ?= "Image"
 
 MACHINE_FEATURES_BACKFILL_CONSIDERED = "rtc"
 
-PREFERRED_PROVIDER_virtual/kernel ?= "linux-yocto-meson64"
+PREFERRED_PROVIDER_virtual/kernel ?= "linux-meson64"
 
 SOC_FAMILY = "amlogic:meson-gx"
 require conf/machine/include/soc-family.inc
 
 DEFAULTTUNE ?= "aarch64"
 require conf/machine/include/arm/arch-armv8a.inc
+
+KERNEL_CLASSES_meson-gx ?= "kernel-uimage-meson"
