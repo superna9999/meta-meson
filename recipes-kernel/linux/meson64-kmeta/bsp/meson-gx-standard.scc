@@ -1,0 +1,11 @@
+define KMACHINE meson-gx
+define KTYPE standard
+define KARCH arm64
+
+include ktypes/standard/standard.scc
+
+kconf hardware meson-gx.cfg
+
+# Standard profiles pulled in from upstream kmeta
+include cfg/usb-mass-storage.scc
+
