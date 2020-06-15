@@ -32,6 +32,6 @@ do_compile_prepend() {
 	(cd ${S} ; ln -s ${B} build)
 	[ -e ${S}/fip/acs_tool.pyc ] && rm ${S}/fip/acs_tool.pyc
 	cp ${WORKDIR}/acs_tool.py ${S}/fip/
-	sed -i "s,python,python3," ${S}/Makefile
+	sed -i "s,python ,python3 ," ${S}/Makefile
 	sed -i "s,acs_tool.pyc,acs_tool.py," ${S}/Makefile
 }

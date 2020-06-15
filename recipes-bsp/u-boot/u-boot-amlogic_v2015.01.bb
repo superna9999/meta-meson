@@ -1,4 +1,4 @@
-require recipes-bsp/u-boot/u-boot.inc
+require u-boot-amlogic.inc
 require u-boot-amlogic-common_${PV}.inc
 
 COMPATIBLE_MACHINE_amlogic-p200 = "amlogic-p200"
