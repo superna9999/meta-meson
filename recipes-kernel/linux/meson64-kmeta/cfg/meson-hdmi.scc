@@ -1,0 +1,3 @@
+define KFEATURE_DESCRIPTION "Enable HDMI support for meson kernels"
+
+kconf hardware meson-hdmi.cfg
