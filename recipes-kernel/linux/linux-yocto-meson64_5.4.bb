@@ -88,6 +88,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
            file://0065-FROMLIST-media-meson-vdec-add-VP9-decoder-support.patch \
            file://0066-FROMLIST-arm64-dts-meson-g12g12-add-syscon-phandle-i.patch \
            file://0067-FROMLIST-media-platform-meson-ao-cec-g12a-add-wakeup.patch \
+           file://0068-UPSTREAM-perf-Make-perf-able-to-build-with-latest-libbfd.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
