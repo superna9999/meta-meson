@@ -8,4 +8,4 @@ setenv start_usb_autoscript "if fatload usb 0 1020000 s905_autoscript; then auto
 setenv upgrade_step "2"
 saveenv
 sleep 1
-reboot
+reset
