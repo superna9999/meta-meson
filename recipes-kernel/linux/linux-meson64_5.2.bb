@@ -243,6 +243,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
            file://0231-TEMP-drm-panfrost-kernel-driver-fix-1-2.patch \
            file://0232-TEMP-drm-panfrost-kernel-driver-fix-2-2.patch \
            file://0001-clk-Fix-potential-NULL-dereference-in-clk_fetch_pare.patch \
+           file://0233-UPSTREAM-perf-Make-perf-able-to-build-with-latest-libbfd.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
