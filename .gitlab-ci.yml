@@ -41,7 +41,7 @@ build:initrd:
     - mkdir -p results
     - rm -rf /tmp/build_env
     - git clone git://github.com/openembedded/openembedded-core --branch=dunfell --depth=1 /tmp/build_env
-    - git clone git://github.com/openembedded/bitbake --branch=1.43.2 --depth=1 /tmp/build_env/bitbake
+    - git clone git://github.com/openembedded/bitbake --branch=1.46.0 --depth=1 /tmp/build_env/bitbake
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
