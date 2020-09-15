@@ -101,7 +101,7 @@ build:initrd:
     paths:
       - results/
 
-gen:libretech-ac:
+.gen:libretech-ac:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s805x-libretech-ac"
@@ -157,7 +157,7 @@ gen:amlogic-p230:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:amlogic-p241:
+.gen:amlogic-p241:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s805x-p241"
@@ -181,7 +181,7 @@ gen:amediatech-x96-max:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-run:libretech-ac:
+.run:libretech-ac:
   extends: .run
   needs: ["build:initrd", "gen:libretech-ac"]
   dependencies:
@@ -201,6 +201,7 @@ run:libretech-cc:
     - lava-meson-gxl-s905x-libretech-cc
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
+  allow_failure: true
 
 #run:hardkernel-odroidc2:
 #  extends: .run
@@ -255,7 +256,7 @@ run:amlogic-p230:
     DEVICE_TYPE: "meson-gxl-s905d-p230"
   allow_failure: true
 
-run:amlogic-p241:
+.run:amlogic-p241:
   extends: .run
   needs: ["build:initrd", "gen:amlogic-p241"]
   dependencies:
