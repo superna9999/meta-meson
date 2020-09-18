@@ -5,10 +5,6 @@ DEPENDS += "bison-native bc-native dtc-native python3-native amlogic-fip"
 
 PROVIDES = "u-boot"
 
-SRC_URI_append_meson-axg = " \
-       file://0001-board-meson-s400-enable-eMMC-when-booting-from-it.patch \
-"
-
 SRC_URI_append = " \
 	file://acs_tool.py \
 "
