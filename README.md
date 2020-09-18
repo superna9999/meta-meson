@@ -108,7 +108,8 @@ Available S922X machines are :
  - hardkernel-odroidn2: .wic image to be booted using vendor u-boot
 
 Available A311D machines are :
- - khadas-vim3: .wic image to be booted using vendor u-boot
+ - khadas-vim : complete bootable .wic sdcard image with mainline U-boot
+ - khadas-vim3-sdboot : .wic image to be booted using vendor u-boot
 
 Available S9xxx machines are :
  - amlogic-s9xxx (all S905 and S905X and S912 machines) : generic non-bootable .wic image to be customized
