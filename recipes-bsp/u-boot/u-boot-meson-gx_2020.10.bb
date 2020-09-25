@@ -3,7 +3,7 @@ require recipes-bsp/u-boot/u-boot.inc
 
 DEPENDS += "bison-native bc-native dtc-native python3-native amlogic-fip"
 
-PROVIDES = "u-boot"
+PROVIDES = "u-boot virtual/bootloader"
 
 SRC_URI_append = " \
 	file://acs_tool.py \
