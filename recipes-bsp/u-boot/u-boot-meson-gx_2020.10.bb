@@ -7,6 +7,7 @@ PROVIDES = "u-boot virtual/bootloader"
 
 SRC_URI_append = " \
 	file://acs_tool.py \
+	file://fit.cfg \
 "
 
 deploy_axg () {
