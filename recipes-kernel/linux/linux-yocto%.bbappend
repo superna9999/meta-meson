@@ -13,5 +13,8 @@ SERIAL_CONSOLES = "115200;ttyAML0"
 KERNEL_FEATURES_append = "${@bb.utils.contains_any('DISTRO_FEATURES', 'x11 wayland', \
     ' cfg/meson-hdmi.scc', '', d)}"
 
+KERNEL_FEATURES_append = "${@bb.utils.contains('DISTRO_FEATURES', 'pci', \
+    ' cfg/meson-pci.scc', '', d)}"
+
 # Enable virt options, needed for docker, LXC, etc.
 include ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', 'recipes-kernel/linux/linux-yocto_virtualization.inc', '', d)}
