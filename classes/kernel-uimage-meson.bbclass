@@ -11,7 +11,7 @@ python __anonymous () {
 
 do_uboot_mkimage() {
 	if test "x${KERNEL_IMAGETYPE}" = "xuImage" ; then
-		uboot-mkimage -A ${UBOOT_ARCH} -O linux -T kernel -C none -a ${UBOOT_LOADADDRESS} -e ${UBOOT_ENTRYSYMBOL} -n "${DISTRO_NAME}/${PV}/${MACHINE}" -d ${B}/arch/${ARCH}/boot/Image ${B}/arch/${ARCH}/boot/uImage
+		uboot-mkimage -A ${UBOOT_ARCH} -O linux -T kernel -C none -a ${UBOOT_LOADADDRESS} -e ${UBOOT_ENTRYPOINT} -n "${DISTRO_NAME}/${PV}/${MACHINE}" -d ${B}/arch/${ARCH}/boot/Image ${B}/arch/${ARCH}/boot/uImage
 	fi
 }
 
