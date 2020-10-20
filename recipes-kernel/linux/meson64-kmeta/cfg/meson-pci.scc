@@ -1,0 +1,5 @@
+define KFEATURE_DESCRIPTION "Enable PCI support for meson kernels"
+
+#include features/pci/pci.scc
+
+kconf hardware meson-pci.cfg
