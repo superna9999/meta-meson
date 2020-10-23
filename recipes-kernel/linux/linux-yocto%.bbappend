@@ -2,7 +2,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}:"
 
 SRC_URI += "file://meson64-kmeta;type=kmeta;destsuffix=meson64-kmeta"
 
-COMPATIBLE_MACHINE_append_meson-gx = "|khadas-vim3"
+COMPATIBLE_MACHINE_append_meson-gx = "|amlogic-fit|khadas-vim3"
 KMACHINE_meson-gx = "meson-gx"
 
 LINUX_VERSION_EXTENSION_append_meson-gx = "-meson64"
