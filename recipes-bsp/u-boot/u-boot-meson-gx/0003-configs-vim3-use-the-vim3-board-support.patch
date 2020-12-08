@@ -1,0 +1,30 @@
+cb4a7feb54b5 configs: vim3: use the vim3 board support
+ configs/khadas-vim3_defconfig  | 2 +-
+ configs/khadas-vim3l_defconfig | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/configs/khadas-vim3_defconfig b/configs/khadas-vim3_defconfig
+index a39e0f9c9f54..ee5990426d83 100644
+--- a/configs/khadas-vim3_defconfig
++++ b/configs/khadas-vim3_defconfig
+@@ -1,5 +1,5 @@
+ CONFIG_ARM=y
+-CONFIG_SYS_BOARD="w400"
++CONFIG_SYS_BOARD="vim3"
+ CONFIG_ARCH_MESON=y
+ CONFIG_SYS_TEXT_BASE=0x01000000
+ CONFIG_NR_DRAM_BANKS=1
+diff --git a/configs/khadas-vim3l_defconfig b/configs/khadas-vim3l_defconfig
+index 57cc383b9d28..5729d339e9a3 100644
+--- a/configs/khadas-vim3l_defconfig
++++ b/configs/khadas-vim3l_defconfig
+@@ -1,5 +1,5 @@
+ CONFIG_ARM=y
+-CONFIG_SYS_BOARD="w400"
++CONFIG_SYS_BOARD="vim3"
+ CONFIG_ARCH_MESON=y
+ CONFIG_SYS_TEXT_BASE=0x01000000
+ CONFIG_NR_DRAM_BANKS=1
+-- 
+2.28.0
+
