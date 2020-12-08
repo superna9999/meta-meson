@@ -113,7 +113,8 @@ Available A311D machines are :
  - khadas-vim3-sdboot : .wic image to be booted using vendor u-boot
 
 Available S905X3/D3 machines are :
- - khadas-vim3l : .wic image to be booted using vendor u-boot
+ - khadas-vim3l : complete bootable .wic sdcard image with mainline U-boot
+ - khadas-vim3l-sdboot : .wic image to be booted using vendor u-boot
  - seirobotics-sei610: .wic image to be booted using vendor u-boot
 
 Available S9xxx machines are :
