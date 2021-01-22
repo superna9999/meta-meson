@@ -1,4 +1,4 @@
-FROM ubuntu:xenial-20190720
+FROM ubuntu:focal
 MAINTAINER Neil Armstrong <narmstrong@baylibre.com>
 LABEL Description=" This image is for building meta-meson inside a container"
 
@@ -10,7 +10,7 @@ RUN dpkg --add-architecture i386
 RUN apt-get update -qq
 
 # Install OE dependencies
-RUN apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib build-essential chrpath socat libsdl1.2-dev xterm python2.7 python-minimal cpio python3
+RUN apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib build-essential chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa libsdl1.2-dev pylint3 xterm python3-subunit mesa-common-dev
     
 # Install git
 RUN apt-get install -qq git
