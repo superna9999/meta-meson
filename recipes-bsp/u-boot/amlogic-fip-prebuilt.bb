@@ -12,6 +12,7 @@ COMPATIBLE_MACHINE_khadas-vim3l = "khadas-vim3l"
 COMPATIBLE_MACHINE_amlogic-p212 = "amlogic-p212"
 COMPATIBLE_MACHINE_friendlyelec-nanopik2 = "friendlyelec-nanopik2"
 COMPATIBLE_MACHINE_amlogic-s400 = "amlogic-s400"
+COMPATIBLE_MACHINE_amlogic-p200 = "amlogic-p200"
 
 SUBDIR_libretech-cc = "lepotato"
 SUBDIR_libretech-ac = "lafrite"
@@ -22,6 +23,7 @@ SUBDIR_khadas-vim3l = "khadas-vim3l"
 SUBDIR_amlogic-p212 = "p212"
 SUBDIR_friendlyelec-nanopik2 = "nanopi-k2"
 SUBDIR_amlogic-s400 = "s400"
+SUBDIR_amlogic-p200 = "p200"
 
 DEPLOY_CMD_libretech-cc = "do_deploy_gxl"
 DEPLOY_CMD_libretech-ac = "do_deploy_gxl"
@@ -32,6 +34,7 @@ DEPLOY_CMD_khadas-vim3 = "do_deploy_g12b"
 DEPLOY_CMD_khadas-vim3l = "do_deploy_g12a"
 DEPLOY_CMD_friendlyelec-nanopik2 = "do_deploy_gxbb"
 DEPLOY_CMD_amlogic-s400="do_deploy_axg"
+DEPLOY_CMD_amlogic-p200="do_deploy_gxbb"
 
 LIC_FILES_CHKSUM = "file://lepotato/blx_fix.sh;md5=12ad2eef4a1dcc98f9eda15224b92836"
 
