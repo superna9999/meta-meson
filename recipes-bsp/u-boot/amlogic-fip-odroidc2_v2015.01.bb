@@ -10,7 +10,7 @@ SRC_URI = "https://github.com/hardkernel/u-boot/archive/${UBOOT_GIT_REV}.tar.gz"
 SRC_URI[md5sum] = "abd2efb3da04104ccad3af83a677e351"
 SRC_URI[sha256sum] = "15fa9539af6c88d930ddda4c5b6e1661f16516030bd3b849370212e307529060"
 
-S = "${WORKDIR}/u-boot-${UBOOT_GIT_REV}/"
+S = "${WORKDIR}/u-boot-${UBOOT_GIT_REV}"
 
 inherit deploy
 
