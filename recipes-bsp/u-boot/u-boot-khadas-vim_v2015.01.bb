@@ -7,7 +7,7 @@ PROVIDES =+ "u-boot"
 
 COMPATIBLE_MACHINE = "khadas-vim"
 
-do_deploy_append () {
+do_deploy:append () {
     install ${S}/fip/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
 }
 

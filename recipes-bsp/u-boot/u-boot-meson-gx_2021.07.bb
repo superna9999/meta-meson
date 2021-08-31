@@ -5,7 +5,7 @@ DEPENDS += "bison-native bc-native dtc-native python3-native amlogic-fip"
 
 PROVIDES = "u-boot virtual/bootloader"
 
-SRC_URI_append = " \
+SRC_URI:append = " \
 	file://acs_tool.py \
 	file://fit.cfg \
 "
@@ -344,14 +344,14 @@ deploy_g12b () {
     install ${DESTDIR}/u-boot.bin.usb.tpl ${DEPLOYDIR}/u-boot.bin.usb.tpl
 }
 
-DEPLOY_COMMAND_meson-axg = "deploy_axg"
-DEPLOY_COMMAND_meson-g12a = "deploy_g12a"
-DEPLOY_COMMAND_meson-sm1 = "deploy_g12a"
-DEPLOY_COMMAND_meson-g12b = "deploy_g12b"
-DEPLOY_COMMAND_meson-gxl = "deploy_gxl"
-DEPLOY_COMMAND_meson-gxbb = "deploy_gxbb"
-DEPLOY_COMMAND_hardkernel-odroidc2 = "deploy_odroidc2"
+DEPLOY_COMMAND:meson-axg = "deploy_axg"
+DEPLOY_COMMAND:meson-g12a = "deploy_g12a"
+DEPLOY_COMMAND:meson-sm1 = "deploy_g12a"
+DEPLOY_COMMAND:meson-g12b = "deploy_g12b"
+DEPLOY_COMMAND:meson-gxl = "deploy_gxl"
+DEPLOY_COMMAND:meson-gxbb = "deploy_gxbb"
+DEPLOY_COMMAND:hardkernel-odroidc2 = "deploy_odroidc2"
 
-do_deploy_append_meson-gx () {
+do_deploy:append:meson-gx () {
 	${DEPLOY_COMMAND}
 }

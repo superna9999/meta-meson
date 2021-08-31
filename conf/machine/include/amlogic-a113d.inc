@@ -4,4 +4,4 @@ require conf/machine/include/amlogic-meson64.inc
 
 MACHINE_FEATURES = "serial usbhost sdio wifi alsa"
 
-SOC_FAMILY_append = ":meson-axg"
+SOC_FAMILY:append = ":meson-axg"

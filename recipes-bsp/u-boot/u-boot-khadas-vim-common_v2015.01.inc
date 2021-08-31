@@ -26,7 +26,7 @@ SRC_URI = "git://github.com/khadas/u-boot.git;branch=khadas-vims-nougat-multios 
 EXTRA_OEMAKE = 'CROSS_COMPILE=aarch64-linux-gnu- V=1'
 EXTRA_OEMAKE += 'HOSTCC="${BUILD_CC} ${BUILD_CFLAGS} ${BUILD_LDFLAGS}"'
 
-do_compile_prepend() {
+do_compile:prepend() {
 	export PATH=${S}/../gcc-arm-none-eabi-4_9-2015q3/bin:$PATH
 	export PATH=${S}/../gcc-linaro-aarch64-linux-gnu-4.9-2014.09_linux/bin:$PATH
 	(cd ${S} ; ln -s ${B} build)

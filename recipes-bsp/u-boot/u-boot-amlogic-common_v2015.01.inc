@@ -26,7 +26,7 @@ SRC_URI = "${SRCREPO};branch=${SRCBRANCH} \
 EXTRA_OEMAKE = 'V=1'
 EXTRA_OEMAKE += 'HOSTCC="${BUILD_CC} ${BUILD_CFLAGS} ${BUILD_LDFLAGS}"'
 
-do_compile_prepend() {
+do_compile:prepend() {
 	export PATH=${S}/../gcc-linaro-aarch64-none-elf-4.8-2013.11_linux/bin:$PATH
 	export PATH=${S}/../gcc-linaro-arm-none-eabi-4.8-2013.11_linux/bin:$PATH
 	(cd ${S} ; ln -s ${B} build)

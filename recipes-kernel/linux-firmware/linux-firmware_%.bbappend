@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
 	git://github.com/LibreELEC/brcmfmac_sdio-firmware.git;protocol=https;branch=master;name=brcmfmac-sdio-firmware;destsuffix=brcmfmac_sdio-firmware \
@@ -7,7 +7,7 @@ SRC_URI += " \
 
 SRCREV_brcmfmac-sdio-firmware = "3ddc301c272f081aa5513c1934f6d530bf80de4a"
 
-do_install_append() {
+do_install:append() {
 	for f in ${WORKDIR}/brcmfmac_sdio-firmware/*.txt ${WORKDIR}/brcmfmac_sdio-firmware/*.bin; do
 	        install -m 0644 $f ${D}${nonarch_base_libdir}/firmware/brcm
 	done

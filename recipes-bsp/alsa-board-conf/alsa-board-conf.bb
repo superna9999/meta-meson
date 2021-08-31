@@ -11,4 +11,4 @@ do_install() {
 	install -m 0644 ${WORKDIR}/board.conf ${D}${datadir}/alsa/alsa.conf.d/board.conf
 }
 
-FILES_${PN} = "${sysconfdir} ${datadir}/alsa/alsa.conf.d"
+FILES:${PN} = "${sysconfdir} ${datadir}/alsa/alsa.conf.d"

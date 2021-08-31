@@ -13,6 +13,6 @@ PROVIDES =+ "u-boot"
 
 DEPENDS += "bc-native"
 
-do_deploy_append () {
+do_deploy:append () {
     install ${S}/fip/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
 }

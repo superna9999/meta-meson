@@ -2,7 +2,7 @@
 # Linux Support for 64bit Amlogic Meson SoCs
 #
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
 
 DEPENDS += "rsync-native"
 
@@ -95,7 +95,7 @@ KERNEL_VERSION_SANITY_SKIP="1"
 
 KERNEL_CLASSES = "kernel-uimage-meson"
 
-LINUX_VERSION_EXTENSION_append = "-meson64"
+LINUX_VERSION_EXTENSION:append = "-meson64"
 
 KERNEL_CONFIG_COMMAND ?= "oe_runmake_call -C ${S} CC="${KERNEL_CC}" O=${B} olddefconfig"
 

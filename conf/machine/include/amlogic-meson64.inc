@@ -14,4 +14,4 @@ require conf/machine/include/soc-family.inc
 DEFAULTTUNE ?= "aarch64"
 require conf/machine/include/arm/arch-armv8a.inc
 
-KERNEL_CLASSES_meson-gx ?= "kernel-uimage-meson"
+KERNEL_CLASSES:meson-gx ?= "kernel-uimage-meson"
