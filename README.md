@@ -106,8 +106,10 @@ Available S905X2 machines are :
  - seirobotics-sei510: .wic image to be booted using vendor u-boot
 
 Available S922X machines are :
- - hardkernel-odroidn2: .wic image to be booted using vendor u-boot
- - hardkernel-odroidn2plus: .wic image to be booted using vendor u-boot
+ - hardkernel-odroidn2: complete bootable .wic sdcard image with mainline U-boot
+ - hardkernel-odroidn2-sdboot: .wic image to be booted using vendor u-boot
+ - hardkernel-odroidn2plus: complete bootable .wic sdcard image with mainline U-boot
+ - hardkernel-odroidn2plus-sdboot: .wic image to be booted using vendor u-boot
 
 Available A311D machines are :
  - khadas-vim3 : complete bootable .wic sdcard image with mainline U-boot
@@ -117,8 +119,10 @@ Available S905X3/D3 machines are :
  - khadas-vim3l : complete bootable .wic sdcard image with mainline U-boot
  - khadas-vim3l-sdboot : .wic image to be booted using vendor u-boot
  - seirobotics-sei610: .wic image to be booted using vendor u-boot
- - hardkernel-odroidc4: .wic image to be booted using vendor u-boot
- - hardkernel-odroidhc4: .wic image to be booted using vendor u-boot
+ - hardkernel-odroidc4: complete bootable .wic sdcard image with mainline U-boot
+ - hardkernel-odroidc4-sdboot: .wic image to be booted using vendor u-boot
+ - hardkernel-odroidhc4: complete bootable .wic sdcard image with mainline U-boot
+ - hardkernel-odroidhc4-sdboot: .wic image to be booted using vendor u-boot
 
 Available S9xxx machines are :
  - amlogic-s9xxx (all S905 and S905X and S912 machines) : generic non-bootable .wic image to be customized
