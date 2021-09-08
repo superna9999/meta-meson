@@ -8,10 +8,6 @@ PROVIDES = "u-boot virtual/bootloader"
 SRC_URI_append = " \
 	file://acs_tool.py \
 	file://fit.cfg \
-	file://0001-ARM-dts-sync-amlogic-G12A-SM1-DT-from-Linux-5.9-rc1.patch \
-	file://0002-board-amlogic-add-a-vim3-specific-board-support.patch \
-	file://0003-configs-vim3-use-the-vim3-board-support.patch \
-	file://0004-board-amlogic-vim3-add-support-for-dynamic-PCIe-enab.patch \
 "
 
 deploy_axg () {
