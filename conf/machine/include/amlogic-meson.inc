@@ -13,6 +13,7 @@ IMAGE_BOOT_FILES ?= "uImage"
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4354", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4356", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "screen", "linux-firmware-amlogic-vdec", "",d)} \
 "
 
 IMAGE_FSTYPES += "tar.bz2 wic"
