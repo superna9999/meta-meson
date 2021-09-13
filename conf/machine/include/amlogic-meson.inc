@@ -10,6 +10,11 @@ UBOOT_ENTRYPOINT = "0x01080000"
 
 IMAGE_BOOT_FILES ?= "uImage"
 
+XSERVER ?= "\
+	   xserver-xorg \
+           xf86-video-modesetting \
+"
+
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4354", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4356", "",d)} \
