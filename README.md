@@ -58,8 +58,10 @@ Available S805 machines are :
  - amlogic-s805 (all S805 machines) : generic non-bootable .wic image to be customized
 
 Available S905 machines are :
- - amlogic-p200 : .wic image to be booted using vendor u-boot
- - amlogic-p201 : .wic image to be booted using vendor u-boot
+ - amlogic-p200 : complete .wic sdcard image with mainline U-boot
+ - amlogic-p200-sdboot : .wic image to be booted using vendor u-boot
+ - amlogic-p201 : complete .wic sdcard image with mainline U-boot
+ - amlogic-p201-sdboot : .wic image to be booted using vendor u-boot
  - hardkernel-odroidc2 : complete .wic sdcard image with mainline U-boot
  - hardkernel-odroidc2-sdboot : .wic image to be booted using vendor u-boot
  - tronsmart-vega-s95-pro : .wic image to be booted using vendor u-boot
