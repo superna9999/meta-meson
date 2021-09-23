@@ -1,11 +1,13 @@
 # Amlogic Meson SoCs configurations
 
-MACHINE_EXTRA_RRECOMMENDS = " kernel-modules kernel-devicetree"
+MACHINE_EXTRA_RRECOMMENDS ?= " kernel-modules kernel-devicetree"
 
-SERIAL_CONSOLE = "115200 ttyAML0"
+MACHINE_FEATURES ?= "serial"
 
-UBOOT_LOADADDRESS = "0x1080000"
-UBOOT_ENTRYPOINT = "0x01080000"
+SERIAL_CONSOLE ?= "115200 ttyAML0"
+
+UBOOT_LOADADDRESS ?= "0x1080000"
+UBOOT_ENTRYPOINT ?= "0x01080000"
 
 XSERVER ?= "\
 	   xserver-xorg \
@@ -13,6 +15,13 @@ XSERVER ?= "\
 "
 
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4329", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4330", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4335", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43362", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43430", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43430a0", "",d)} \
+       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43455", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4354", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4356", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "screen", "linux-firmware-amlogic-vdec", "",d)} \
