@@ -10,6 +10,14 @@ SRC_URI:append = " \
 	file://fit.cfg \
 "
 
+SRC_URI:sei510:append = " \
+	file://no-android.cfg \
+"
+
+SRC_URI:sei610:append = " \
+	file://no-android.cfg \
+"
+
 deploy_axg () {
     FIPDIR="${DEPLOY_DIR_IMAGE}/fip/"
     DESTDIR="${B}/fip"
