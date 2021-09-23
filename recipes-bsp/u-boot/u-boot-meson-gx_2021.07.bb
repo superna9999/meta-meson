@@ -349,6 +349,7 @@ DEPLOY_COMMAND_meson-g12a = "deploy_g12a"
 DEPLOY_COMMAND_meson-sm1 = "deploy_g12a"
 DEPLOY_COMMAND_meson-g12b = "deploy_g12b"
 DEPLOY_COMMAND_meson-gxl = "deploy_gxl"
+DEPLOY_COMMAND_meson-gxm = "deploy_gxl"
 DEPLOY_COMMAND_meson-gxbb = "deploy_gxbb"
 DEPLOY_COMMAND_hardkernel-odroidc2 = "deploy_odroidc2"
 
