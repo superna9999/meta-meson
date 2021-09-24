@@ -20,5 +20,4 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
 
 # Generate an SDCard Image
 IMAGE_CLASSES += "image_types_meson"
-
-WKS_FILE ?= "sdimage-meson.wks"
+WKS_FILE = "sdimage-meson.wks"

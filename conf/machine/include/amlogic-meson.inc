@@ -29,3 +29,5 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
 
 IMAGE_FSTYPES += "tar.bz2 wic"
 do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
+
+WKS_FILE ?= "sdimage-bootpart-meson.wks"
