@@ -1,5 +1,5 @@
 variables:
-  IMAGE_TAG: "2021-01-22-1"
+  IMAGE_TAG: "2021-09-28-1"
   YOCTO_IMAGE: "amlogic-image-headless-initrd"
   MACHINE_NAME: "amlogic-s9xxx"
   IMAGE_NAME: "uImage"

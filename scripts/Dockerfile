@@ -10,7 +10,7 @@ RUN dpkg --add-architecture i386
 RUN apt-get update -qq
 
 # Install OE dependencies
-RUN apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib build-essential chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa libsdl1.2-dev pylint3 xterm python3-subunit mesa-common-dev
+RUN apt-get install -qq gawk wget git-core diffstat unzip texinfo gcc-multilib build-essential chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa libsdl1.2-dev pylint3 xterm python3-subunit mesa-common-dev zstd lz4
     
 # Install git
 RUN apt-get install -qq git
