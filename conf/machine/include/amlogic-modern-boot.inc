@@ -2,8 +2,8 @@ KERNEL_IMAGETYPE ?= "Image"
 
 IMAGE_BOOT_FILES ?= "${KERNEL_IMAGETYPE}"
 
-PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot-meson-gx"
-PREFERRED_PROVIDER_u-boot ?= "u-boot-meson-gx"
+PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
+PREFERRED_PROVIDER_u-boot ?= "u-boot"
 
 UBOOT_EXTLINUX ?= "1"
 UBOOT_EXTLINUX_CONSOLE ?= "console=ttyAML0"
