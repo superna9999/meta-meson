@@ -1,9 +1,6 @@
-require u-boot-common_${PV}.inc
-require recipes-bsp/u-boot/u-boot.inc
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-DEPENDS += "bison-native bc-native dtc-native python3-native amlogic-fip"
-
-PROVIDES = "u-boot virtual/bootloader"
+DEPENDS += "python3-native amlogic-fip"
 
 SRC_URI:append = " \
 	file://acs_tool.py \
