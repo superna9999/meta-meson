@@ -8,3 +8,5 @@ PREFERRED_PROVIDER_virtual/kernel ?= "linux-yocto-meson32"
 
 SOC_FAMILY = "amlogic:meson8"
 require conf/machine/include/soc-family.inc
+
+MACHINEOVERRIDES =. "meson32all:"
