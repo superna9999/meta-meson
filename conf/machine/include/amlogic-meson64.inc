@@ -9,5 +9,7 @@ PREFERRED_PROVIDER_virtual/kernel ?= "linux-meson64"
 SOC_FAMILY = "amlogic:meson-gx"
 require conf/machine/include/soc-family.inc
 
+MACHINEOVERRIDES =. "meson64all:"
+
 DEFAULTTUNE ?= "aarch64"
 require conf/machine/include/arm/arch-armv8a.inc
