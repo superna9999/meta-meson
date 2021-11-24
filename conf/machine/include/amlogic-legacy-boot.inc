@@ -1,5 +1,7 @@
 KERNEL_IMAGETYPE ?= "uImage"
 
+PREFERRED_PROVIDER_virtual/kernel ?= "linux-meson64"
+
 KERNEL_CLASSES:meson-gx ?= "kernel-uimage-meson"
 
 IMAGE_BOOT_FILES ?= "${KERNEL_IMAGETYPE} \
