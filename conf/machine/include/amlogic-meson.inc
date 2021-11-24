@@ -1,6 +1,6 @@
 # Amlogic Meson SoCs configurations
 
-MACHINE_EXTRA_RRECOMMENDS ?= " kernel-modules kernel-devicetree"
+MACHINE_EXTRA_RRECOMMENDS ?= " kernel-modules"
 
 MACHINE_FEATURES ?= "serial"
 
