@@ -2,6 +2,6 @@
 # long-description: Creates a partitioned SD card image. Boot files
 # are located in the first vfat partition.
 
-part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --align 4096
-
-bootloader --ptable msdos
+part /boot --source bootimg-partition --fstype=vfat --label boot --active --align 4096 --size 64 --sourceparams="loader=u-boot" --use-uuid
+part / --source rootfs --fstype=ext4 --use-uuid --label root --align 4096
+bootloader --ptable msdos --append="console=ttyAML0,115200"
