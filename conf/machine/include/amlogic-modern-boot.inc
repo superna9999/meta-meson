@@ -6,8 +6,9 @@ IMAGE_BOOT_FILES = "${KERNEL_IMAGETYPE}"
 
 PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
 PREFERRED_PROVIDER_u-boot ?= "u-boot"
+PREFERRED_PROVIDER_virtual/trusted-firmware-a ?= "amlogic-boot-fip"
 
-EXTRA_IMAGEDEPENDS += "u-boot"
+EXTRA_IMAGEDEPENDS += "u-boot virtual/trusted-firmware-a"
 
 # Generate an SDCard Image
 IMAGE_CLASSES += "image_types_meson"
