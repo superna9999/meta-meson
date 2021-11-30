@@ -20,7 +20,6 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4335", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43362", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43430", "",d)} \
-       ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43430a0", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm43455", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4354", "",d)} \
        ${@bb.utils.contains("MACHINE_FEATURES", "wifi", "linux-firmware-bcm4356", "",d)} \
