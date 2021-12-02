@@ -8,6 +8,3 @@ SOC_FAMILY = "amlogic:meson-gx"
 require conf/machine/include/soc-family.inc
 
 MACHINEOVERRIDES =. "meson64all:"
-
-DEFAULTTUNE ?= "aarch64"
-require conf/machine/include/arm/arch-armv8a.inc
