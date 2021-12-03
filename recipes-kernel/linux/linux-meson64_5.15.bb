@@ -16,8 +16,6 @@ SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protoc
 
 KERNEL_VERSION_SANITY_SKIP="1"
 
-KERNEL_CLASSES = "kernel-uimage-meson"
-
 LINUX_VERSION_EXTENSION:append = "-meson64"
 
 KERNEL_CONFIG_COMMAND ?= "oe_runmake_call -C ${S} CC="${KERNEL_CC}" O=${B} olddefconfig"
