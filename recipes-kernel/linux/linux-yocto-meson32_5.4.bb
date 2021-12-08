@@ -2,7 +2,7 @@
 # Linux Support for 32bit Amlogic Meson SoCs
 #
 
-FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
 
 KERNEL_CLASSES = "kernel-uimage-meson"
 
@@ -20,7 +20,7 @@ KERNEL_VERSION_SANITY_SKIP="1"
 # Linux stable tree
 LINUX_VERSION = "5.4.24"
 
-LINUX_VERSION_EXTENSION:append = "-meson32"
+LINUX_VERSION_EXTENSION_append = "-meson32"
 KBUILD_DEFCONFIG = "multi_v7_defconfig"
 
 require linux-yocto-meson.inc

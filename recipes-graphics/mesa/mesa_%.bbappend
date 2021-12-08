@@ -1,1 +1,1 @@
-PACKAGECONFIG:append:meson-gx = "kmsro lima panfrost"
+PACKAGECONFIG_append_meson-gx = "kmsro lima panfrost"

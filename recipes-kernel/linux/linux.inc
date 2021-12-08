@@ -34,7 +34,7 @@ kernel_conf_variable() {
     fi
 }
 
-do_configure:prepend() {
+do_configure_prepend() {
     echo "" > ${B}/.config
     CONF_SED_SCRIPT=""
 
@@ -117,15 +117,15 @@ do_configure:prepend() {
     yes '' | oe_runmake -C ${S} O=${B} oldconfig
 }
 
-do_configure:append() {
+do_configure_append() {
     if test -e scripts/Makefile.fwinst ; then
         sed -i -e "s:-m0644:-m 0644:g" scripts/Makefile.fwinst
     fi
 }
 
-do_install:append() {
+do_install_append() {
     oe_runmake headers_install INSTALL_HDR_PATH=${D}${exec_prefix}/src/linux-${KERNEL_VERSION} ARCH=$ARCH
 }
 
 PACKAGES =+ "kernel-headers"
-FILES:kernel-headers = "${exec_prefix}/src/linux*"
+FILES_kernel-headers = "${exec_prefix}/src/linux*"
