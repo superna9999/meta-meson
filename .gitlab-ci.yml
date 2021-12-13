@@ -173,6 +173,14 @@ gen:seirobotics-sei510:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
+gen:seirobotics-sei610:
+  extends: .gen
+  variables:
+    DEVICE_TYPE: "meson-sm1-sei610"
+    DTB_NAME: "meson-sm1-sei610.dtb"
+    BOOT_METHOD: "u-boot"
+    LAVA_TAGS: ""
+
 gen:amediatech-x96-max:
   extends: .gen
   variables:
@@ -234,6 +242,7 @@ run:khadas-vim:
     - lava-meson-gxl-s905x-khadas-vim
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
+  allow_failure: true
 
 run:khadas-vim2:
   extends: .run
@@ -244,6 +253,7 @@ run:khadas-vim2:
     - lava-meson-gxm-khadas-vim2
   variables:
     DEVICE_TYPE: "meson-gxm-khadas-vim2"
+  allow_failure: true
 
 run:amlogic-p230:
   extends: .run
@@ -267,15 +277,15 @@ run:amlogic-p230:
     DEVICE_TYPE: "meson-gxl-s805x-p241"
   allow_failure: true
 
-run:seirobotics-sei510:
+run:seirobotics-sei610:
   extends: .run
-  needs: ["build:initrd", "gen:seirobotics-sei510"]
+  needs: ["build:initrd", "gen:seirobotics-sei610"]
   dependencies:
-    - gen:seirobotics-sei510
+    - gen:seirobotics-sei610
   tags:
-    - lava-meson-g12a-sei510
+    - lava-meson-g12a-sei610
   variables:
-    DEVICE_TYPE: "meson-g12a-sei510"
+    DEVICE_TYPE: "meson-sm1-sei610"
   allow_failure: true
 
 run:amediatech-x96-max:
