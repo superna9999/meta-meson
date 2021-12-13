@@ -12,4 +12,4 @@ EXTRA_IMAGEDEPENDS += "u-boot virtual/trusted-firmware-a"
 # Generate an SDCard Image
 IMAGE_CLASSES += "image_types_meson"
 
-WKS_FILE ?= "sdimage-meson.wks"
+WKS_FILE = "sdimage-meson.wks"
