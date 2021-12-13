@@ -1,5 +1,5 @@
 variables:
-  IMAGE_TAG: "2019-09-23-1"
+  IMAGE_TAG: "2021-09-28-1"
   YOCTO_IMAGE: "amlogic-image-headless-initrd"
   MACHINE_NAME: "amlogic-s9xxx"
   IMAGE_NAME: "uImage"
@@ -242,6 +242,7 @@ run:khadas-vim:
     - lava-meson-gxl-s905x-khadas-vim
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
+  allow_failure: true
 
 run:khadas-vim2:
   extends: .run
@@ -252,6 +253,7 @@ run:khadas-vim2:
     - lava-meson-gxm-khadas-vim2
   variables:
     DEVICE_TYPE: "meson-gxm-khadas-vim2"
+  allow_failure: true
 
 run:amlogic-p230:
   extends: .run
