@@ -12,6 +12,7 @@ LINUX_VERSION = "5.15.4"
 # Linux stable tree
 SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protocol=https;branch=linux-5.15.y;name=meson \
            file://defconfig \
+           file://0001-ASoC-meson-implement-driver-name.patch \
            "
 
 KERNEL_VERSION_SANITY_SKIP="1"
