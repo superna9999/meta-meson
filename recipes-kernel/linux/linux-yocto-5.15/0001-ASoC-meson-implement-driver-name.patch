@@ -1,0 +1,35 @@
+From bc387887ae22d6ed6439e83968b5be3443a8e57d Mon Sep 17 00:00:00 2001
+From: Christian Hewitt <christianshewitt@gmail.com>
+Date: Sun, 17 Oct 2021 16:00:28 +0000
+Subject: ASoC: meson: implement driver_name for snd_soc_card in
+ meson-card-utils
+
+Implement driver_name to provide an alternative to card_name for userspace
+configuration of Amlogic audio cards.
+
+Suggested-by: Matthias Reichl <hias@horus.com>
+Signed-off-by: Christian Hewitt <christianshewitt@gmail.com>
+Acked-by: Jerome Brunet <jbrunet@baylibre.com>
+Link: https://lore.kernel.org/r/20211017160028.23318-1-christianshewitt@gmail.com
+Signed-off-by: Mark Brown <broonie@kernel.org>
+---
+ sound/soc/meson/meson-card-utils.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+(limited to 'sound/soc/meson')
+
+diff --git a/sound/soc/meson/meson-card-utils.c b/sound/soc/meson/meson-card-utils.c
+index 415cc0046e4b4..29b0174f4b5c9 100644
+--- a/sound/soc/meson/meson-card-utils.c
++++ b/sound/soc/meson/meson-card-utils.c
+@@ -302,6 +302,7 @@ int meson_card_probe(struct platform_device *pdev)
+ 
+ 	priv->card.owner = THIS_MODULE;
+ 	priv->card.dev = dev;
++	priv->card.driver_name = dev->driver->name;
+ 	priv->match_data = data;
+ 
+ 	ret = snd_soc_of_parse_card_name(&priv->card, "model");
+-- 
+cgit 1.2.3-1.el7
+
