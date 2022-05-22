@@ -162,3 +162,26 @@ You will be able to dd the image onto the raw SDcard like :
 ```
 sudo dd if=tmp/deploy/images/libretech-cc/core-image-sato-libretech-cc.wic of=/dev/mmcblk0
 ```
+
+## Build with kas
+
+The `kas` tool is installed via Python pip. The recommended way is to use an virtual environment for this.
+
+```
+$ python3 -m venv venv
+$ source venv/bin/activate
+$ pip3 install wheel kas
+```
+
+To start a build we just need to run the command `kas build <configuration>.yml`
+
+```
+$ source venv/bin/activate
+$ DL_DIR=/data/downloads SSTATE_DIR=/data/sstate-cache kas build kas/kas-poky-meson.yml
+```
+
+The environment variable `DL_DIR` will allow to use a common place for the downloads across different projects. The same applies to the `SSTATE_DIR` variable.
+
+To build for a specific machine use the environment variable `KAS_MACHINE`.
+
+Please check the [kas](https://kas.readthedocs.io/en/latest/) manual for more details.
