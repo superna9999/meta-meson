@@ -1,0 +1,54 @@
+header:
+  version: 8
+
+machine: amediatech-x96-max
+distro: poky
+target:
+  - amlogic-image-headless-sd
+
+repos:
+  meta-meson:
+
+  poky:
+    url: https://git.yoctoproject.org/git/poky
+    path: layers/poky
+    refspec: kirkstone
+    layers:
+      meta:
+      meta-poky:
+      meta-yocto-bsp:
+
+  meta-openembedded:
+    url: http://git.openembedded.org/meta-openembedded
+    path: layers/meta-openembedded
+    refspec: kirkstone
+    layers:
+      meta-oe:
+      meta-python:
+      meta-networking:
+      meta-perl:
+
+bblayers_conf_header:
+  standard: |
+    POKY_BBLAYERS_CONF_VERSION = "2"
+    BBPATH = "${TOPDIR}"
+    BBFILES ?= ""
+local_conf_header:
+  reduce_diskspace: |
+    INHERIT += "rm_work"
+  standard: |
+    CONF_VERSION = "2"
+    PACKAGE_CLASSES = "package_ipk"
+    USER_CLASSES = "buildstats"
+  debug-tweaks: |
+    EXTRA_IMAGE_FEATURES = "debug-tweaks"
+  diskmon: |
+    BB_DISKMON_DIRS = "\
+        STOPTASKS,${TMPDIR},1G,100K \
+        STOPTASKS,${DL_DIR},1G,100K \
+        STOPTASKS,${SSTATE_DIR},1G,100K \
+        STOPTASKS,/tmp,100M,100K \
+        ABORT,${TMPDIR},100M,1K \
+        ABORT,${DL_DIR},100M,1K \
+        ABORT,${SSTATE_DIR},100M,1K \
+        ABORT,/tmp,10M,1K"
