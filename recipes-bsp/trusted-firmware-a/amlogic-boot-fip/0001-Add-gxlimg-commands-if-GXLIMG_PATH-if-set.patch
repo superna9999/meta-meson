@@ -1,0 +1,135 @@
+From ec8d60c3ca705e84b3fc6ef060540f3d804e0f70 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <narmstrong@baylibre.com>
+Date: Fri, 3 Dec 2021 18:56:29 +0100
+Subject: [PATCH] Add gxlimg commands if GXLIMG_PATH if set
+
+Signed-off-by: Neil Armstrong <narmstrong@baylibre.com>
+---
+ axg.inc  | 22 ++++++++++++++++++++++
+ g12a.inc | 34 +++++++++++++++++++++++++++++++++-
+ gxl.inc  | 22 ++++++++++++++++++++++
+ 3 files changed, 77 insertions(+), 1 deletion(-)
+
+diff --git a/axg.inc b/axg.inc
+index 1dbf380..cc5f304 100644
+--- a/axg.inc
++++ b/axg.inc
+@@ -36,6 +36,27 @@ ${TMP}/bl2_acs.bin: bl2.bin acs.bin
+ ${TMP}/bl2_new.bin: ${TMP}/bl2_acs.bin bl21.bin
+ 	./blx_fix.sh ${TMP}/bl2_acs.bin ${TMP}/zero_tmp ${TMP}/bl2_zero.bin bl21.bin ${TMP}/bl21_zero.bin ${TMP}/bl2_new.bin bl2
+ 
++ifneq ($(GXLIMG_PATH),)
++${TMP}/bl30_new.bin.enc: ${TMP}/bl30_new.bin
++	${GXLIMG_PATH} -t bl30 -s ${TMP}/bl30_new.bin ${TMP}/bl30_new.bin.enc
++
++${TMP}/bl31.img.enc: bl31.img
++	${GXLIMG_PATH} -t bl3x -s bl31.img ${TMP}/bl31.img.enc
++
++${TMP}/bl33.bin.enc: ${BL33}
++	${GXLIMG_PATH} -t bl3x -s ${BL33} ${TMP}/bl33.bin.enc
++
++${TMP}/bl2.n.bin.sig: ${TMP}/bl2_new.bin
++	${GXLIMG_PATH} -t bl2 -s ${TMP}/bl2_new.bin ${TMP}/bl2.n.bin.sig
++
++${O}/u-boot.bin: ${TMP}/bl2.n.bin.sig ${TMP}/bl30_new.bin.enc ${TMP}/bl31.img.enc ${TMP}/bl33.bin.enc
++	${GXLIMG_PATH} -t fip --rev v3 \
++		       --bl2 ${TMP}/bl2.n.bin.sig --bl30 ${TMP}/bl30_new.bin.enc \
++		       --bl31 ${TMP}/bl31.img.enc --bl33 ${TMP}/bl33.bin.enc \
++		       ${O}/u-boot.bin;\
++	dd if=${O}/u-boot.bin of=${O}/u-boot.bin.usb.tpl skip=49152 bs=1
++	dd if=${O}/u-boot.bin of=${O}/u-boot.bin.usb.bl2 bs=49152 count=1
++else
+ ${TMP}/bl30_new.bin.enc: ${TMP}/bl30_new.bin
+ 	./${AML_ENCRYPT} --bl3sig --input ${TMP}/bl30_new.bin --output ${TMP}/bl30_new.bin.enc  --level 3 --type bl30
+ 
+@@ -53,3 +74,4 @@ ${O}/u-boot.bin: ${TMP}/bl2.n.bin.sig ${TMP}/bl30_new.bin.enc ${TMP}/bl31.img.en
+ 	               --bl2 ${TMP}/bl2.n.bin.sig --bl30 ${TMP}/bl30_new.bin.enc \
+ 		       --bl31 ${TMP}/bl31.img.enc --bl33 ${TMP}/bl33.bin.enc \
+ 		       --level 3
++endif
+diff --git a/g12a.inc b/g12a.inc
+index 0a40a92..add9f8b 100644
+--- a/g12a.inc
++++ b/g12a.inc
+@@ -36,6 +36,38 @@ ${TMP}/bl2_new.bin: bl2.bin acs.bin
+ 	@if [ -e ${TMP}/zero_tmp ] ; then rm ${TMP}/zero_tmp ; fi
+ 	@rm ${TMP}/bl2_zero.bin ${TMP}/bl21_zero.bin
+ 
++ifneq ($(GXLIMG_PATH),)
++${TMP}/bl30_new.bin.enc: ${TMP}/bl30_new.bin
++	${GXLIMG_PATH} -t bl30 -s ${TMP}/bl30_new.bin ${TMP}/bl30_new.bin.enc
++
++${TMP}/bl31.img.enc: bl31.img
++	${GXLIMG_PATH} -t bl3x -s bl31.img ${TMP}/bl31.img.enc
++
++${TMP}/bl33.bin.enc: ${BL33}
++	${GXLIMG_PATH} -t bl3x -s ${BL33} ${TMP}/bl33.bin.enc
++
++${TMP}/bl2.n.bin.sig: ${TMP}/bl2_new.bin
++	${GXLIMG_PATH} -t bl2 -s ${TMP}/bl2_new.bin ${TMP}/bl2.n.bin.sig
++
++${O}/u-boot.bin: ${TMP}/bl2.n.bin.sig ${TMP}/bl30_new.bin.enc ${TMP}/bl31.img.enc ${TMP}/bl33.bin.enc
++	if [ -e lpddr3_1d.fw ] ; then \
++		${GXLIMG_PATH} -t fip --rev v3 \
++			       --bl2 ${TMP}/bl2.n.bin.sig --bl30 ${TMP}/bl30_new.bin.enc \
++			       --bl31 ${TMP}/bl31.img.enc --bl33 ${TMP}/bl33.bin.enc \
++			       --ddrfw ddr4_1d.fw --ddrfw ddr4_2d.fw --ddrfw ddr3_1d.fw \
++			       --ddrfw piei.fw --ddrfw lpddr4_1d.fw --ddrfw lpddr4_2d.fw \
++			       --ddrfw diag_lpddr4.fw --ddrfw aml_ddr.fw --ddrfw lpddr3_1d.fw \
++			       ${O}/u-boot.bin;\
++	else \
++		${GXLIMG_PATH} -t fip --rev v3 \
++			       --bl2 ${TMP}/bl2.n.bin.sig --bl30 ${TMP}/bl30_new.bin.enc \
++			       --bl31 ${TMP}/bl31.img.enc --bl33 ${TMP}/bl33.bin.enc \
++			       --ddrfw ddr4_1d.fw --ddrfw ddr4_2d.fw --ddrfw ddr3_1d.fw \
++			       --ddrfw piei.fw --ddrfw lpddr4_1d.fw --ddrfw lpddr4_2d.fw \
++			       --ddrfw diag_lpddr4.fw --ddrfw aml_ddr.fw \
++			       ${O}/u-boot.bin;\
++	fi
++else
+ ${TMP}/bl30_new.bin.g12a.enc: ${TMP}/bl30_new.bin
+ 	./${AML_ENCRYPT} --bl30sig --input ${TMP}/bl30_new.bin --output ${TMP}/bl30_new.bin.g12a.enc --level v3
+ 
+@@ -67,4 +99,4 @@ ${O}/u-boot.bin: ${TMP}/bl2.n.bin.sig ${TMP}/bl30_new.bin.enc ${TMP}/bl31.img.en
+ 			       --ddrfw4 piei.fw --ddrfw5 lpddr4_1d.fw --ddrfw6 lpddr4_2d.fw \
+ 			       --ddrfw7 diag_lpddr4.fw --ddrfw8 aml_ddr.fw ;\
+ 	fi
+-
++endif
+diff --git a/gxl.inc b/gxl.inc
+index 07a956d..9a16011 100644
+--- a/gxl.inc
++++ b/gxl.inc
+@@ -37,6 +37,27 @@ ${TMP}/bl2_new.bin: ${TMP}/bl2_acs.bin bl21.bin
+ 	@if [ -e ${TMP}/zero_tmp ] ; then rm ${TMP}/zero_tmp ; fi
+ 	@rm ${TMP}/bl2_zero.bin ${TMP}/bl21_zero.bin
+ 
++ifneq ($(GXLIMG_PATH),)
++${TMP}/bl30_new.bin.enc: ${TMP}/bl30_new.bin
++	$(GXLIMG_PATH) -t bl3x -c ${TMP}/bl30_new.bin ${TMP}/bl30_new.bin.enc
++
++${TMP}/bl31.img.enc: bl31.img
++	$(GXLIMG_PATH) -t bl3x -c bl31.img ${TMP}/bl31.img.enc
++
++${TMP}/bl33.bin.enc: ${BL33}
++	$(GXLIMG_PATH) -t bl3x -c ${BL33} ${TMP}/bl33.bin.enc ${BL33_ARGS}
++
++${TMP}/bl2.n.bin.sig: ${TMP}/bl2_new.bin
++	$(GXLIMG_PATH) -t bl2 -s ${TMP}/bl2_new.bin ${TMP}/bl2.n.bin.sig
++
++${O}/u-boot.bin: ${TMP}/bl2.n.bin.sig ${TMP}/bl30_new.bin.enc ${TMP}/bl31.img.enc ${TMP}/bl33.bin.enc
++	$(GXLIMG_PATH) -t fip \
++	               --bl2 ${TMP}/bl2.n.bin.sig --bl30 ${TMP}/bl30_new.bin.enc \
++		       --bl31 ${TMP}/bl31.img.enc --bl33 ${TMP}/bl33.bin.enc \
++		       ${O}/u-boot.bin
++	dd if=${O}/u-boot.bin of=${O}/u-boot.bin.usb.tpl skip=49152 bs=1
++	dd if=${O}/u-boot.bin of=${O}/u-boot.bin.usb.bl2 bs=49152 count=1
++else
+ ${TMP}/bl30_new.bin.enc: ${TMP}/bl30_new.bin
+ 	./aml_encrypt_gxl --bl3enc --input ${TMP}/bl30_new.bin --output ${TMP}/bl30_new.bin.enc
+ 
+@@ -53,3 +74,4 @@ ${O}/u-boot.bin: ${TMP}/bl2.n.bin.sig ${TMP}/bl30_new.bin.enc ${TMP}/bl31.img.en
+ 	./aml_encrypt_gxl --bootmk --output ${O}/u-boot.bin \
+ 	               --bl2 ${TMP}/bl2.n.bin.sig --bl30 ${TMP}/bl30_new.bin.enc \
+ 		       --bl31 ${TMP}/bl31.img.enc --bl33 ${TMP}/bl33.bin.enc
++endif
