@@ -133,7 +133,7 @@ Available S9xxx machines are :
 
 Images types available (in addition of standard Poky/OE images) :
  - amlogic-image-headless-sd : to flash on an eMMC or SD-Card
- - amlogic-image-headless-initrd : to load as ramdisk
+ - [amlogic-image-headless-initrd](/doc/images/amlogic-image-headless-initrd.rst) : to be loaded as a ramdisk
  - amlogic-image-sato : Graphical images with X11 and Sato environment to flash on an eMMC or SD-Card
 
 Standard types are :
