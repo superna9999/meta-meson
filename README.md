@@ -30,7 +30,7 @@ amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson 
 
 Initialize environment :
 ```
-amlogic-bsp$ TEMPLATECONF=../meta-meson/conf
+amlogic-bsp$ TEMPLATECONF=../meta-meson/conf/templates/default
 amlogic-bsp$ source poky/oe-init-build-env
 amlogic-bsp/build$ cp ../poky/meta-poky/conf/local.conf.sample conf/local.conf
 ```
