@@ -107,6 +107,9 @@ Available S905X2 machines are :
  - amediatech-x96-max: .wic image to be booted using vendor u-boot
  - seirobotics-sei510: complete bootable .wic sdcard image with mainline U-boot
 
+Available S905Y2 machines are :
+ - radxa-zero: complete bootable .wic sdcard image with mainline U-boot
+
 Available S922X machines are :
  - hardkernel-odroidn2: complete bootable .wic sdcard image with mainline U-boot
  - hardkernel-odroidn2-sdboot: .wic image to be booted using vendor u-boot

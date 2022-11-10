@@ -28,6 +28,7 @@ COMPATIBLE_MACHINE:hardkernel-odroidn2 = "hardkernel-odroidn2"
 COMPATIBLE_MACHINE:hardkernel-odroidn2plus = "hardkernel-odroidn2plus"
 COMPATIBLE_MACHINE:seirobotics-sei510 = "seirobotics-sei510"
 COMPATIBLE_MACHINE:seirobotics-sei610 = "seirobotics-sei610"
+COMPATIBLE_MACHINE:radxa-zero = "radxa-zero"
 
 MODEL:libretech-cc = "lepotato"
 MODEL:libretech-ac = "lafrite"
@@ -47,6 +48,7 @@ MODEL:hardkernel-odroidn2 = "odroid-n2"
 MODEL:hardkernel-odroidn2plus = "odroid-n2-plus"
 MODEL:seirobotics-sei510 = "sei510"
 MODEL:seirobotics-sei610 = "sei610"
+MODEL:radxa-zero = "radxa-zero"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2dbd68496cc5ed3e68e855100cb86363"
 
