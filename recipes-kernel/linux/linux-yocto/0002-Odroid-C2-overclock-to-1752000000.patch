@@ -1,0 +1,40 @@
+From 192eab71ec617a793812f2ae34783c077b62a9cc Mon Sep 17 00:00:00 2001
+From: Tomasz Olszak <olszak.tomasz@gmail.com>
+Date: Thu, 15 Dec 2022 12:03:50 +0100
+Subject: [PATCH 2/2] Odroid C2 : overclock to 1752000000
+
+---
+ drivers/firmware/arm_scpi.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/arm_scpi.c b/drivers/firmware/arm_scpi.c
+index ddf0b9ff9e15..2a41f466e03f 100644
+--- a/drivers/firmware/arm_scpi.c
++++ b/drivers/firmware/arm_scpi.c
+@@ -622,7 +622,8 @@ static struct scpi_dvfs_info *scpi_dvfs_get_info(u8 domain)
+ 	if (scpi_info->dvfs[domain])	/* data already populated */
+ 		return scpi_info->dvfs[domain];
+ 
+-	ret = scpi_send_message(CMD_GET_DVFS_INFO, &domain, sizeof(domain),
++	u8 odroidc2_overclocked_domain = domain | 0x80;
++	ret = scpi_send_message(CMD_GET_DVFS_INFO, &odroidc2_overclocked_domain, sizeof(odroidc2_overclocked_domain),
+ 				&buf, sizeof(buf));
+ 	if (ret)
+ 		return ERR_PTR(ret);
+@@ -641,8 +642,13 @@ static struct scpi_dvfs_info *scpi_dvfs_get_info(u8 domain)
+ 	}
+ 
+ 	for (i = 0, opp = info->opps; i < info->count; i++, opp++) {
++
+ 		opp->freq = le32_to_cpu(buf.opps[i].freq);
+ 		opp->m_volt = le32_to_cpu(buf.opps[i].m_volt);
++		if (opp->freq >= 1752000000) {
++			info->count = i + 1;
++			break;
++		}
+ 	}
+ 
+ 	sort(info->opps, info->count, sizeof(*opp), opp_cmp_func, NULL);
+-- 
+2.25.1
+

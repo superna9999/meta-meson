@@ -6,3 +6,5 @@ SRC_URI:append:meson-g12a = " file://0002-FROMLIST-arm64-dts-amlogic-add-support
 
 SRC_URI:append:hardkernel-odroidc2 = " file://0001-Odroid-C2-enable-microusb.patch"
 
+# Uncomment to enable overclocking to 1752 on Odroid C2
+#SRC_URI:append:hardkernel-odroidc2 = " file://0002-Odroid-C2-overclock-to-1752000000.patch"
