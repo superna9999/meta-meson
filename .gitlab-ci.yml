@@ -59,7 +59,7 @@ build:initrd:
   tags:
     - yocto
   needs: ["build:initrd"]
-  dependencie2:
+  dependencies:
     - build:initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   script:
