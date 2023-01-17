@@ -1,4 +1,10 @@
-on: push
+on:
+  push:
+    branches-ignore:
+      - "**-next"
+  schedule:
+    - cron: 0 8 * * *
+
 
 jobs:
   sync:
