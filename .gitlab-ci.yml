@@ -40,8 +40,8 @@ build:initrd:
   before_script:
     - mkdir -p results
     - rm -rf /tmp/build_env
-    - git clone http://github.com/openembedded/openembedded-core --branch=kirkstone --depth=1 /tmp/build_env
-    - git clone http://github.com/openembedded/bitbake --branch=2.0 --depth=1 /tmp/build_env/bitbake
+    - git clone http://github.com/openembedded/openembedded-core --branch=langdale --depth=1 /tmp/build_env
+    - git clone http://github.com/openembedded/bitbake --branch=2.2 --depth=1 /tmp/build_env/bitbake
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
@@ -59,7 +59,7 @@ build:initrd:
   tags:
     - yocto
   needs: ["build:initrd"]
-  dependencies:
+  dependencie2:
     - build:initrd
   image: $CI_REGISTRY_IMAGE:$IMAGE_TAG
   script:
