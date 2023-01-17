@@ -1,0 +1,16 @@
+on: push
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+	with:
+	  fetch-depth: 0
+
+      - name: Push to gitlab
+        env:
+          SSH_PUSH_KEY: ${{ secrets.SSH_PUSH_KEY }}
+        run: ./.github/scripts/sync.sh gitlab.com git@gitlab.com:superna9999/meta-meson.git
+        shell: bash
