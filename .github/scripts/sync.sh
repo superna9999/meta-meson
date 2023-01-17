@@ -2,8 +2,8 @@
 
 mkdir --parents "$HOME/.ssh"
 DEPLOY_KEY_FILE="$HOME/.ssh/deploy_key"
-echo "${SSH_PUSH_KEY}" > "$SSH_PUSH_KEY"
-chmod 600 "$SSH_PUSH_KEY"
+echo "${SSH_PUSH_KEY}" > "$DEPLOY_KEY_FILE"
+chmod 600 "$DEPLOY_KEY_FILE"
 
 SSH_KNOWN_HOSTS_FILE="$HOME/.ssh/known_hosts"
 ssh-keyscan -H "$1" > "$SSH_KNOWN_HOSTS_FILE"
