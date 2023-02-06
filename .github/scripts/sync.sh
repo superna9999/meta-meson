@@ -10,4 +10,4 @@ ssh-keyscan -H "$1" > "$SSH_KNOWN_HOSTS_FILE"
 
 export GIT_SSH_COMMAND="ssh -i "$DEPLOY_KEY_FILE" -o UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
 
-git push --all $2
+git push --all --force $2
