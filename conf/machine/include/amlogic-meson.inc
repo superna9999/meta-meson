@@ -27,7 +27,7 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
        ${@bb.utils.contains("MACHINE_FEATURES", "screen", "linux-firmware-amlogic-vdec", "",d)} \
 "
 
-IMAGE_FSTYPES += "tar.bz2 wic"
+IMAGE_FSTYPES += "tar.bz2 wic wic.bmap"
 do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
 
 WKS_FILE ?= "sdimage-bootpart-meson.wks"
