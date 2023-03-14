@@ -1,13 +1,15 @@
-name: Push Build (master)
+name: Push Build
 
 on:
   push:
     branches:
       - master
+      - kirkstone
+      - dunfell
 
 jobs:
   build:
-    uses: ndechesne/meta-qcom/.github/workflows/build-template.yml@master
+    uses: ./.github/workflows/build-template.yml
     with:
       host: ubuntu-20.04
       images: core-image-base core-image-weston core-image-x11 amlogic-image-headless-initrd amlogic-image-headless-sd amlogic-image-sato

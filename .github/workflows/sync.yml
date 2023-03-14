@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+      - kirkstone
+      - dunfell
   schedule:
     - cron: 0 8 * * *
 
