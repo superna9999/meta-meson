@@ -1,3 +1,5 @@
+name: Sync to gitlab
+
 on:
   push:
     branches-ignore:
