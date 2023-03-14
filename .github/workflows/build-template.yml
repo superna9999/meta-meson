@@ -68,7 +68,7 @@ jobs:
           artifacts: []
         EOF
 
-        for tclibc in ${{github.tclibc}}; do
+        for tclibc in ${{inputs.tclibc}}; do
         cat << EOF >> plan.yaml
         ${tclibc}: &${tclibc}
           local_conf:
@@ -83,7 +83,7 @@ jobs:
         jobs:
         EOF
 
-        for tclibc in ${{github.tclibc}}; do
+        for tclibc in ${{inputs.tclibc}}; do
         cat << EOF >> plan.yaml
         - name: ${tclibc}
           bakes:
