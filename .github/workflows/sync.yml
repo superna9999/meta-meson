@@ -1,12 +1,11 @@
-name: Sync to gitlab
+name: Sync to gitlab (master)
 
 on:
   push:
-    branches-ignore:
-      - "**-next"
+    branches:
+      - master
   schedule:
     - cron: 0 8 * * *
-
 
 jobs:
   sync:

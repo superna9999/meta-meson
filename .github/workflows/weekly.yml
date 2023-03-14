@@ -32,7 +32,7 @@ jobs:
       TUXSUITE_TOKEN: ${{ secrets.TUXSUITE_TOKEN }}
 
   dunfell:
-    uses: ndechesne/meta-qcom/.github/workflows/build-template.yml@master
+    uses: superna9999/meta-meson/.github/workflows/build-template.yml@dunfell
     with:
       host: ubuntu-20.04
       images: core-image-base core-image-weston core-image-x11 amlogic-image-headless-initrd amlogic-image-headless-sd amlogic-image-sato
