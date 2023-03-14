@@ -1,12 +1,9 @@
-name: Sync to gitlab
+name: Sync to gitlab (dunfell)
 
 on:
   push:
-    branches-ignore:
-      - "**-next"
-  schedule:
-    - cron: 0 8 * * *
-
+    branches:
+      - dunfell
 
 jobs:
   sync:
