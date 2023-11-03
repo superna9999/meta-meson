@@ -40,8 +40,8 @@ build:initrd:
   before_script:
     - mkdir -p results
     - rm -rf /tmp/build_env
-    - git clone http://github.com/openembedded/openembedded-core --branch=langdale --depth=1 /tmp/build_env
-    - git clone http://github.com/openembedded/bitbake --branch=2.2 --depth=1 /tmp/build_env/bitbake
+    - git clone http://github.com/openembedded/openembedded-core --branch=mickledore --depth=1 /tmp/build_env
+    - git clone http://github.com/openembedded/bitbake --branch=2.4 --depth=1 /tmp/build_env/bitbake
     - git clone $(pwd) /tmp/build_env/$(basename $(pwd))
 
   script:
@@ -109,7 +109,7 @@ build:initrd:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:libretech-cc:
+.gen:libretech-cc:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-libretech-cc"
@@ -125,7 +125,7 @@ gen:libretech-cc:
 #    BOOT_METHOD: "u-boot"
 #    LAVA_TAGS: ""
 
-gen:hardkernel-odroid-n2:
+.gen:hardkernel-odroid-n2:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-g12b-odroid-n2"
@@ -133,7 +133,7 @@ gen:hardkernel-odroid-n2:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:khadas-vim:
+.gen:khadas-vim:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
@@ -141,7 +141,7 @@ gen:khadas-vim:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:khadas-vim2:
+.gen:khadas-vim2:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxm-khadas-vim2"
@@ -149,7 +149,7 @@ gen:khadas-vim2:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: "panfrost"
 
-gen:amlogic-p230:
+.gen:amlogic-p230:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-gxl-s905d-p230"
@@ -165,7 +165,7 @@ gen:amlogic-p230:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:seirobotics-sei510:
+.gen:seirobotics-sei510:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-g12a-sei510"
@@ -173,7 +173,7 @@ gen:seirobotics-sei510:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:seirobotics-sei610:
+.gen:seirobotics-sei610:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-sm1-sei610"
@@ -181,7 +181,7 @@ gen:seirobotics-sei610:
     BOOT_METHOD: "u-boot"
     LAVA_TAGS: ""
 
-gen:amediatech-x96-max:
+.gen:amediatech-x96-max:
   extends: .gen
   variables:
     DEVICE_TYPE: "meson-g12a-x96-max"
@@ -200,7 +200,7 @@ gen:amediatech-x96-max:
     DEVICE_TYPE: "meson-gxl-s805x-libretech-ac"
   allow_failure: true
 
-run:libretech-cc:
+.run:libretech-cc:
   extends: .run
   needs: ["build:initrd", "gen:libretech-cc"]
   dependencies:
@@ -222,7 +222,7 @@ run:libretech-cc:
 #    DEVICE_TYPE: "meson-gxbb-odroidc2"
 #  allow_failure: true
 
-run:hardkernel-odroid-n2:
+.run:hardkernel-odroid-n2:
   extends: .run
   needs: ["build:initrd", "gen:hardkernel-odroid-n2"]
   dependencies:
@@ -233,7 +233,7 @@ run:hardkernel-odroid-n2:
     DEVICE_TYPE: "meson-g12b-odroid-n2"
   allow_failure: true
 
-run:khadas-vim:
+.run:khadas-vim:
   extends: .run
   needs: ["build:initrd", "gen:khadas-vim"]
   dependencies:
@@ -244,7 +244,7 @@ run:khadas-vim:
     DEVICE_TYPE: "meson-gxl-s905x-khadas-vim"
   allow_failure: true
 
-run:khadas-vim2:
+.run:khadas-vim2:
   extends: .run
   needs: ["build:initrd", "gen:khadas-vim2"]
   dependencies:
@@ -255,7 +255,7 @@ run:khadas-vim2:
     DEVICE_TYPE: "meson-gxm-khadas-vim2"
   allow_failure: true
 
-run:amlogic-p230:
+.run:amlogic-p230:
   extends: .run
   needs: ["build:initrd", "gen:amlogic-p230"]
   dependencies:
@@ -277,7 +277,7 @@ run:amlogic-p230:
     DEVICE_TYPE: "meson-gxl-s805x-p241"
   allow_failure: true
 
-run:seirobotics-sei610:
+.run:seirobotics-sei610:
   extends: .run
   needs: ["build:initrd", "gen:seirobotics-sei610"]
   dependencies:
@@ -288,7 +288,7 @@ run:seirobotics-sei610:
     DEVICE_TYPE: "meson-sm1-sei610"
   allow_failure: true
 
-run:amediatech-x96-max:
+.run:amediatech-x96-max:
   extends: .run
   needs: ["build:initrd", "gen:amediatech-x96-max"]
   dependencies:
