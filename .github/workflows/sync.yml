@@ -6,6 +6,7 @@ on:
       - master
       - kirkstone
       - dunfell
+      - mickledore
   schedule:
     - cron: 0 8 * * *
 
