@@ -29,6 +29,8 @@ COMPATIBLE_MACHINE:hardkernel-odroidn2plus = "hardkernel-odroidn2plus"
 COMPATIBLE_MACHINE:seirobotics-sei510 = "seirobotics-sei510"
 COMPATIBLE_MACHINE:seirobotics-sei610 = "seirobotics-sei610"
 COMPATIBLE_MACHINE:radxa-zero = "radxa-zero"
+COMPATIBLE_MACHINE:beelink-gt1-ultimate = "beelink-gt1-ultimate"
+COMPATIBLE_MACHINE:bananapi-bpi-m5 = "bananapi-bpi-m5"
 
 MODEL:libretech-cc = "lepotato"
 MODEL:libretech-ac = "lafrite"
@@ -49,11 +51,13 @@ MODEL:hardkernel-odroidn2plus = "odroid-n2-plus"
 MODEL:seirobotics-sei510 = "sei510"
 MODEL:seirobotics-sei610 = "sei610"
 MODEL:radxa-zero = "radxa-zero"
+MODEL:beelink-gt1-ultimate = "beelink-gt1"
+MODEL:bananapi-bpi-m5 = "bananapi-m5"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2dbd68496cc5ed3e68e855100cb86363"
 
 SRC_URI = "git://github.com/LibreELEC/amlogic-boot-fip.git;protocol=https;branch=master"
-SRCREV = "7ff0004e0e4d261ba81334a2f46302bd06704aca"
+SRCREV = "c4bf0e3b1ab1246c3176d6c3e420a5e1cdf40c4e"
 
 S = "${WORKDIR}/git"
 B = "${WORKDIR}/build"
