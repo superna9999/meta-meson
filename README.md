@@ -75,6 +75,7 @@ Available S905 machines are :
 Available S905D machines are :
  - amlogic-p230 : .wic image to be booted using vendor u-boot
  - amlogic-p231 : .wic image to be booted using vendor u-boot
+ - mecool-kii-pro : .wic image to be booted using vendor u-boot
  - amlogic-s905d (all S905D machines) : generic non-bootable .wic image to be customized
 
 Available S905X machines are :
@@ -90,6 +91,7 @@ Available S905X machines are :
  - amlogic-p241: .wic image to be booted using vendor u-boot
  - amlogic-p281: .wic image to be booted using vendor u-boot
  - oranth-tx3-mini: .wic image to be booted using vendor u-boot
+ - osmc-vero4k-plus .wic image to be booted using vendor u-boot
  - amlogic-s905x (all S905X machines) : generic non-bootable .wic image to be customized
 
 Available S912 machines are :
@@ -97,6 +99,9 @@ Available S912 machines are :
  - amlogic-q201 : .wic image to be booted using vendor u-boot
  - nexbox-a1 : .wic image to be booted using vendor u-boot
  - khadas-vim2 : .wic image to be booted using vendor u-boot
+ - mecool-kiii-pro : .wic image to be booted using vendor u-boot
+ - minix-neo-u9h : .wic image to be booted using vendor u-boot
+ - beelink-gt1-ultimate: complete bootable .wic sdcard image with mainline U-boot
  - amlogic-s912 (all S912 machines) : generic non-bootable .wic image to be customized
 
 Available A113d machine :
@@ -115,10 +120,13 @@ Available S922X machines are :
  - hardkernel-odroidn2-sdboot: .wic image to be booted using vendor u-boot
  - hardkernel-odroidn2plus: complete bootable .wic sdcard image with mainline U-boot
  - hardkernel-odroidn2plus-sdboot: .wic image to be booted using vendor u-boot
+ - hardkernel-odroid-n2l: complete bootable .wic sdcard image with mainline U-boot
 
 Available A311D machines are :
  - khadas-vim3 : complete bootable .wic sdcard image with mainline U-boot
  - khadas-vim3-sdboot : .wic image to be booted using vendor u-boot
+ - hardkernel-odroid-go-ultra: complete bootable .wic sdcard image with mainline U-boot
+ - bananapi-bpi-m2s: complete bootable .wic sdcard image with mainline U-boot
 
 Available S905X3/D3 machines are :
  - khadas-vim3l : complete bootable .wic sdcard image with mainline U-boot
@@ -128,6 +136,11 @@ Available S905X3/D3 machines are :
  - hardkernel-odroidc4-sdboot: .wic image to be booted using vendor u-boot
  - hardkernel-odroidhc4: complete bootable .wic sdcard image with mainline U-boot
  - hardkernel-odroidhc4-sdboot: .wic image to be booted using vendor u-boot
+ - haochuangy-h96-max: .wic image to be booted using vendor u-boot
+ - cyx-a95xf3-air: .wic image to be booted using vendor u-boot
+ - cyx-a95xf3-air-gbit: .wic image to be booted using vendor u-boot
+ - bananapi-bpi-m5: complete bootable .wic sdcard image with mainline U-boot
+ - bananapi-bpi-m2-pro: complete bootable .wic sdcard image with mainline U-boot
 
 Available S9xxx machines are :
  - amlogic-s9xxx (all S905 and S905X and S912 machines) : generic non-bootable .wic image to be customized
