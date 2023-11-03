@@ -3,9 +3,7 @@ name: Pull Request Build
 on:
   pull_request_target:
     branches:
-      - master
-      - kirkstone
-      - dunfell
+      - mickledore
 
 jobs:
   build:

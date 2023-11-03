@@ -3,9 +3,7 @@ name: Push Build
 on:
   push:
     branches:
-      - master
-      - kirkstone
-      - dunfell
+      - mickledore
 
 jobs:
   build:
