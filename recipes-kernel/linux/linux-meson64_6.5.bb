@@ -6,11 +6,11 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
 
 DEPENDS += "rsync-native"
 
-SRCREV_meson = "9ac77cf6e1bd35ef538077245feaee8f1146ca4b"
-LINUX_VERSION = "5.15.4"
+SRCREV_meson = "43a868577dfcd9be6930453dc5ec557ab2e9ad89"
+LINUX_VERSION = "6.5.10"
 	
 # Linux stable tree
-SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protocol=https;branch=linux-5.15.y;name=meson \
+SRC_URI = "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git;protocol=https;branch=linux-6.5.y;name=meson \
            file://defconfig \
            "
 
