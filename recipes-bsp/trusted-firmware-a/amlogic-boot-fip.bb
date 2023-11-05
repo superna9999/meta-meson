@@ -82,8 +82,12 @@ do_compile[cleandirs] = "${B}"
 do_deploy () {
     install ${B}/u-boot.bin.sd.bin ${DEPLOYDIR}/u-boot.bin.sd.bin
     install ${B}/u-boot.bin ${DEPLOYDIR}/u-boot.bin.mmc.bin
-    install ${B}/u-boot.bin.usb.bl2 ${DEPLOYDIR}/u-boot.bin.usb.bl2
-    install ${B}/u-boot.bin.usb.tpl ${DEPLOYDIR}/u-boot.bin.usb.tpl
+    if [ -e ${B}/u-boot.bin.usb.bl2 ]; then
+	    install ${B}/u-boot.bin.usb.bl2 ${DEPLOYDIR}/u-boot.bin.usb.bl2
+    fi
+    if [ -e ${B}/u-boot.bin.usb.tpl ]; then
+	    install ${B}/u-boot.bin.usb.tpl ${DEPLOYDIR}/u-boot.bin.usb.tpl
+    fi
 }
 
 addtask deploy after do_compile
