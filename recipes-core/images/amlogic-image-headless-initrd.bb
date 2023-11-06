@@ -7,7 +7,6 @@ IMAGE_INSTALL = "\
     packagegroup-core-ssh-openssh \
     kernel-modules \
     kernel-devicetree \
-    linux-firmware \
     ${CORE_IMAGE_EXTRA_INSTALL} \
     "
 
