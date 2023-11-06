@@ -7,6 +7,8 @@ The s400 platform has default alsa configurations for input and output
 stream with correct sample rate and format.
 Configure pulseaudio to use them by default.
 
+Upstream-Status: Inappropriate [specific to how we handle s400 audio]
+
 Signed-off-by: Loys Ollivier <lollivier@baylibre.com>
 ---
  src/daemon/default.pa.in | 4 ++--
