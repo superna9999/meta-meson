@@ -1,12 +1,9 @@
-name: Sync to gitlab (master)
+name: Sync to gitlab (nanbield)
 
 on:
   push:
     branches:
-      - master
-      - kirkstone
-      - dunfell
-      - mickledore
+      - nanbield
   schedule:
     - cron: 0 8 * * *
 

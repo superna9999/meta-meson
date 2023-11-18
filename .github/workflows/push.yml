@@ -3,7 +3,7 @@ name: Push Build
 on:
   push:
     branches:
-      - master
+      - nanbield
 
 jobs:
   build:
