@@ -27,7 +27,7 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS += " \
        ${@bb.utils.contains("MACHINE_FEATURES", "screen", "linux-firmware-amlogic-vdec", "",d)} \
 "
 
-IMAGE_FSTYPES += "tar.bz2 wic wic.bmap"
+IMAGE_FSTYPES += "tar.bz2 wic.bz2 wic.bmap"
 IMAGE_NAME_SUFFIX = ""
 
 do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
