@@ -1,5 +1,5 @@
 header:
-  version: 8
+  version: 16
 
 machine: amediatech-x96-max
 distro: poky
@@ -12,7 +12,7 @@ repos:
   poky:
     url: https://git.yoctoproject.org/git/poky
     path: layers/poky
-    refspec: kirkstone
+    branch: nanbield
     layers:
       meta:
       meta-poky:
@@ -21,7 +21,7 @@ repos:
   meta-openembedded:
     url: http://git.openembedded.org/meta-openembedded
     path: layers/meta-openembedded
-    refspec: kirkstone
+    branch: nanbield
     layers:
       meta-oe:
       meta-python:
