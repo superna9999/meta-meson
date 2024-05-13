@@ -127,6 +127,7 @@ Available A311D machines are :
  - khadas-vim3-sdboot : .wic image to be booted using vendor u-boot
  - hardkernel-odroid-go-ultra: complete bootable .wic sdcard image with mainline U-boot
  - bananapi-bpi-m2s: complete bootable .wic sdcard image with mainline U-boot
+ - bananapi-bpi-cm4io: complete bootable .wic sdcard image with mainline U-boot
 
 Available S905X3/D3 machines are :
  - khadas-vim3l : complete bootable .wic sdcard image with mainline U-boot
