@@ -35,6 +35,7 @@ COMPATIBLE_MACHINE:hardkernel-odroid-go-ultra = "hardkernel-odroid-go-ultra"
 COMPATIBLE_MACHINE:hardkernel-odroid-n2l = "hardkernel-odroid-n2l"
 COMPATIBLE_MACHINE:bananapi-bpi-m2-pro = "bananapi-bpi-m2-pro"
 COMPATIBLE_MACHINE:bananapi-bpi-m2s = "bananapi-bpi-m2s"
+COMPATIBLE_MACHINE:bananapi-bpi-cm4io = "bananapi-bpi-cm4io"
 
 MODEL:libretech-cc = "lepotato"
 MODEL:libretech-ac = "lafrite"
@@ -61,6 +62,7 @@ MODEL:hardkernel-odroid-go-ultra = "odroid-go-ultra"
 MODEL:hardkernel-odroid-n2l = "odroid-n2l"
 MODEL:bananapi-bpi-m2-pro = "bananapi-m2-pro"
 MODEL:bananapi-bpi-m2s = "bananapi-m2s"
+MODEL:bananapi-bpi-cm4io = "bananapi-cm4io"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=2dbd68496cc5ed3e68e855100cb86363"
 
