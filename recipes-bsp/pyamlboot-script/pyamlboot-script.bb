@@ -7,14 +7,12 @@ SRC_URI = "file://boot.cmd"
 
 inherit deploy
 
-S = "${WORKDIR}"
-
 do_configure() {
 	:
 }
 
 do_compile() {
-	mkimage -A arm -T script -C none -d ${B}/boot.cmd ${B}/boot.scr
+	mkimage -A arm -T script -C none -d ${UNPACKDIR}/boot.cmd ${B}/boot.scr
 }
 
 do_deploy() {

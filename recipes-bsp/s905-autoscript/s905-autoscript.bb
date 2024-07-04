@@ -7,10 +7,8 @@ SRC_URI = "file://s905_autoscript.cmd"
 
 inherit deploy
 
-S = "${WORKDIR}"
-
 do_compile() {
-	mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "s905_autoscript" -d ${WORKDIR}/s905_autoscript.cmd ${B}/s905_autoscript
+	mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "s905_autoscript" -d ${UNPACKDIR}/s905_autoscript.cmd ${B}/s905_autoscript
 }
 
 do_deploy() {

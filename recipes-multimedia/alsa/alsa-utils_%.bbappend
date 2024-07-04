@@ -19,8 +19,8 @@ do_install:append:meson-gx:udev-enabled() {
     UDEV_DIR=`pkg-config --variable=udevdir udev`
     UDEV_RULES_DIR=${UDEV_DIR}/rules.d
     install -d ${D}${UDEV_RULES_DIR}
-    install "${WORKDIR}/soundconfig" ${D}${UDEV_DIR}
-    install -m 0644 ${WORKDIR}/90-alsa-restore.rules.in ${D}${UDEV_RULES_DIR}/90-alsa-restore.rules.in
+    install "${UNPACKDIR}/soundconfig" ${D}${UDEV_DIR}
+    install -m 0644 ${UNPACKDIR}/90-alsa-restore.rules.in ${D}${UDEV_RULES_DIR}/90-alsa-restore.rules.in
     sed -i 's!@@UDEV_DIR@@!'${UDEV_DIR}'!g' ${D}${UDEV_RULES_DIR}/90-alsa-restore.rules.in
     mv ${D}${UDEV_RULES_DIR}/90-alsa-restore.rules.in ${D}${UDEV_RULES_DIR}/90-alsa-restore.rules
 }

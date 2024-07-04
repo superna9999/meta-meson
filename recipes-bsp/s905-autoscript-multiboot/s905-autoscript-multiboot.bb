@@ -7,10 +7,8 @@ SRC_URI = "file://aml_autoscript.cmd"
 
 inherit deploy
 
-S = "${WORKDIR}"
-
 do_compile() {
-	mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "aml_autoscript" -d ${WORKDIR}/aml_autoscript.cmd ${B}/aml_autoscript
+	mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "aml_autoscript" -d ${UNPACKDIR}/aml_autoscript.cmd ${B}/aml_autoscript
 	zip ${B}/aml_autoscript.zip ${B}/aml_autoscript
 }
 
