@@ -8,10 +8,10 @@ SRC_URI += " \
 SRCREV_brcmfmac-sdio-firmware = "3ddc301c272f081aa5513c1934f6d530bf80de4a"
 
 do_install:append() {
-	for f in ${WORKDIR}/brcmfmac_sdio-firmware/*.txt ${WORKDIR}/brcmfmac_sdio-firmware/*.bin; do
+	for f in ${UNPACKDIR}/brcmfmac_sdio-firmware/*.txt ${UNPACKDIR}/brcmfmac_sdio-firmware/*.bin; do
 	        install -m 0644 $f ${D}${nonarch_base_libdir}/firmware/brcm
 	done
-	install -m 0644 ${WORKDIR}/brcmfmac4354-sdio.txt ${D}${nonarch_base_libdir}/firmware/brcm
+	install -m 0644 ${UNPACKDIR}/brcmfmac4354-sdio.txt ${D}${nonarch_base_libdir}/firmware/brcm
 }
 
 FILES_${PN}-bcm4329 += " \

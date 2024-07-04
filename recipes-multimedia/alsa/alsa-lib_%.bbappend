@@ -7,6 +7,6 @@ SRC_URI += " \
 
 do_install:append() {
     install -D -t ${D}/${datadir}/alsa/cards \
-                  ${WORKDIR}/axg-sound-card.conf \
-                  ${WORKDIR}/gx-sound-card.conf
+                  ${UNPACKDIR}/axg-sound-card.conf \
+                  ${UNPACKDIR}/gx-sound-card.conf
 }

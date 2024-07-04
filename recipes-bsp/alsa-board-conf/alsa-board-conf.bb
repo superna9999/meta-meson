@@ -8,7 +8,7 @@ SRC_URI = "file://board.conf \
 
 do_install() {
 	install -d ${D}${datadir}/alsa/alsa.conf.d
-	install -m 0644 ${WORKDIR}/board.conf ${D}${datadir}/alsa/alsa.conf.d/board.conf
+	install -m 0644 ${UNPACKDIR}/board.conf ${D}${datadir}/alsa/alsa.conf.d/board.conf
 }
 
 FILES:${PN} = "${sysconfdir} ${datadir}/alsa/alsa.conf.d"
