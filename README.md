@@ -20,12 +20,12 @@ $ mkdir amlogic-bsp
 Checkout Yocto/Poky :
 ```
 $ cd amlogic-bsp
-amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b nanbield poky
+amlogic-bsp$ git clone --depth 1 git://git.yoctoproject.org/poky -b master poky
 ```
 
 Checkout meta-meson :
 ```
-amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b nanbield
+amlogic-bsp$ git clone https://github.com/superna9999/meta-meson.git meta-meson -b master
 ```
 
 Initialize environment :
