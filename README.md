@@ -57,6 +57,9 @@ Available S805 machines are :
  - hardkernel-odroidc1 : .wic image to be booted using vendor u-boot
  - amlogic-s805 (all S805 machines) : generic non-bootable .wic image to be customized
 
+Available S805X machines are :
+ - libretech-ac : complete bootable .wic sdcard image for Libre Computer LaFrite AML-S805X-AC using already flashed u-boot on SPI
+
 Available S905 machines are :
  - amlogic-p200 : complete .wic sdcard image with mainline U-boot
  - amlogic-p200-sdboot : .wic image to be booted using vendor u-boot
@@ -79,7 +82,6 @@ Available S905D machines are :
  - amlogic-s905d (all S905D machines) : generic non-bootable .wic image to be customized
 
 Available S905X machines are :
- - libretech-ac : complete bootable .wic sdcard image using already flashed u-boot on SPI
  - libretech-cc : complete bootable .wic sdcard image with mainline U-boot
  - libretech-cc-sdboot : .wic image to be booted using vendor u-boot
  - amlogic-p212 : complete bootable .wic sdcard image with mainline U-boot
