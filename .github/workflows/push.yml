@@ -11,7 +11,7 @@ jobs:
     with:
       host: ubuntu-22.04
       images: core-image-base core-image-weston core-image-x11 amlogic-image-headless-initrd amlogic-image-headless-sd amlogic-image-sato
-      machines: amlogic-p200 amlogic-p200-sdboot amlogic-p201-sdboot amlogic-p212 amlogic-p212-sdboot amlogic-s400 friendlyelec-nanopik2 hardkernel-odroidc2 hardkernel-odroidc2-sdboot hardkernel-odroidc4 hardkernel-odroidc4-sdboot hardkernel-odroidhc4 hardkernel-odroidhc4-sdboot hardkernel-odroidn2 hardkernel-odroidn2-sdboot hardkernel-odroidn2plus hardkernel-odroidn2plus-sdboot khadas-vim khadas-vim-sdboot khadas-vim2 khadas-vim3 khadas-vim3-sdboot khadas-vim3l khadas-vim3l-sdboot libretech-ac libretech-cc radxa-zero seirobotics-sei510 seirobotics-sei610 bananapi-bpi-m5 beelink-gt1-ultimate hardkernel-odroid-go-ultra hardkernel-odroid-n2l bananapi-bpi-m2-pro bananapi-bpi-m2s bananapi-bpi-cm4io
+      machines: amlogic-p200 amlogic-p212 amlogic-s400 friendlyelec-nanopik2 hardkernel-odroidc2 hardkernel-odroidc4 hardkernel-odroidhc4 hardkernel-odroidn2 hardkernel-odroidn2plus khadas-vim2 khadas-vim3 khadas-vim3l libretech-ac libretech-cc radxa-zero seirobotics-sei510 seirobotics-sei610 
       ref_type: sha
       ref: ${{github.sha}}
       branch: ${{github.ref_name}}
