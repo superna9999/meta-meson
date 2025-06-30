@@ -1,8 +1,12 @@
 PREFERRED_PROVIDER_virtual/kernel ?= "linux-yocto"
-KERNEL_IMAGETYPE ?= "fitImage"
-KERNEL_CLASSES ?= "kernel kernel-fitimage"
+KERNEL_CLASSES += "kernel-fit-extra-artifacts"
 
-IMAGE_BOOT_FILES = "${KERNEL_IMAGETYPE}"
+KERNEL_IMAGETYPE ?= "Image"
+RRECOMMENDS:${KERNEL_PACKAGE_NAME}-base = ""
+MACHINE_ESSENTIAL_EXTRA_RDEPENDS += "linux-yocto-fitimage"
+KERNEL_DEPLOY_DEPEND = "linux-yocto-fitimage:do_deploy"
+
+IMAGE_BOOT_FILES = "fitImage"
 
 PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
 PREFERRED_PROVIDER_u-boot ?= "u-boot"

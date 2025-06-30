@@ -7,6 +7,8 @@ INC_PR = "r0"
 
 inherit kernel siteinfo
 
+B = "${WORKDIR}/linux-build"
+
 # Enable OABI compat for people stuck with obsolete userspace
 ARM_KEEP_OABI ?= "0"
 

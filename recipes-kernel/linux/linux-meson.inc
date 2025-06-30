@@ -11,6 +11,3 @@ require linux.inc
 
 PATCHTOOL = "git"
 PATCH_COMMIT_FUNCTIONS = "1"
-
-S = "${WORKDIR}/git"
-

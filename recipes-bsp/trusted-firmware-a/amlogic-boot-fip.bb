@@ -69,7 +69,6 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=2dbd68496cc5ed3e68e855100cb86363"
 SRC_URI = "git://github.com/LibreELEC/amlogic-boot-fip.git;protocol=https;branch=master"
 SRCREV = "c4bf0e3b1ab1246c3176d6c3e420a5e1cdf40c4e"
 
-S = "${WORKDIR}/git"
 B = "${WORKDIR}/build"
 
 inherit deploy
